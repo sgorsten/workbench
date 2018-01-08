@@ -73,22 +73,6 @@ namespace glfw
 
 namespace gl
 {
-    inline void vertex(const float2 & v) { glVertex2fv(&v[0]); } inline void vertex(const double2 & v) { glVertex2dv(&v[0]); } 
-    inline void vertex(const float3 & v) { glVertex3fv(&v[0]); } inline void vertex(const double3 & v) { glVertex3dv(&v[0]); } 
-    inline void vertex(const float4 & v) { glVertex4fv(&v[0]); } inline void vertex(const double4 & v) { glVertex4dv(&v[0]); } 
-    inline void vertex(const int2 & v) { glVertex2iv(&v[0]); } inline void vertex(const short2 & v) { glVertex2sv(&v[0]); }
-    inline void vertex(const int3 & v) { glVertex3iv(&v[0]); } inline void vertex(const short3 & v) { glVertex3sv(&v[0]); }
-    inline void vertex(const int4 & v) { glVertex4iv(&v[0]); } inline void vertex(const short4 & v) { glVertex4sv(&v[0]); }    
-
-    inline void color(const float3 & v) { glColor3fv(&v[0]); } inline void color(const double3 & v) { glColor3dv(&v[0]); } 
-    inline void color(const float4 & v) { glColor4fv(&v[0]); } inline void color(const double4 & v) { glColor4dv(&v[0]); } 
-    inline void color(const int3 & v) { glColor3iv(&v[0]); } inline void color(const short3 & v) { glColor3sv(&v[0]); }
-    inline void color(const int4 & v) { glColor4iv(&v[0]); } inline void color(const short4 & v) { glColor4sv(&v[0]); }
-    inline void color(const uint3 & v) { glColor3uiv(&v[0]); } inline void color(const ushort3 & v) { glColor3usv(&v[0]); }
-    inline void color(const uint4 & v) { glColor4uiv(&v[0]); } inline void color(const ushort4 & v) { glColor4usv(&v[0]); }  
-    inline void color(const byte3 & v) { glColor3ubv(&v[0]); } inline void color(const linalg::vec<signed char,3> & v) { glColor3bv(&v[0]); }
-    inline void color(const byte4 & v) { glColor4ubv(&v[0]); } inline void color(const linalg::vec<signed char,4> & v) { glColor4bv(&v[0]); }
-
-    inline void load_matrix(const float4x4 & m) { glLoadMatrixf(&m[0][0]); }
-    inline void load_matrix(const double4x4 & m) { glLoadMatrixd(&m[0][0]); }
+    inline void uniform(GLint loc, const float4x4 & m) { glUniformMatrix4fv(loc, 1, GL_FALSE, &m[0][0]); }
+    inline void uniform(GLint loc, const double4x4 & m) { glUniformMatrix4dv(loc, 1, GL_FALSE, &m[0][0]); }
 }

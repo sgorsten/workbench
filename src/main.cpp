@@ -38,12 +38,15 @@ struct mesh
     std::vector<int4> quads;
 };
 
-void draw_vertex(const mesh_vertex & v) { gl::color(v.color); gl::vertex(v.position); }
 void draw_mesh(const mesh & m)
 {
-    glBegin(GL_QUADS); for(auto & quad : m.quads) for(auto index : quad) draw_vertex(m.vertices[index]); glEnd();
-    glBegin(GL_TRIANGLES); for(auto & triangle : m.triangles) for(auto index : triangle) draw_vertex(m.vertices[index]); glEnd();
-    glBegin(GL_LINES); for(auto & line : m.lines) for(auto index : line) draw_vertex(m.vertices[index]); glEnd();
+    for(GLuint i : {0,1}) glEnableVertexAttribArray(i);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), &m.vertices[0].position);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), &m.vertices[0].color);
+    glDrawElements(GL_QUADS, m.quads.size()*4, GL_UNSIGNED_INT, m.quads.data());
+    glDrawElements(GL_TRIANGLES, m.triangles.size()*3, GL_UNSIGNED_INT, m.triangles.data());
+    glDrawElements(GL_LINES, m.lines.size()*2, GL_UNSIGNED_INT, m.lines.data());
+    for(GLuint i : {0,1}) glDisableVertexAttribArray(i);
 }
 
 mesh make_basis_mesh()
@@ -68,7 +71,43 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
-int main(int argc, const char * argv[])
+GLuint compile_shader(GLenum type, const char * source)
+{
+    auto shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+
+    GLint status, length;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+    if(status == GL_FALSE)
+    {
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
+        std::vector<char> buffer(length);
+        glGetShaderInfoLog(shader, buffer.size(), &length, buffer.data());
+        throw std::runtime_error(buffer.data());
+    }
+    return shader;
+}
+
+GLuint link_program(std::initializer_list<GLuint> shaders)
+{
+    auto program = glCreateProgram();
+    for(auto shader : shaders) glAttachShader(program, shader);
+    glLinkProgram(program);
+
+    GLint status, length;
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    if(status == GL_FALSE)
+    {
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
+        std::vector<char> buffer(length);
+        glGetProgramInfoLog(program, buffer.size(), &length, buffer.data());
+        throw std::runtime_error(buffer.data());
+    }
+    return program;
+}
+
+int main(int argc, const char * argv[]) try
 {
     // Run tests, if requested
     if(argc > 1 && strcmp("--test", argv[1]) == 0)
@@ -90,6 +129,29 @@ int main(int argc, const char * argv[])
     
     glfw::context context;
     glfw::window window {context, {1280,720}, "workbench"};
+    window.make_context_current();
+
+    std::cout << "GL_VERSION = " << glGetString(GL_VERSION) << std::endl;
+    std::cout << "GL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
+    std::cout << "GL_VENDOR = " << glGetString(GL_VENDOR) << std::endl;
+    std::cout << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
+
+    auto vs = compile_shader(GL_VERTEX_SHADER, R"(#version 450
+layout(location=0) uniform mat4 u_transform;
+layout(location=0) in vec3 v_position;
+layout(location=1) in vec3 v_color;
+layout(location=0) out vec3 color;
+void main()
+{
+    gl_Position = u_transform * vec4(v_position,1);
+    color = v_color;
+})");
+    auto fs = compile_shader(GL_FRAGMENT_SHADER, R"(#version 450
+layout(location=0) in vec3 color;
+layout(location=0) out vec4 f_color;
+void main() { f_color = vec4(color,1); }
+)");
+    auto prog = link_program({vs,fs});
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -126,11 +188,13 @@ int main(int argc, const char * argv[])
         
         constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
         const auto view_proj_matrix = cam.get_view_proj_matrix((float)fb_size.x/fb_size.y, opengl_coords);
-        gl::load_matrix(view_proj_matrix);
+
+        glUseProgram(prog);
+        gl::uniform(0, view_proj_matrix);;
         draw_mesh(basis_mesh);
 
         const auto model_matrix = translation_matrix(game_coords(coord_axis::down)*0.1f);
-        gl::load_matrix(mul(view_proj_matrix, model_matrix));
+        gl::uniform(0, mul(view_proj_matrix, model_matrix));
         draw_mesh(ground_mesh);
 
         window.swap_buffers();
@@ -139,4 +203,9 @@ int main(int argc, const char * argv[])
         context.poll_events();
     }
     return EXIT_SUCCESS;
+}
+catch(const std::exception & e)
+{
+    std::cerr << e.what() << std::endl;
+    return EXIT_FAILURE;
 }
