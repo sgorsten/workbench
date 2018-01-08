@@ -1,6 +1,9 @@
 #pragma once
 #include <functional>
 #include <string_view>
+
+#define GLEW_STATIC
+#include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include "linalg.h"
 using namespace linalg::aliases;

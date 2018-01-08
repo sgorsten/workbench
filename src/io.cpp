@@ -7,6 +7,7 @@ glfw::context::context()
     hidden_window = glfwCreateWindow(1, 1, "", nullptr, nullptr);
     glfwDefaultWindowHints();        
     glfwMakeContextCurrent(hidden_window);
+    glewInit();
 }
 
 glfw::context::~context()
