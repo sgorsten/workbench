@@ -3,9 +3,10 @@
   <ItemGroup>
     <ClCompile Include="..\..\src\main.cpp" />
     <ClCompile Include="..\..\src\io.cpp" />
+    <ClCompile Include="..\..\src\geometry.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\src\linalg.h" />
     <ClInclude Include="..\..\src\io.h" />
+    <ClInclude Include="..\..\src\geometry.h" />
   </ItemGroup>
 </Project>
