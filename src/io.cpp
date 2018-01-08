@@ -42,5 +42,3 @@ glfw::window::~window()
     glfwDestroyWindow(w); 
 }
 
-void gl::load_matrix(const float4x4 & m) { glLoadMatrixf(&m[0][0]); }
-void gl::load_matrix(const double4x4 & m) { glLoadMatrixd(&m[0][0]); }

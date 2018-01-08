@@ -25,6 +25,49 @@ struct camera
     void move(coord_axis direction, float distance) { position += get_direction(direction) * distance; }
 };
 
+struct mesh_vertex
+{
+    float3 position, color;
+};
+
+struct mesh
+{
+    std::vector<mesh_vertex> vertices;
+    std::vector<int2> lines;
+    std::vector<int3> triangles;
+    std::vector<int4> quads;
+};
+
+void draw_vertex(const mesh_vertex & v) { gl::color(v.color); gl::vertex(v.position); }
+void draw_mesh(const mesh & m)
+{
+    glBegin(GL_QUADS); for(auto & quad : m.quads) for(auto index : quad) draw_vertex(m.vertices[index]); glEnd();
+    glBegin(GL_TRIANGLES); for(auto & triangle : m.triangles) for(auto index : triangle) draw_vertex(m.vertices[index]); glEnd();
+    glBegin(GL_LINES); for(auto & line : m.lines) for(auto index : line) draw_vertex(m.vertices[index]); glEnd();
+}
+
+mesh make_basis_mesh()
+{
+    mesh m;
+    m.vertices = {{{0,0,0},{1,0,0}}, {{1,0,0},{1,0,0}}, {{0,0,0},{0,1,0}}, {{0,1,0},{0,1,0}}, {{0,0,0},{0,0,1}}, {{0,0,1},{0,0,1}}};
+    m.lines = {{0,1},{2,3},{4,5}};
+    return m;
+}
+
+mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3 & tangent_t)
+{
+    mesh m;
+    m.vertices =
+    {
+        {-tangent_s-tangent_t, color},
+        {+tangent_s-tangent_t, color},
+        {+tangent_s+tangent_t, color},
+        {-tangent_s+tangent_t, color}
+    };
+    m.quads = {{0,1,2,3}};
+    return m;
+}
+
 int main(int argc, const char * argv[])
 {
     // Run tests, if requested
@@ -38,6 +81,8 @@ int main(int argc, const char * argv[])
 
     // Launch the workbench
     constexpr coord_system game_coords {coord_axis::right, coord_axis::forward, coord_axis::up};
+    const auto basis_mesh = make_basis_mesh();
+    const auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*5.0f, game_coords(coord_axis::forward)*5.0f);
 
     camera cam {game_coords};
     cam.pitch += 0.8f;
@@ -74,17 +119,19 @@ int main(int argc, const char * argv[])
         const int2 fb_size = window.get_framebuffer_size();
         window.make_context_current();
         glViewport(0, 0, fb_size.x, fb_size.y);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        glEnable(GL_DEPTH_TEST);
+
+        
         constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
-        gl::load_matrix(cam.get_view_proj_matrix((float)fb_size.x/fb_size.y, opengl_coords));
+        const auto view_proj_matrix = cam.get_view_proj_matrix((float)fb_size.x/fb_size.y, opengl_coords);
+        gl::load_matrix(view_proj_matrix);
+        draw_mesh(basis_mesh);
 
-        // Render basis
-        glBegin(GL_LINES);
-        glColor3f(1,0,0); glVertex3f(0,0,0); glVertex3f(1,0,0);
-        glColor3f(0,1,0); glVertex3f(0,0,0); glVertex3f(0,1,0);
-        glColor3f(0,0,1); glVertex3f(0,0,0); glVertex3f(0,0,1);
-        glEnd();
+        const auto model_matrix = translation_matrix(game_coords(coord_axis::down)*0.1f);
+        gl::load_matrix(mul(view_proj_matrix, model_matrix));
+        draw_mesh(ground_mesh);
 
         window.swap_buffers();
 
