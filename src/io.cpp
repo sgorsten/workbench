@@ -3,35 +3,17 @@
 glfw::context::context()
 {
     glfwInit();
-
-    glfwDefaultWindowHints();
-    glfwWindowHint(GLFW_VISIBLE, 0);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    hidden_window = glfwCreateWindow(1, 1, "", nullptr, nullptr);
-    
-    glfwMakeContextCurrent(hidden_window);
-    glewInit();
 }
 
 glfw::context::~context()
 {
-    glfwDestroyWindow(hidden_window);
     glfwTerminate();
 }
 
 static glfw::window & get(GLFWwindow * window) { return *reinterpret_cast<glfw::window *>(glfwGetWindowUserPointer(window)); }
 
-glfw::window::window(context & context, int2 dimensions, std::string_view title)
+glfw::window::window(GLFWwindow * window) : w{window}
 {
-    const std::string buffer {begin(title), end(title)};
-    glfwDefaultWindowHints();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, context.hidden_window);
-
     glfwSetWindowPosCallback(w, [](GLFWwindow * window, int xpos, int ypos) { get(window).on_window_pos({xpos, ypos}); });
     glfwSetWindowSizeCallback(w, [](GLFWwindow * window, int width, int height) { get(window).on_window_size({width, height}); });
     glfwSetWindowCloseCallback(w, [](GLFWwindow * window) { get(window).on_window_close(); });

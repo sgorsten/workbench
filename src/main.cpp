@@ -1,5 +1,6 @@
-#include "io.h"
+#include "rhi.h"
 #include "geometry.h"
+#include "shader.h"
 
 #define DOCTEST_CONFIG_NO_SHORT_MACRO_NAMES
 #define DOCTEST_CONFIG_IMPLEMENT
@@ -60,127 +61,6 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
-#include "../dep/glslang/glslang/Public/ShaderLang.h"
-#include "../dep/glslang/SPIRV/GlslangToSpv.h"
-#include "../dep/glslang/StandAlone/ResourceLimits.h"
-#include "../dep/SPIRV-Cross/spirv_glsl.hpp"
-
-GLuint compile_shader(GLenum type, const char * source)
-{
-    {
-        glslang::InitializeProcess();
-
-        glslang::TShader shader(type == GL_VERTEX_SHADER ? EShLangVertex : EShLangFragment);
-        shader.setStrings(&source, 1);
-        if(!shader.parse(&glslang::DefaultTBuiltInResource, 450, ENoProfile, false, false, static_cast<EShMessages>(EShMsgSpvRules|EShMsgVulkanRules)))
-        {
-            throw std::runtime_error(std::string("GLSL compile failure: ") + shader.getInfoLog());
-        }
-    
-        glslang::TProgram program;
-        program.addShader(&shader);
-        if(!program.link(EShMsgVulkanRules))
-        {
-            throw std::runtime_error(std::string("GLSL link failure: ") + program.getInfoLog());
-        }
-
-        std::vector<uint32_t> spirv;
-        glslang::GlslangToSpv(*program.getIntermediate(shader.getStage()), spirv, nullptr);
-    
-        spirv_cross::CompilerGLSL compiler(spirv);
-        auto s = compiler.compile();
-        std::cout << s << std::endl;
-
-        glslang::FinalizeProcess();
-    }
-
-    auto shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-
-    GLint status, length;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-    if(status == GL_FALSE)
-    {
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-        std::vector<char> buffer(length);
-        glGetShaderInfoLog(shader, buffer.size(), &length, buffer.data());
-        throw std::runtime_error(buffer.data());
-    }
-    return shader;
-}
-
-GLuint link_program(std::initializer_list<GLuint> shaders)
-{
-    auto program = glCreateProgram();
-    for(auto shader : shaders) glAttachShader(program, shader);
-    glLinkProgram(program);
-
-    GLint status, length;
-    glGetProgramiv(program, GL_LINK_STATUS, &status);
-    if(status == GL_FALSE)
-    {
-        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
-        std::vector<char> buffer(length);
-        glGetProgramInfoLog(program, buffer.size(), &length, buffer.data());
-        throw std::runtime_error(buffer.data());
-    }
-    return program;
-}
-
-struct buffer_range
-{
-    GLuint buffer;
-    GLintptr offset;
-    GLsizeiptr size;
-};
-
-class static_buffer
-{
-    GLuint buffer;
-    GLsizeiptr size;
-public:
-    static_buffer(size_t size, const void * data) : size{static_cast<GLsizeiptr>(size)}
-    {
-        glCreateBuffers(1, &buffer);
-        glNamedBufferStorage(buffer, size, data, 0);
-    }
-
-    template<class T> static_buffer(const std::vector<T> & elements) : static_buffer{elements.size()*sizeof(T), elements.data()} {}
-
-    buffer_range range() const { return {buffer, 0, size}; }
-};
-
-class dynamic_buffer
-{
-    GLuint buffer;
-    GLsizeiptr size;
-    char * memory;
-    GLintptr used;
-public:
-    dynamic_buffer(GLsizeiptr size) : size{size}
-    {
-        glCreateBuffers(1, &buffer);
-        glNamedBufferStorage(buffer, size, nullptr, GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT);
-        memory = reinterpret_cast<char *>(glMapNamedBuffer(buffer, GL_WRITE_ONLY));
-    }
-
-    void reset()
-    {
-        used = 0;
-    }
-
-    buffer_range write(size_t size, const void * data)
-    {
-        const buffer_range range {buffer, (used+255)/256*256, size};
-        memcpy(memory + range.offset, data, range.size);
-        used = range.offset + range.size;
-        return range;
-    }
-
-    template<class T> buffer_range write(const T & value) { return write(sizeof(value), &value); }
-};
-
 int main(int argc, const char * argv[]) try
 {
     // Run tests, if requested
@@ -202,15 +82,19 @@ int main(int argc, const char * argv[]) try
     cam.move(coord_axis::back, 10.0f);
     
     glfw::context context;
-    glfw::window window {context, {1280,720}, "workbench"};
-    window.make_context_current();
+    shader_compiler compiler;
 
-    std::cout << "GL_VERSION = " << glGetString(GL_VERSION) << std::endl;
-    std::cout << "GL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
-    std::cout << "GL_VENDOR = " << glGetString(GL_VENDOR) << std::endl;
-    std::cout << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
+    auto dev = create_opengl_device();
+    auto window = dev->create_window({1280,720}, "workbench");
 
-    auto vs = compile_shader(GL_VERTEX_SHADER, R"(#version 450
+    auto mesh_vertex_format = dev->create_vertex_format({
+        {0, sizeof(mesh_vertex), {
+            {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
+            {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
+        }}
+    });
+
+    auto vs = dev->create_shader(compiler.compile(shader_stage::vertex, R"(#version 450
 layout(binding=0) uniform PerObject { mat4 u_transform; };
 layout(location=0) in vec3 v_position;
 layout(location=1) in vec3 v_color;
@@ -219,26 +103,25 @@ void main()
 {
     gl_Position = u_transform * vec4(v_position,1);
     color = v_color;
-})");
-    auto fs = compile_shader(GL_FRAGMENT_SHADER, R"(#version 450
+})"));
+
+    auto fs = dev->create_shader(compiler.compile(shader_stage::fragment, R"(#version 450
 layout(location=0) in vec3 color;
 layout(location=0) out vec4 f_color;
 void main() { f_color = vec4(color,1); }
-)");
-    auto prog = link_program({vs,fs});
+)"));
 
-    dynamic_buffer uniform_buffer {1024};
+    auto wire_pipe = dev->create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
+    auto solid_pipe = dev->create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
-    static_buffer basis_vertex_buffer {basis_mesh.vertices};
-    static_buffer ground_vertex_buffer {ground_mesh.vertices};
+    auto basis_vertex_buffer = dev->create_static_buffer(basis_mesh.vertices);
+    auto ground_vertex_buffer = dev->create_static_buffer(ground_mesh.vertices);
 
-    GLuint vao;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
+    dynamic_buffer uniform_buffer {*dev, 1024};    
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
-    while(!window.should_close())
+    while(!window->should_close())
     {
         // Compute timestep
         const auto t1 = std::chrono::high_resolution_clock::now();
@@ -246,8 +129,8 @@ void main() { f_color = vec4(color,1); }
         t0 = t1;
 
         // Handle input
-        const double2 cursor = window.get_cursor_pos();
-        if(window.get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
+        const double2 cursor = window->get_cursor_pos();
+        if(window->get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
         {
             cam.yaw += static_cast<float>(cursor.x - last_cursor.x) * 0.01f;
             cam.pitch = std::min(std::max(cam.pitch + static_cast<float>(cursor.y - last_cursor.y) * 0.01f, -1.5f), +1.5f);
@@ -255,51 +138,31 @@ void main() { f_color = vec4(color,1); }
         last_cursor = cursor;
 
         const float cam_speed = timestep * 10;
-        if(window.get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
-        if(window.get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
-        if(window.get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
-        if(window.get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
+        if(window->get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
+        if(window->get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
+        if(window->get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
+        if(window->get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
 
         // Render frame
-        const int2 fb_size = window.get_framebuffer_size();
-        window.make_context_current();
-        glViewport(0, 0, fb_size.x, fb_size.y);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        glEnable(GL_DEPTH_TEST);
-
-        uniform_buffer.reset();
-        
         constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
-        const auto view_proj_matrix = cam.get_view_proj_matrix((float)fb_size.x/fb_size.y, opengl_coords);
+        const auto view_proj_matrix = cam.get_view_proj_matrix(window->get_aspect(), opengl_coords);
+        uniform_buffer.reset();
 
-        glUseProgram(prog);
+        dev->begin_render_pass(*window);
 
-        auto r = uniform_buffer.write(view_proj_matrix);
-        glBindBufferRange(GL_UNIFORM_BUFFER, 0, r.buffer, r.offset, r.size);
+        dev->bind_pipeline(*wire_pipe);
+        dev->bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));       
+        dev->bind_vertex_buffer(0, basis_vertex_buffer);
+        dev->draw(0, 6);
         
-        glBindBuffer(GL_ARRAY_BUFFER, basis_vertex_buffer.range().buffer);
-        glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, position));
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, color));
-        glDrawArrays(GL_LINES, 0, 6);
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
-        
-        r = uniform_buffer.write(mul(view_proj_matrix, translation_matrix(game_coords(coord_axis::down)*0.1f)));
-        glBindBufferRange(GL_UNIFORM_BUFFER, 0, r.buffer, r.offset, r.size);
+        dev->bind_pipeline(*solid_pipe);
+        dev->bind_uniform_buffer(0, uniform_buffer.write(mul(view_proj_matrix, translation_matrix(game_coords(coord_axis::down)*0.1f))));
+        dev->bind_vertex_buffer(0, ground_vertex_buffer);
+        dev->draw(0, 3);
 
-        glBindBuffer(GL_ARRAY_BUFFER, ground_vertex_buffer.range().buffer);
-        glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, position));
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, color));
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
+        dev->end_render_pass();
 
-        window.swap_buffers();
+        dev->present(*window);
 
         // Poll events
         context.poll_events();

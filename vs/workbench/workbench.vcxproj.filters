@@ -4,9 +4,13 @@
     <ClCompile Include="..\..\src\main.cpp" />
     <ClCompile Include="..\..\src\io.cpp" />
     <ClCompile Include="..\..\src\geometry.cpp" />
+    <ClCompile Include="..\..\src\shader.cpp" />
+    <ClCompile Include="..\..\src\rhi-opengl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\io.h" />
     <ClInclude Include="..\..\src\geometry.h" />
+    <ClInclude Include="..\..\src\rhi.h" />
+    <ClInclude Include="..\..\src\shader.h" />
   </ItemGroup>
 </Project>

@@ -2,8 +2,7 @@
 #include <functional>
 #include <string_view>
 
-#define GLEW_STATIC
-#include <GL/glew.h>
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "linalg.h"
 using namespace linalg::aliases;
@@ -15,7 +14,6 @@ namespace glfw
     class context
     {
         friend class window;
-        GLFWwindow * hidden_window;
     public:
         // Noncopyable and immovable
         context();
@@ -25,7 +23,6 @@ namespace glfw
         context & operator = (context &&) = delete;
         ~context();
 
-        void make_shared_context_current() { glfwMakeContextCurrent(hidden_window); }
         void poll_events() { glfwPollEvents(); }
     };
 
@@ -35,7 +32,7 @@ namespace glfw
         GLFWwindow * w;
     public:
         // Noncopyable and immovable
-        window(context & ctx, int2 dimensions, std::string_view title);
+        window(GLFWwindow * window);
         window(const window &) = delete;
         window(window &&) = delete;
         window & operator = (const window &) = delete;
@@ -49,6 +46,7 @@ namespace glfw
         double2 get_cursor_pos() const { double2 pos; glfwGetCursorPos(w, &pos.x, &pos.y); return pos; }
         int2 get_window_size() const { int2 size; glfwGetWindowSize(w, &size.x, &size.y); return size; }
         int2 get_framebuffer_size() const { int2 size; glfwGetFramebufferSize(w, &size.x, &size.y); return size; }
+        float get_aspect() const { auto size = get_window_size(); return (float)size.x/size.y; }
 
         // Mutators
         void make_context_current() { glfwMakeContextCurrent(w); }
@@ -69,10 +67,4 @@ namespace glfw
         std::function<void(int key, int scancode, int action, int mods)> on_key = ignore{};
         std::function<void(unsigned int codepoint, int mods)> on_char = ignore{};
     };
-}
-
-namespace gl
-{
-    inline void uniform(GLint loc, const float4x4 & m) { glUniformMatrix4fv(loc, 1, GL_FALSE, &m[0][0]); }
-    inline void uniform(GLint loc, const double4x4 & m) { glUniformMatrix4dv(loc, 1, GL_FALSE, &m[0][0]); }
 }
