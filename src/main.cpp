@@ -38,17 +38,6 @@ struct mesh
     std::vector<int4> quads;
 };
 
-void draw_mesh(const mesh & m)
-{
-    for(GLuint i : {0,1}) glEnableVertexAttribArray(i);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), &m.vertices[0].position);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), &m.vertices[0].color);
-    glDrawElements(GL_QUADS, m.quads.size()*4, GL_UNSIGNED_INT, m.quads.data());
-    glDrawElements(GL_TRIANGLES, m.triangles.size()*3, GL_UNSIGNED_INT, m.triangles.data());
-    glDrawElements(GL_LINES, m.lines.size()*2, GL_UNSIGNED_INT, m.lines.data());
-    for(GLuint i : {0,1}) glDisableVertexAttribArray(i);
-}
-
 mesh make_basis_mesh()
 {
     mesh m;
@@ -71,8 +60,40 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
+#include "../dep/glslang/glslang/Public/ShaderLang.h"
+#include "../dep/glslang/SPIRV/GlslangToSpv.h"
+#include "../dep/glslang/StandAlone/ResourceLimits.h"
+#include "../dep/SPIRV-Cross/spirv_glsl.hpp"
+
 GLuint compile_shader(GLenum type, const char * source)
 {
+    {
+        glslang::InitializeProcess();
+
+        glslang::TShader shader(type == GL_VERTEX_SHADER ? EShLangVertex : EShLangFragment);
+        shader.setStrings(&source, 1);
+        if(!shader.parse(&glslang::DefaultTBuiltInResource, 450, ENoProfile, false, false, static_cast<EShMessages>(EShMsgSpvRules|EShMsgVulkanRules)))
+        {
+            throw std::runtime_error(std::string("GLSL compile failure: ") + shader.getInfoLog());
+        }
+    
+        glslang::TProgram program;
+        program.addShader(&shader);
+        if(!program.link(EShMsgVulkanRules))
+        {
+            throw std::runtime_error(std::string("GLSL link failure: ") + program.getInfoLog());
+        }
+
+        std::vector<uint32_t> spirv;
+        glslang::GlslangToSpv(*program.getIntermediate(shader.getStage()), spirv, nullptr);
+    
+        spirv_cross::CompilerGLSL compiler(spirv);
+        auto s = compiler.compile();
+        std::cout << s << std::endl;
+
+        glslang::FinalizeProcess();
+    }
+
     auto shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
@@ -107,6 +128,59 @@ GLuint link_program(std::initializer_list<GLuint> shaders)
     return program;
 }
 
+struct buffer_range
+{
+    GLuint buffer;
+    GLintptr offset;
+    GLsizeiptr size;
+};
+
+class static_buffer
+{
+    GLuint buffer;
+    GLsizeiptr size;
+public:
+    static_buffer(size_t size, const void * data) : size{static_cast<GLsizeiptr>(size)}
+    {
+        glCreateBuffers(1, &buffer);
+        glNamedBufferStorage(buffer, size, data, 0);
+    }
+
+    template<class T> static_buffer(const std::vector<T> & elements) : static_buffer{elements.size()*sizeof(T), elements.data()} {}
+
+    buffer_range range() const { return {buffer, 0, size}; }
+};
+
+class dynamic_buffer
+{
+    GLuint buffer;
+    GLsizeiptr size;
+    char * memory;
+    GLintptr used;
+public:
+    dynamic_buffer(GLsizeiptr size) : size{size}
+    {
+        glCreateBuffers(1, &buffer);
+        glNamedBufferStorage(buffer, size, nullptr, GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT);
+        memory = reinterpret_cast<char *>(glMapNamedBuffer(buffer, GL_WRITE_ONLY));
+    }
+
+    void reset()
+    {
+        used = 0;
+    }
+
+    buffer_range write(size_t size, const void * data)
+    {
+        const buffer_range range {buffer, (used+255)/256*256, size};
+        memcpy(memory + range.offset, data, range.size);
+        used = range.offset + range.size;
+        return range;
+    }
+
+    template<class T> buffer_range write(const T & value) { return write(sizeof(value), &value); }
+};
+
 int main(int argc, const char * argv[]) try
 {
     // Run tests, if requested
@@ -137,7 +211,7 @@ int main(int argc, const char * argv[]) try
     std::cout << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
 
     auto vs = compile_shader(GL_VERTEX_SHADER, R"(#version 450
-layout(location=0) uniform mat4 u_transform;
+layout(binding=0) uniform PerObject { mat4 u_transform; };
 layout(location=0) in vec3 v_position;
 layout(location=1) in vec3 v_color;
 layout(location=0) out vec3 color;
@@ -152,6 +226,15 @@ layout(location=0) out vec4 f_color;
 void main() { f_color = vec4(color,1); }
 )");
     auto prog = link_program({vs,fs});
+
+    dynamic_buffer uniform_buffer {1024};
+
+    static_buffer basis_vertex_buffer {basis_mesh.vertices};
+    static_buffer ground_vertex_buffer {ground_mesh.vertices};
+
+    GLuint vao;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -185,17 +268,36 @@ void main() { f_color = vec4(color,1); }
 
         glEnable(GL_DEPTH_TEST);
 
+        uniform_buffer.reset();
         
         constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
         const auto view_proj_matrix = cam.get_view_proj_matrix((float)fb_size.x/fb_size.y, opengl_coords);
 
         glUseProgram(prog);
-        gl::uniform(0, view_proj_matrix);;
-        draw_mesh(basis_mesh);
 
-        const auto model_matrix = translation_matrix(game_coords(coord_axis::down)*0.1f);
-        gl::uniform(0, mul(view_proj_matrix, model_matrix));
-        draw_mesh(ground_mesh);
+        auto r = uniform_buffer.write(view_proj_matrix);
+        glBindBufferRange(GL_UNIFORM_BUFFER, 0, r.buffer, r.offset, r.size);
+        
+        glBindBuffer(GL_ARRAY_BUFFER, basis_vertex_buffer.range().buffer);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, position));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, color));
+        glDrawArrays(GL_LINES, 0, 6);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        
+        r = uniform_buffer.write(mul(view_proj_matrix, translation_matrix(game_coords(coord_axis::down)*0.1f)));
+        glBindBufferRange(GL_UNIFORM_BUFFER, 0, r.buffer, r.offset, r.size);
+
+        glBindBuffer(GL_ARRAY_BUFFER, ground_vertex_buffer.range().buffer);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, position));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(mesh_vertex), (const GLvoid *)offsetof(mesh_vertex, color));
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
 
         window.swap_buffers();
 
