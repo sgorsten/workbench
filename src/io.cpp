@@ -2,7 +2,7 @@
 
 glfw::context::context()
 {
-    glfwInit();
+    if(glfwInit() == GLFW_FALSE) throw std::runtime_error("glfwInit() failed");
 }
 
 glfw::context::~context()

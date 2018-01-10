@@ -6,6 +6,7 @@
     <ClCompile Include="..\..\src\geometry.cpp" />
     <ClCompile Include="..\..\src\shader.cpp" />
     <ClCompile Include="..\..\src\rhi-opengl.cpp" />
+    <ClCompile Include="..\..\src\rhi-d3d11.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\io.h" />

@@ -61,6 +61,94 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
+struct common_assets
+{
+    coord_system game_coords;
+    mesh basis_mesh;
+    mesh ground_mesh;
+    shader_module vs, fs;
+
+    common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
+    {
+        shader_compiler compiler;
+        vs = compiler.compile(shader_stage::vertex, R"(#version 450
+            layout(binding=0) uniform PerObject { mat4 u_transform; };
+            layout(location=0) in vec3 v_position;
+            layout(location=1) in vec3 v_color;
+            layout(location=0) out vec3 color;
+            void main()
+            {
+                gl_Position = u_transform * vec4(v_position,1);
+                color = v_color;
+            }
+        )");
+        fs = compiler.compile(shader_stage::fragment, R"(#version 450
+            layout(location=0) in vec3 color;
+            layout(location=0) out vec4 f_color;
+            void main() { f_color = vec4(color,1); }
+        )");
+
+        basis_mesh = make_basis_mesh();
+        ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*5.0f, game_coords(coord_axis::forward)*5.0f);
+    }
+};
+
+class device_session
+{
+    rhi::device & dev;
+    glfw::window * window;
+    rhi::pipeline * wire_pipe, * solid_pipe;
+    rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer;
+    dynamic_buffer uniform_buffer;
+public:
+    device_session(const common_assets & assets, rhi::device & dev) : dev{dev}, uniform_buffer{dev, 1024} 
+    {
+        window = dev.create_window({512,512}, "workbench");
+
+        auto mesh_vertex_format = dev.create_vertex_format({
+            {0, sizeof(mesh_vertex), {
+                {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
+                {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
+            }}
+        });
+
+        auto vs = dev.create_shader(assets.vs);
+        auto fs = dev.create_shader(assets.fs);
+
+        wire_pipe = dev.create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
+        solid_pipe = dev.create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+
+        basis_vertex_buffer = dev.create_static_buffer(assets.basis_mesh.vertices);
+        ground_vertex_buffer = dev.create_static_buffer(assets.ground_mesh.vertices);
+    }
+
+    glfw::window & get_window() { return *window; }
+
+    void render_frame(const camera & cam)
+    {
+        // Render frame
+        constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
+        const auto view_proj_matrix = cam.get_view_proj_matrix(window->get_aspect(), opengl_coords);
+        uniform_buffer.reset();
+
+        dev.begin_render_pass(*window);
+        {
+            dev.bind_pipeline(*wire_pipe);
+            dev.bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));       
+            dev.bind_vertex_buffer(0, basis_vertex_buffer);
+            dev.draw(0, 6);
+
+            dev.bind_pipeline(*solid_pipe);
+            dev.bind_uniform_buffer(0, uniform_buffer.write(mul(view_proj_matrix, translation_matrix(cam.coords(coord_axis::down)*0.1f))));
+            dev.bind_vertex_buffer(0, ground_vertex_buffer);
+            dev.draw(0, 3);
+        }
+        dev.end_render_pass();
+
+        dev.present(*window);
+    }
+};
+
 int main(int argc, const char * argv[]) try
 {
     // Run tests, if requested
@@ -73,55 +161,22 @@ int main(int argc, const char * argv[]) try
     }
 
     // Launch the workbench
-    constexpr coord_system game_coords {coord_axis::right, coord_axis::forward, coord_axis::up};
-    const auto basis_mesh = make_basis_mesh();
-    const auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*5.0f, game_coords(coord_axis::forward)*5.0f);
-
-    camera cam {game_coords};
+    common_assets assets;
+    camera cam {assets.game_coords};
     cam.pitch += 0.8f;
     cam.move(coord_axis::back, 10.0f);
     
+    // Create the devices
     glfw::context context;
-    shader_compiler compiler;
+    auto dev = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
+    device_session session {assets, *dev};
 
-    auto dev = create_opengl_device();
-    auto window = dev->create_window({1280,720}, "workbench");
-
-    auto mesh_vertex_format = dev->create_vertex_format({
-        {0, sizeof(mesh_vertex), {
-            {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
-            {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
-        }}
-    });
-
-    auto vs = dev->create_shader(compiler.compile(shader_stage::vertex, R"(#version 450
-layout(binding=0) uniform PerObject { mat4 u_transform; };
-layout(location=0) in vec3 v_position;
-layout(location=1) in vec3 v_color;
-layout(location=0) out vec3 color;
-void main()
-{
-    gl_Position = u_transform * vec4(v_position,1);
-    color = v_color;
-})"));
-
-    auto fs = dev->create_shader(compiler.compile(shader_stage::fragment, R"(#version 450
-layout(location=0) in vec3 color;
-layout(location=0) out vec4 f_color;
-void main() { f_color = vec4(color,1); }
-)"));
-
-    auto wire_pipe = dev->create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
-    auto solid_pipe = dev->create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
-
-    auto basis_vertex_buffer = dev->create_static_buffer(basis_mesh.vertices);
-    auto ground_vertex_buffer = dev->create_static_buffer(ground_mesh.vertices);
-
-    dynamic_buffer uniform_buffer {*dev, 1024};    
+    auto dev2 = create_d3d11_device([](const char * message) { std::cerr << message << std::endl; });
+    device_session session2 {assets, *dev2};
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
-    while(!window->should_close())
+    while(!session.get_window().should_close())
     {
         // Compute timestep
         const auto t1 = std::chrono::high_resolution_clock::now();
@@ -129,8 +184,8 @@ void main() { f_color = vec4(color,1); }
         t0 = t1;
 
         // Handle input
-        const double2 cursor = window->get_cursor_pos();
-        if(window->get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
+        const double2 cursor = session.get_window().get_cursor_pos();
+        if(session.get_window().get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
         {
             cam.yaw += static_cast<float>(cursor.x - last_cursor.x) * 0.01f;
             cam.pitch = std::min(std::max(cam.pitch + static_cast<float>(cursor.y - last_cursor.y) * 0.01f, -1.5f), +1.5f);
@@ -138,31 +193,13 @@ void main() { f_color = vec4(color,1); }
         last_cursor = cursor;
 
         const float cam_speed = timestep * 10;
-        if(window->get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
-        if(window->get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
-        if(window->get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
-        if(window->get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
+        if(session.get_window().get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
+        if(session.get_window().get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
+        if(session.get_window().get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
+        if(session.get_window().get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
 
-        // Render frame
-        constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
-        const auto view_proj_matrix = cam.get_view_proj_matrix(window->get_aspect(), opengl_coords);
-        uniform_buffer.reset();
-
-        dev->begin_render_pass(*window);
-
-        dev->bind_pipeline(*wire_pipe);
-        dev->bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));       
-        dev->bind_vertex_buffer(0, basis_vertex_buffer);
-        dev->draw(0, 6);
-        
-        dev->bind_pipeline(*solid_pipe);
-        dev->bind_uniform_buffer(0, uniform_buffer.write(mul(view_proj_matrix, translation_matrix(game_coords(coord_axis::down)*0.1f))));
-        dev->bind_vertex_buffer(0, ground_vertex_buffer);
-        dev->draw(0, 3);
-
-        dev->end_render_pass();
-
-        dev->present(*window);
+        session.render_frame(cam);
+        session2.render_frame(cam);
 
         // Poll events
         context.poll_events();

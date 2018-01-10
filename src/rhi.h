@@ -57,7 +57,8 @@ namespace rhi
     };
 }
 
-rhi::device * create_opengl_device();
+rhi::device * create_opengl_device(std::function<void(const char *)> debug_callback);
+rhi::device * create_d3d11_device(std::function<void(const char *)> debug_callback);
 
 class dynamic_buffer
 {

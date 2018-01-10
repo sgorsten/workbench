@@ -3,7 +3,7 @@
 #define GLEW_STATIC
 #include <GL/glew.h>
 #include "../dep/SPIRV-Cross/spirv_glsl.hpp"
-#include <iostream>
+#pragma comment(lib, "opengl32.lib")
 
 namespace gl
 {
@@ -14,8 +14,34 @@ namespace gl
 
     struct vertex_format
     {
-        GLuint vertex_array_object;
         std::vector<rhi::vertex_binding_desc> bindings;
+        mutable std::unordered_map<GLFWwindow *, GLuint> vertex_array_objects; // vertex array objects cannot be shared between OpenGL contexts, so we must cache them per-context
+    
+        void bind_vertex_array() const
+        {
+            auto & vertex_array = vertex_array_objects[glfwGetCurrentContext()];
+            if(!vertex_array)
+            {
+                // If vertex array object was not yet created in this context, go ahead and generate it
+                glCreateVertexArrays(1, &vertex_array);
+                for(auto & buf : bindings)
+                {
+                    for(auto & attrib : buf.attributes)
+                    {
+                        glEnableVertexArrayAttrib(vertex_array, attrib.index);
+                        glVertexArrayAttribBinding(vertex_array, attrib.index, buf.index);
+                        switch(attrib.type)
+                        {
+                        case rhi::attribute_format::float1: glVertexArrayAttribFormat(vertex_array, attrib.index, 1, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                        case rhi::attribute_format::float2: glVertexArrayAttribFormat(vertex_array, attrib.index, 2, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                        case rhi::attribute_format::float3: glVertexArrayAttribFormat(vertex_array, attrib.index, 3, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                        case rhi::attribute_format::float4: glVertexArrayAttribFormat(vertex_array, attrib.index, 4, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                        }                
+                    }
+                }
+            }
+            glBindVertexArray(vertex_array);
+        }
     };
 
     struct shader
@@ -29,14 +55,21 @@ namespace gl
         GLuint program_object;
     };
 
+    struct window : glfw::window
+    {
+        GLFWwindow * w;
+        window(GLFWwindow * w) : glfw::window{w}, w{w} {}
+    };
+
     template<class T> struct interface_type;
     template<class T> struct implementation_type;
 
-    #define CONNECT_TYPES(T) template<> struct interface_type<T> { using type = rhi::T; }; template<> struct implementation_type<rhi::T> { using type = T; }
-    CONNECT_TYPES(buffer);
-    CONNECT_TYPES(vertex_format);
-    CONNECT_TYPES(shader);
-    CONNECT_TYPES(pipeline);
+    #define CONNECT_TYPES(INTERFACE, IMPLEMENTATION) template<> struct interface_type<IMPLEMENTATION> { using type = INTERFACE; }; template<> struct implementation_type<INTERFACE> { using type = IMPLEMENTATION; }
+    CONNECT_TYPES(rhi::buffer, buffer);
+    CONNECT_TYPES(rhi::vertex_format, vertex_format);
+    CONNECT_TYPES(rhi::shader, shader);
+    CONNECT_TYPES(rhi::pipeline, pipeline);
+    CONNECT_TYPES(glfw::window, window);
     #undef CONNECT_TYPES
 
     template<class T> typename interface_type<T>::type * out(T * ptr) { return reinterpret_cast<typename interface_type<T>::type *>(ptr); }
@@ -48,24 +81,46 @@ namespace gl
 
     struct device : rhi::device
     {
+        std::function<void(const char *)> debug_callback;
         GLFWwindow * hidden_window;
         pipeline * current_pipeline;
 
-        device()
+        void enable_debug_callback(GLFWwindow * window)
+        {
+            glfwMakeContextCurrent(window);
+            if(debug_callback)
+            {
+                glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+                glDebugMessageCallback([](GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar * message, const void * user) { reinterpret_cast<const device *>(user)->debug_callback(message); }, this);
+                const GLuint ids = 0;
+                glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, &ids, true);
+            }
+        }
+
+        device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
         {
             glfwDefaultWindowHints();
             glfwWindowHint(GLFW_VISIBLE, 0);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+            if(debug_callback) glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
             hidden_window = glfwCreateWindow(1, 1, "", nullptr, nullptr);
-    
+            if(!hidden_window) throw std::runtime_error("glfwCreateWindow(...) failed");
+
             glfwMakeContextCurrent(hidden_window);
-            glewInit();
-            std::cout << "GL_VERSION = " << glGetString(GL_VERSION) << std::endl;
-            std::cout << "GL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
-            std::cout << "GL_VENDOR = " << glGetString(GL_VENDOR) << std::endl;
-            std::cout << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
+            if(glewInit() != GLEW_OK) throw std::runtime_error("glewInit() failed");
+            if(debug_callback)
+            {
+                std::ostringstream ss;
+                ss << "GL_VERSION = " << glGetString(GL_VERSION) << std::endl;
+                ss << "GL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
+                ss << "GL_VENDOR = " << glGetString(GL_VENDOR) << std::endl;
+                ss << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
+                ss << "GLEW_VERSION = " << glewGetString(GLEW_VERSION) << std::endl;
+                debug_callback(ss.str().c_str());
+            }
+            enable_debug_callback(hidden_window);
         }
 
         glfw::window * create_window(const int2 & dimensions, std::string_view title) override
@@ -75,7 +130,11 @@ namespace gl
             glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-            return new glfw::window{glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window)};
+            glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
+            auto window = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
+            if(!window) throw std::runtime_error("glfwCreateWindow(...) failed");
+            enable_debug_callback(window);
+            return new gl::window{window};
         }
 
         rhi::buffer_range create_static_buffer(binary_view contents) override
@@ -151,30 +210,13 @@ namespace gl
 
         rhi::vertex_format * create_vertex_format(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            GLuint vertex_array;
-            glCreateVertexArrays(1, &vertex_array);
-            for(auto & buf : bindings)
-            {
-                for(auto & attrib : buf.attributes)
-                {
-                    glEnableVertexArrayAttrib(vertex_array, attrib.index);
-                    glVertexArrayAttribBinding(vertex_array, attrib.index, buf.index);
-                    switch(attrib.type)
-                    {
-                    case rhi::attribute_format::float1: glVertexArrayAttribFormat(vertex_array, attrib.index, 1, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                    case rhi::attribute_format::float2: glVertexArrayAttribFormat(vertex_array, attrib.index, 2, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                    case rhi::attribute_format::float3: glVertexArrayAttribFormat(vertex_array, attrib.index, 3, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                    case rhi::attribute_format::float4: glVertexArrayAttribFormat(vertex_array, attrib.index, 4, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                    }                
-                }
-            }
-            return out(new gl::vertex_format{vertex_array, bindings});
+            return out(new gl::vertex_format{bindings});
         }
 
         void begin_render_pass(glfw::window & window) override
         {
             const int2 fb_size = window.get_framebuffer_size();
-            window.make_context_current();
+            glfwMakeContextCurrent(in(window).w);
             glViewport(0, 0, fb_size.x, fb_size.y);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
@@ -183,7 +225,7 @@ namespace gl
         {
             current_pipeline = in(&pipe);
             glUseProgram(current_pipeline->program_object);
-            glBindVertexArray(in(current_pipeline->desc.format)->vertex_array_object);
+            in(current_pipeline->desc.format)->bind_vertex_array();
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_NEVER | static_cast<int>(current_pipeline->desc.depth_test));
         }
@@ -221,12 +263,12 @@ namespace gl
 
         void present(glfw::window & window) override
         {
-            window.swap_buffers();
+            glfwSwapBuffers(in(window).w);
         }
     };
 }
 
-rhi::device * create_opengl_device()
+rhi::device * create_opengl_device(std::function<void(const char *)> debug_callback)
 {
-    return new gl::device();
+    return new gl::device(debug_callback);
 }
