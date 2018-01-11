@@ -1,6 +1,7 @@
 #pragma once
 #include "shader.h"
 #include "io.h"
+#include "geometry.h"
 
 #include <type_traits>
 struct binary_view 
@@ -39,6 +40,9 @@ namespace rhi
 
     struct device
     {
+        virtual coord_system        get_ndc_coords() const = 0;
+        virtual linalg::z_range     get_z_range() const = 0;
+
         virtual glfw::window *      create_window(const int2 & dimensions, std::string_view title) = 0;
         virtual buffer_range        create_static_buffer(binary_view contents) = 0;
         virtual mapped_buffer_range create_dynamic_buffer(size_t size) = 0;

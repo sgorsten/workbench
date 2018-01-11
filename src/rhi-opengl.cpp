@@ -122,6 +122,9 @@ namespace gl
             }
             enable_debug_callback(hidden_window);
         }
+        
+        coord_system get_ndc_coords() const { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
+        linalg::z_range get_z_range() const { return linalg::neg_one_to_one; }
 
         glfw::window * create_window(const int2 & dimensions, std::string_view title) override
         {

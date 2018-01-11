@@ -48,6 +48,9 @@ namespace glfw
         int2 get_framebuffer_size() const { int2 size; glfwGetFramebufferSize(w, &size.x, &size.y); return size; }
         float get_aspect() const { auto size = get_window_size(); return (float)size.x/size.y; }
 
+        // Mutators
+        void set_pos(const int2 & pos) { glfwSetWindowPos(w, pos.x, pos.y); }
+
         // Event handling callbacks
         std::function<void(int2 pos)> on_window_pos = ignore{};
         std::function<void(int2 size)> on_window_size = ignore{};

@@ -101,9 +101,10 @@ class device_session
     rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer;
     dynamic_buffer uniform_buffer;
 public:
-    device_session(const common_assets & assets, rhi::device & dev) : dev{dev}, uniform_buffer{dev, 1024} 
+    device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : dev{dev}, uniform_buffer{dev, 1024} 
     {
         window = dev.create_window({512,512}, "workbench");
+        window->set_pos(window_pos);
 
         auto mesh_vertex_format = dev.create_vertex_format({
             {0, sizeof(mesh_vertex), {
@@ -127,14 +128,14 @@ public:
     void render_frame(const camera & cam)
     {
         // Render frame
-        constexpr coord_system opengl_coords {coord_axis::right, coord_axis::up, coord_axis::back};
-        const auto view_proj_matrix = cam.get_view_proj_matrix(window->get_aspect(), opengl_coords);
+        const auto proj_matrix = linalg::perspective_matrix(1.0f, window->get_aspect(), 0.5f, 100.0f, linalg::pos_z, dev.get_z_range());
+        const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, dev.get_ndc_coords()), cam.get_view_matrix());
         uniform_buffer.reset();
 
         dev.begin_render_pass(*window);
         {
             dev.bind_pipeline(*wire_pipe);
-            dev.bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));       
+            dev.bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));
             dev.bind_vertex_buffer(0, basis_vertex_buffer);
             dev.draw(0, 6);
 
@@ -169,10 +170,10 @@ int main(int argc, const char * argv[]) try
     // Create the devices
     glfw::context context;
     auto dev = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
-    device_session session {assets, *dev};
+    device_session session {assets, *dev, {100,100}};
 
     auto dev2 = create_d3d11_device([](const char * message) { std::cerr << message << std::endl; });
-    device_session session2 {assets, *dev2};
+    device_session session2 {assets, *dev2, {700,100}};
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
