@@ -1,7 +1,6 @@
 #include "rhi-internal.h"
 
-#define GLEW_STATIC
-#include <GL/glew.h>
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "../dep/SPIRV-Cross/spirv_glsl.hpp"
 #pragma comment(lib, "opengl32.lib")
@@ -99,7 +98,7 @@ namespace gl
             if(!hidden_window) throw std::runtime_error("glfwCreateWindow(...) failed");
 
             glfwMakeContextCurrent(hidden_window);
-            if(glewInit() != GLEW_OK) throw std::runtime_error("glewInit() failed");
+            if(!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) throw std::runtime_error("gladLoadGLLoader(...) failed");
             if(debug_callback)
             {
                 std::ostringstream ss;
@@ -107,7 +106,6 @@ namespace gl
                 ss << "GL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
                 ss << "GL_VENDOR = " << glGetString(GL_VENDOR) << std::endl;
                 ss << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
-                ss << "GLEW_VERSION = " << glewGetString(GLEW_VERSION) << std::endl;
                 debug_callback(ss.str().c_str());
             }
             enable_debug_callback(hidden_window);

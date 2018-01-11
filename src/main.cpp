@@ -96,22 +96,16 @@ class device_session
 {
     rhi::device & dev;
     rhi::device_info info;
-    rhi::window rwindow;
-    std::unique_ptr<glfw::window> gwindow;
     rhi::pipeline wire_pipe, solid_pipe;
     rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer;
     dynamic_buffer uniform_buffer;
+    rhi::window rwindow;
+    std::unique_ptr<glfw::window> gwindow;
 public:
     device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : 
         dev{dev}, info{dev.get_info()}, 
         uniform_buffer{dev, rhi::buffer_usage::uniform, 1024} 
     {
-        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
-        GLFWwindow * w;
-        std::tie(rwindow, w) = dev.create_window({512,512}, ss.str());
-        gwindow = std::make_unique<glfw::window>(w);
-        gwindow->set_pos(window_pos);
-
         auto mesh_layout = dev.create_input_layout({
             {0, sizeof(mesh_vertex), {
                 {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
@@ -128,8 +122,14 @@ public:
         basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
         ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
 
-        uint32_t quad_indices[] {0,1,2, 0,2,3};
+        const uint32_t quad_indices[] {0,1,2, 0,2,3};
         ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
+
+        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
+        GLFWwindow * w;
+        std::tie(rwindow, w) = dev.create_window({512,512}, ss.str());
+        gwindow = std::make_unique<glfw::window>(w);
+        gwindow->set_pos(window_pos);
     }
 
     glfw::window & get_window() { return *gwindow; }

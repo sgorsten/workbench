@@ -7,6 +7,9 @@
     <ClCompile Include="..\..\src\shader.cpp" />
     <ClCompile Include="..\..\src\rhi-opengl.cpp" />
     <ClCompile Include="..\..\src\rhi-d3d11.cpp" />
+    <ClCompile Include="..\..\dep\glad\src\glad.c">
+      <Filter>glad</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\io.h" />
@@ -15,5 +18,10 @@
     <ClInclude Include="..\..\src\shader.h" />
     <ClInclude Include="..\..\src\rhi-internal.h" />
     <ClInclude Include="..\..\src\graphics.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="glad">
+      <UniqueIdentifier>{d5939173-98cf-4fb1-bfc9-155b8bc13f93}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>
