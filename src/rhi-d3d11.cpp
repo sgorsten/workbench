@@ -107,30 +107,29 @@ namespace d3d
 
         auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<rhi::window, GLFWwindow *> override 
         {
-            auto handle = windows.alloc();
-            auto & w = windows[handle];
+            auto [handle, window] = windows.create();
 
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
             glfwWindowHint(GLFW_OPENGL_API, GLFW_NO_API);
-            w.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
-            if(!w.w) throw std::runtime_error("glfwCreateWindow(...) failed");
+            window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
+            if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
             
             DXGI_SWAP_CHAIN_DESC scd {};
             scd.BufferCount = 1;                                    // one back buffer
             scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;     // use 32-bit color
             scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;      // how swap chain is to be used
-            scd.OutputWindow = glfwGetWin32Window(w.w);          // the window to be used
+            scd.OutputWindow = glfwGetWin32Window(window.w);        // the window to be used
             scd.SampleDesc.Count = 1;
             scd.Windowed = TRUE;                                    // windowed/full-screen mode
-            auto hr = factory->CreateSwapChain(dev, &scd, &w.swap_chain);
+            auto hr = factory->CreateSwapChain(dev, &scd, &window.swap_chain);
             if(FAILED(hr)) throw std::runtime_error("IDXGIFactory::CreateSwapChain(...) failed");
 
             ID3D11Resource * image;
-            hr = w.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image);
+            hr = window.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image);
             if(FAILED(hr)) throw std::runtime_error("IDXGISwapChain::GetBuffer(...) failed");
 
-            hr = dev->CreateRenderTargetView(image, nullptr, &w.render_target_view);
+            hr = dev->CreateRenderTargetView(image, nullptr, &window.render_target_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
             D3D11_TEXTURE2D_DESC desc {};
@@ -142,19 +141,18 @@ namespace d3d
             desc.SampleDesc.Count = 1;
             desc.Usage = D3D11_USAGE_DEFAULT;
             desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-            hr = dev->CreateTexture2D(&desc, nullptr, &w.depth_texture);
+            hr = dev->CreateTexture2D(&desc, nullptr, &window.depth_texture);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateTexture2D(...) failed");
 
-            hr = dev->CreateDepthStencilView(w.depth_texture, nullptr, &w.depth_stencil_view);
+            hr = dev->CreateDepthStencilView(window.depth_texture, nullptr, &window.depth_stencil_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
-            return {handle, w.w};
+            return {handle, window.w};
         }
 
         std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
-            auto handle = buffers.alloc();
-            auto & buffer = buffers[handle];
+            auto [handle, buffer] = buffers.create();
 
             D3D11_BUFFER_DESC buffer_desc {};
             buffer_desc.ByteWidth = desc.size;
@@ -188,18 +186,19 @@ namespace d3d
 
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            auto handle = input_layouts.alloc();
-            input_layouts[handle].bindings = bindings;
+            auto [handle, input_layout] = input_layouts.create();
+
+            input_layout.bindings = bindings;
             for(auto & buf : bindings)
             {
                 for(auto & attrib : buf.attributes)
                 {
                     switch(attrib.type)
                     {
-                    case rhi::attribute_format::float1: input_layouts[handle].input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case rhi::attribute_format::float2: input_layouts[handle].input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case rhi::attribute_format::float3: input_layouts[handle].input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case rhi::attribute_format::float4: input_layouts[handle].input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case rhi::attribute_format::float1: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case rhi::attribute_format::float2: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case rhi::attribute_format::float3: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case rhi::attribute_format::float4: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
                     default: throw std::logic_error("invalid rhi::attribute_format");
                     }
                 }
@@ -213,8 +212,7 @@ namespace d3d
             auto hr = (dev->*create_func)(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &s);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::Create...Shader(...) failed");
 
-            auto handle = shaders.alloc();
-            auto & shader = shaders[handle];
+            auto [handle, shader] = shaders.create();
             shader.blob = blob;
             shader.shader_object = s;
             return handle;
@@ -249,16 +247,15 @@ namespace d3d
 
         rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
-            auto handle = pipelines.alloc();
-            auto & pipe = pipelines[handle];
-            pipe.desc = desc;
+            auto [handle, pipeline] = pipelines.create();
+            pipeline.desc = desc;
             for(auto s : desc.stages) 
             {
-                std::visit([&pipe](auto * s) { pipe.set_shader(s); }, shaders[s].shader_object);
+                std::visit([&pipeline](auto * s) { pipeline.set_shader(s); }, shaders[s].shader_object);
                 if(std::holds_alternative<ID3D11VertexShader*>(shaders[s].shader_object))
                 {
                     const auto & input_descs = input_layouts[desc.input].input_descs;
-                    auto hr = dev->CreateInputLayout(input_descs.data(), input_descs.size(), shaders[s].blob->GetBufferPointer(), shaders[s].blob->GetBufferSize(), &pipe.layout);
+                    auto hr = dev->CreateInputLayout(input_descs.data(), input_descs.size(), shaders[s].blob->GetBufferPointer(), shaders[s].blob->GetBufferSize(), &pipeline.layout);
                     if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateInputLayout(...) failed");
                 }
             }

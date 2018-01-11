@@ -7,8 +7,18 @@ struct GLFWwindow;
 
 namespace rhi
 {
+    // Simple handle type used to refer to device objects
+    template<class T> struct handle 
+    { 
+        int id;                                             // A handle is simply a strongly typed int
+        handle() : id{0} {}                                 // Handles automatically default to zero, and are considered 'null'
+        explicit handle(int id) : id{id} {}                 // Handles cannot be implicitly constructed from int
+        explicit operator bool () const { return id != 0; } // A handle evaluates to true if it is not null
+    };
+    template<class T> bool operator == (const handle<T> & a, const handle<T> & b) { return a.id == b.id; } // Handles of the same type can be compared for equality
+    template<class T> bool operator != (const handle<T> & a, const handle<T> & b) { return a.id != b.id; }
+
     // Object types
-    template<class T> struct handle { int id; handle() : id{0} {} explicit handle(int id) : id{id} {} };
     using input_layout = handle<struct input_layout_tag>;
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;

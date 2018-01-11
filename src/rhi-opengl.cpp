@@ -123,8 +123,7 @@ namespace gl
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
             glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
-            auto handle = windows.alloc();
-            auto & window = windows[handle];
+            auto [handle, window] = windows.create();
             window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
             if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
             enable_debug_callback(window.w);
@@ -133,15 +132,14 @@ namespace gl
 
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            auto handle = input_layouts.alloc();
-            input_layouts[handle].bindings = bindings;
+            auto [handle, input_layout] = input_layouts.create();
+            input_layout.bindings = bindings;
             return handle;
         }
 
         rhi::shader create_shader(const shader_module & module) override
         {
-            auto handle = shaders.alloc();
-            auto & shader = shaders[handle];
+            auto [handle, shader] = shaders.create();
 
             spirv_cross::CompilerGLSL compiler(module.spirv);
             const auto glsl = compiler.compile();
@@ -188,16 +186,15 @@ namespace gl
                 throw std::runtime_error(buffer.data());
             }
 
-            auto p = pipelines.alloc();
-            pipelines[p].desc = desc;
-            pipelines[p].program_object = program;
-            return p;
+            auto [handle, pipeline] = pipelines.create();
+            pipeline.desc = desc;
+            pipeline.program_object = program;
+            return handle;
         }
 
         std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
-            auto handle = buffers.alloc();
-            auto & buffer = buffers[handle];
+            auto [handle, buffer] = buffers.create();
             glCreateBuffers(1, &buffer.buffer_object);
             GLbitfield flags = 0;
             if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
