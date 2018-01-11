@@ -231,6 +231,8 @@ namespace gl
             in(current_pipeline->desc.format)->bind_vertex_array();
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_NEVER | static_cast<int>(current_pipeline->desc.depth_test));
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
         }
 
         void bind_uniform_buffer(int index, rhi::buffer_range range) override

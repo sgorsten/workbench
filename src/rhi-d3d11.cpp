@@ -45,6 +45,9 @@ namespace d3d
 
         IDXGISwapChain * swap_chain;
         ID3D11RenderTargetView * render_target_view;
+
+        ID3D11Texture2D * depth_texture;
+        ID3D11DepthStencilView * depth_stencil_view;
     };
 
     template<class T> struct interface_type;
@@ -102,8 +105,8 @@ namespace d3d
 
             D3D11_RASTERIZER_DESC rdesc {};
             rdesc.FillMode = D3D11_FILL_SOLID;
-            rdesc.CullMode = D3D11_CULL_NONE;
-            rdesc.FrontCounterClockwise = FALSE;
+            rdesc.CullMode = D3D11_CULL_BACK;
+            rdesc.FrontCounterClockwise = TRUE;
             hr = dev->CreateRasterizerState(&rdesc, &rasterizer_state);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRasterizerState(...) failed");            
         }
@@ -135,6 +138,21 @@ namespace d3d
             if(FAILED(hr)) throw std::runtime_error("IDXGISwapChain::GetBuffer(...) failed");
 
             hr = dev->CreateRenderTargetView(image, nullptr, &w->render_target_view);
+            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
+
+            D3D11_TEXTURE2D_DESC desc {};
+            desc.Width = dimensions.x;
+            desc.Height = dimensions.y;
+            desc.MipLevels = 1;
+            desc.ArraySize = 1;
+            desc.Format = DXGI_FORMAT_D32_FLOAT;
+            desc.SampleDesc.Count = 1;
+            desc.Usage = D3D11_USAGE_DEFAULT;
+            desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+            hr = dev->CreateTexture2D(&desc, nullptr, &w->depth_texture);
+            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateTexture2D(...) failed");
+
+            hr = dev->CreateDepthStencilView(w->depth_texture, nullptr, &w->depth_stencil_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
             return w;
@@ -258,7 +276,9 @@ namespace d3d
 
             FLOAT rgba[] {0,0,0,1};
             ctx->ClearRenderTargetView(in(window).render_target_view, rgba);
-            ctx->OMSetRenderTargets(1, &in(window).render_target_view, nullptr);
+            ctx->ClearDepthStencilView(in(window).depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+            ctx->OMSetRenderTargets(1, &in(window).render_target_view, in(window).depth_stencil_view);
             D3D11_VIEWPORT vp {0, 0, 512, 512, 0, 1};
             ctx->RSSetViewports(1, &vp);
         }
