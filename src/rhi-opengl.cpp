@@ -10,6 +10,7 @@ namespace gl
     struct buffer
     {
         GLuint buffer_object;
+        char * mapped;
     };
 
     struct vertex_format
@@ -83,7 +84,8 @@ namespace gl
     {
         std::function<void(const char *)> debug_callback;
         GLFWwindow * hidden_window;
-        pipeline * current_pipeline;
+        pipeline * current_pipeline=0;
+        size_t index_buffer_offset=0;
 
         void enable_debug_callback(GLFWwindow * window)
         {
@@ -123,8 +125,7 @@ namespace gl
             enable_debug_callback(hidden_window);
         }
         
-        coord_system get_ndc_coords() const { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
-        linalg::z_range get_z_range() const { return linalg::neg_one_to_one; }
+        rhi::device_info get_info() const override { return {"OpenGL 4.5 Core", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
 
         glfw::window * create_window(const int2 & dimensions, std::string_view title) override
         {
@@ -140,27 +141,20 @@ namespace gl
             return new gl::window{window};
         }
 
-        rhi::buffer_range create_static_buffer(binary_view contents) override
+        rhi::buffer * create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
             GLuint buffer;
             glCreateBuffers(1, &buffer);
-            glNamedBufferStorage(buffer, contents.size, contents.data, 0);
-            return {out(new gl::buffer{buffer}), 0, contents.size};
+            GLbitfield flags = 0;
+            if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
+            glNamedBufferStorage(buffer, desc.size, initial_data, flags);
+
+            char * mapped = 0;
+            if(desc.dynamic) mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer, GL_WRITE_ONLY));
+            return out(new gl::buffer{buffer, mapped});
         }
 
-        rhi::mapped_buffer_range create_dynamic_buffer(size_t size) override
-        {
-            GLuint buffer;
-            glCreateBuffers(1, &buffer);
-            glNamedBufferStorage(buffer, size, nullptr, GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT);
-
-            rhi::mapped_buffer_range mapped;
-            mapped.buffer = out(new gl::buffer{buffer});
-            mapped.offset = 0;
-            mapped.size = size;
-            mapped.memory = reinterpret_cast<char *>(glMapNamedBuffer(buffer, GL_WRITE_ONLY));
-            return mapped;
-        }
+        char * get_mapped_memory(rhi::buffer * buffer) override { return in(buffer)->mapped; }
 
         rhi::shader * create_shader(const shader_module & module) override
         {
@@ -251,6 +245,12 @@ namespace gl
             }        
         }
 
+        void bind_index_buffer(rhi::buffer_range range) override
+        {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, in(range.buffer)->buffer_object);
+            index_buffer_offset = range.offset;
+        }
+
         void draw(int first_vertex, int vertex_count) override
         {
             switch(current_pipeline->desc.topology)
@@ -258,6 +258,17 @@ namespace gl
             case rhi::primitive_topology::points: glDrawArrays(GL_POINTS, first_vertex, vertex_count); break;
             case rhi::primitive_topology::lines: glDrawArrays(GL_LINES, first_vertex, vertex_count); break;
             case rhi::primitive_topology::triangles: glDrawArrays(GL_TRIANGLES, first_vertex, vertex_count); break;
+            }
+        }
+
+        void draw_indexed(int first_index, int index_count) override
+        {
+            auto indices = (const void *)(index_buffer_offset + first_index*sizeof(uint32_t));
+            switch(current_pipeline->desc.topology)
+            {
+            case rhi::primitive_topology::points: glDrawElements(GL_POINTS, index_count, GL_UNSIGNED_INT, indices); break;
+            case rhi::primitive_topology::lines: glDrawElements(GL_LINES, index_count, GL_UNSIGNED_INT, indices); break;
+            case rhi::primitive_topology::triangles: glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_INT, indices); break;
             }
         }
 

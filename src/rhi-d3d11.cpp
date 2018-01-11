@@ -15,6 +15,7 @@ namespace d3d
     struct buffer
     {
         ID3D11Buffer * buffer_object;
+        char * mapped = 0;
     };
 
     struct vertex_format
@@ -111,8 +112,7 @@ namespace d3d
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRasterizerState(...) failed");            
         }
 
-        coord_system get_ndc_coords() const { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
-        linalg::z_range get_z_range() const { return linalg::zero_to_one; }
+        rhi::device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
 
         glfw::window * create_window(const int2 & dimensions, std::string_view title) override
         {
@@ -158,46 +158,40 @@ namespace d3d
             return w;
         }
 
-        rhi::buffer_range create_static_buffer(binary_view contents) override
+        rhi::buffer * create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
             D3D11_BUFFER_DESC buffer_desc {};
-            buffer_desc.ByteWidth = contents.size;
-            buffer_desc.Usage = D3D11_USAGE_IMMUTABLE; //D3D11_USAGE_DYNAMIC
-            buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER; // D3D11_BIND_CONSTANT_BUFFER
-            buffer_desc.CPUAccessFlags = 0; // D3D11_CPU_ACCESS_WRITE
+            buffer_desc.ByteWidth = desc.size;
+            buffer_desc.Usage = desc.dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
+            buffer_desc.BindFlags = 0;
+            switch(desc.usage)
+            {
+            case rhi::buffer_usage::vertex: buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER; break;
+            case rhi::buffer_usage::index: buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER; break;
+            case rhi::buffer_usage::uniform: buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER; break;
+            case rhi::buffer_usage::storage: buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE; break;
+            }
+            buffer_desc.CPUAccessFlags = desc.dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
 
             D3D11_SUBRESOURCE_DATA data {};
-            data.pSysMem = contents.data;
+            data.pSysMem = initial_data;
 
             auto buf = new buffer;
-            auto hr = dev->CreateBuffer(&buffer_desc, &data, &buf->buffer_object);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateBuffer(...) failed");
-            return {out(buf), 0, contents.size};
-        }
-
-        rhi::mapped_buffer_range create_dynamic_buffer(size_t size) override
-        {
-            D3D11_BUFFER_DESC buffer_desc {};
-            buffer_desc.ByteWidth = size;
-            buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
-            buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-            buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-            auto buf = new buffer;
-            auto hr = dev->CreateBuffer(&buffer_desc, nullptr, &buf->buffer_object);
+            auto hr = dev->CreateBuffer(&buffer_desc, initial_data ? &data : 0, &buf->buffer_object);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateBuffer(...) failed");
 
-            D3D11_MAPPED_SUBRESOURCE sub;
-            hr = ctx->Map(buf->buffer_object, 0, D3D11_MAP_WRITE_DISCARD, 0, &sub);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11DeviceContext::Map(...) failed");
+            if(desc.dynamic)
+            {
+                D3D11_MAPPED_SUBRESOURCE sub;
+                hr = ctx->Map(buf->buffer_object, 0, D3D11_MAP_WRITE_DISCARD, 0, &sub);
+                if(FAILED(hr)) throw std::runtime_error("ID3D11DeviceContext::Map(...) failed");
+                buf->mapped = reinterpret_cast<char *>(sub.pData);
+            }
 
-            rhi::mapped_buffer_range mapped;
-            mapped.buffer = out(buf);
-            mapped.offset = 0;
-            mapped.size = size;
-            mapped.memory = reinterpret_cast<char *>(sub.pData);
-            return mapped;
+            return out(buf);
         }
+
+        char * get_mapped_memory(rhi::buffer * buffer) override { return in(buffer)->mapped; }
 
         template<class T> rhi::shader * create_shader(ID3DBlob * blob, HRESULT (__stdcall ID3D11Device::*create_func)(const void *, SIZE_T, ID3D11ClassLinkage *, T **))
         {
@@ -288,7 +282,13 @@ namespace d3d
             current_pipeline = in(&pipe);
             ctx->IASetInputLayout(current_pipeline->layout);
             ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
-            ctx->PSSetShader(current_pipeline->ps, nullptr, 0);            
+            ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
+            switch(current_pipeline->desc.topology)
+            {
+            case rhi::primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
+            case rhi::primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
+            case rhi::primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
+            }
         }
 
         void bind_uniform_buffer(int index, rhi::buffer_range range) override
@@ -310,15 +310,19 @@ namespace d3d
             }
         }
 
+        void bind_index_buffer(rhi::buffer_range range) override
+        {
+            ctx->IASetIndexBuffer(in(range.buffer)->buffer_object, DXGI_FORMAT_R32_UINT, range.offset);
+        }
+
         void draw(int first_vertex, int vertex_count) override
         {
-            switch(current_pipeline->desc.topology)
-            {
-            case rhi::primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
-            case rhi::primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
-            case rhi::primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
-            }
             ctx->Draw(vertex_count, first_vertex);
+        }
+
+        void draw_indexed(int first_index, int index_count) override
+        {
+            ctx->DrawIndexed(index_count, first_index, 0);
         }
 
         void end_render_pass() override

@@ -96,14 +96,16 @@ struct common_assets
 class device_session
 {
     rhi::device & dev;
+    rhi::device_info info;
     glfw::window * window;
     rhi::pipeline * wire_pipe, * solid_pipe;
-    rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer;
+    rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer;
     dynamic_buffer uniform_buffer;
 public:
-    device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : dev{dev}, uniform_buffer{dev, 1024} 
+    device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : dev{dev}, info{dev.get_info()}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024} 
     {
-        window = dev.create_window({512,512}, "workbench");
+        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
+        window = dev.create_window({512,512}, ss.str());
         window->set_pos(window_pos);
 
         auto mesh_vertex_format = dev.create_vertex_format({
@@ -119,8 +121,11 @@ public:
         wire_pipe = dev.create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
         solid_pipe = dev.create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
-        basis_vertex_buffer = dev.create_static_buffer(assets.basis_mesh.vertices);
-        ground_vertex_buffer = dev.create_static_buffer(assets.ground_mesh.vertices);
+        basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
+        ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
+
+        uint32_t quad_indices[] {0,1,2, 0,2,3};
+        ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
     }
 
     glfw::window & get_window() { return *window; }
@@ -128,8 +133,8 @@ public:
     void render_frame(const camera & cam)
     {
         // Render frame
-        const auto proj_matrix = linalg::perspective_matrix(1.0f, window->get_aspect(), 0.5f, 100.0f, linalg::pos_z, dev.get_z_range());
-        const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, dev.get_ndc_coords()), cam.get_view_matrix());
+        const auto proj_matrix = linalg::perspective_matrix(1.0f, window->get_aspect(), 0.5f, 100.0f, linalg::pos_z, info.z_range);
+        const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
         uniform_buffer.reset();
 
         dev.begin_render_pass(*window);
@@ -142,7 +147,8 @@ public:
             dev.bind_pipeline(*solid_pipe);
             dev.bind_uniform_buffer(0, uniform_buffer.write(mul(view_proj_matrix, translation_matrix(cam.coords(coord_axis::down)*0.1f))));
             dev.bind_vertex_buffer(0, ground_vertex_buffer);
-            dev.draw(0, 3);
+            dev.bind_index_buffer(ground_index_buffer);
+            dev.draw_indexed(0, 6);
         }
         dev.end_render_pass();
 
