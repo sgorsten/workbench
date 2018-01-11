@@ -1,6 +1,5 @@
-#include "rhi.h"
-#include "geometry.h"
-#include "shader.h"
+#include "graphics.h"
+#include "io.h"
 
 #define DOCTEST_CONFIG_NO_SHORT_MACRO_NAMES
 #define DOCTEST_CONFIG_IMPLEMENT
@@ -97,18 +96,23 @@ class device_session
 {
     rhi::device & dev;
     rhi::device_info info;
-    glfw::window * window;
-    rhi::pipeline * wire_pipe, * solid_pipe;
+    rhi::window rwindow;
+    std::unique_ptr<glfw::window> gwindow;
+    rhi::pipeline wire_pipe, solid_pipe;
     rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer;
     dynamic_buffer uniform_buffer;
 public:
-    device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : dev{dev}, info{dev.get_info()}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024} 
+    device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : 
+        dev{dev}, info{dev.get_info()}, 
+        uniform_buffer{dev, rhi::buffer_usage::uniform, 1024} 
     {
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
-        window = dev.create_window({512,512}, ss.str());
-        window->set_pos(window_pos);
+        GLFWwindow * w;
+        std::tie(rwindow, w) = dev.create_window({512,512}, ss.str());
+        gwindow = std::make_unique<glfw::window>(w);
+        gwindow->set_pos(window_pos);
 
-        auto mesh_vertex_format = dev.create_vertex_format({
+        auto mesh_layout = dev.create_input_layout({
             {0, sizeof(mesh_vertex), {
                 {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
                 {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
@@ -118,8 +122,8 @@ public:
         auto vs = dev.create_shader(assets.vs);
         auto fs = dev.create_shader(assets.fs);
 
-        wire_pipe = dev.create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
-        solid_pipe = dev.create_pipeline({mesh_vertex_format, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+        wire_pipe = dev.create_pipeline({mesh_layout, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
+        solid_pipe = dev.create_pipeline({mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
         basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
         ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
@@ -128,23 +132,23 @@ public:
         ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
     }
 
-    glfw::window & get_window() { return *window; }
+    glfw::window & get_window() { return *gwindow; }
 
     void render_frame(const camera & cam)
     {
         // Render frame
-        const auto proj_matrix = linalg::perspective_matrix(1.0f, window->get_aspect(), 0.5f, 100.0f, linalg::pos_z, info.z_range);
+        const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.5f, 100.0f, linalg::pos_z, info.z_range);
         const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
         uniform_buffer.reset();
 
-        dev.begin_render_pass(*window);
+        dev.begin_render_pass(rwindow);
         {
-            dev.bind_pipeline(*wire_pipe);
+            dev.bind_pipeline(wire_pipe);
             dev.bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));
             dev.bind_vertex_buffer(0, basis_vertex_buffer);
             dev.draw(0, 6);
 
-            dev.bind_pipeline(*solid_pipe);
+            dev.bind_pipeline(solid_pipe);
             dev.bind_uniform_buffer(0, uniform_buffer.write(mul(view_proj_matrix, translation_matrix(cam.coords(coord_axis::down)*0.1f))));
             dev.bind_vertex_buffer(0, ground_vertex_buffer);
             dev.bind_index_buffer(ground_index_buffer);
@@ -152,7 +156,7 @@ public:
         }
         dev.end_render_pass();
 
-        dev.present(*window);
+        dev.present(rwindow);
     }
 };
 

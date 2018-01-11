@@ -13,5 +13,7 @@
     <ClInclude Include="..\..\src\geometry.h" />
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\shader.h" />
+    <ClInclude Include="..\..\src\rhi-internal.h" />
+    <ClInclude Include="..\..\src\graphics.h" />
   </ItemGroup>
 </Project>

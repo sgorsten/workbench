@@ -1,7 +1,8 @@
-#include "rhi.h"
+#include "rhi-internal.h"
 
 #define GLEW_STATIC
 #include <GL/glew.h>
+#include <GLFW/glfw3.h>
 #include "../dep/SPIRV-Cross/spirv_glsl.hpp"
 #pragma comment(lib, "opengl32.lib")
 
@@ -9,11 +10,11 @@ namespace gl
 {
     struct buffer
     {
-        GLuint buffer_object;
-        char * mapped;
+        GLuint buffer_object = 0;
+        char * mapped = 0;
     };
 
-    struct vertex_format
+    struct input_layout
     {
         std::vector<rhi::vertex_binding_desc> bindings;
         mutable std::unordered_map<GLFWwindow *, GLuint> vertex_array_objects; // vertex array objects cannot be shared between OpenGL contexts, so we must cache them per-context
@@ -56,29 +57,10 @@ namespace gl
         GLuint program_object;
     };
 
-    struct window : glfw::window
+    struct window
     {
         GLFWwindow * w;
-        window(GLFWwindow * w) : glfw::window{w}, w{w} {}
     };
-
-    template<class T> struct interface_type;
-    template<class T> struct implementation_type;
-
-    #define CONNECT_TYPES(INTERFACE, IMPLEMENTATION) template<> struct interface_type<IMPLEMENTATION> { using type = INTERFACE; }; template<> struct implementation_type<INTERFACE> { using type = IMPLEMENTATION; }
-    CONNECT_TYPES(rhi::buffer, buffer);
-    CONNECT_TYPES(rhi::vertex_format, vertex_format);
-    CONNECT_TYPES(rhi::shader, shader);
-    CONNECT_TYPES(rhi::pipeline, pipeline);
-    CONNECT_TYPES(glfw::window, window);
-    #undef CONNECT_TYPES
-
-    template<class T> typename interface_type<T>::type * out(T * ptr) { return reinterpret_cast<typename interface_type<T>::type *>(ptr); }
-    template<class T> typename implementation_type<T>::type * in(T * ptr) { return reinterpret_cast<typename implementation_type<T>::type *>(ptr); }
-    template<class T> typename implementation_type<T>::type & in(T & ref) { return reinterpret_cast<typename implementation_type<T>::type &>(ref); }
-    template<class T> const typename interface_type<T>::type * out(const T * ptr) { return reinterpret_cast<const typename interface_type<T>::type *>(ptr); }
-    template<class T> const typename implementation_type<T>::type * in(const T * ptr) { return reinterpret_cast<const typename implementation_type<T>::type *>(ptr); }
-    template<class T> const typename implementation_type<T>::type & in(const T & ref) { return reinterpret_cast<const typename implementation_type<T>::type &>(ref); }   
 
     struct device : rhi::device
     {
@@ -86,6 +68,12 @@ namespace gl
         GLFWwindow * hidden_window;
         pipeline * current_pipeline=0;
         size_t index_buffer_offset=0;
+
+        object_set<rhi::input_layout, input_layout> input_layouts;
+        object_set<rhi::shader, shader> shaders;
+        object_set<rhi::pipeline, pipeline> pipelines;
+        object_set<rhi::buffer, buffer> buffers;
+        object_set<rhi::window, window> windows;
 
         void enable_debug_callback(GLFWwindow * window)
         {
@@ -127,7 +115,7 @@ namespace gl
         
         rhi::device_info get_info() const override { return {"OpenGL 4.5 Core", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
 
-        glfw::window * create_window(const int2 & dimensions, std::string_view title) override
+        std::tuple<rhi::window, GLFWwindow *> create_window(const int2 & dimensions, std::string_view title) override 
         {
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
@@ -135,35 +123,32 @@ namespace gl
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
             glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
-            auto window = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
-            if(!window) throw std::runtime_error("glfwCreateWindow(...) failed");
-            enable_debug_callback(window);
-            return new gl::window{window};
+            auto handle = windows.alloc();
+            auto & window = windows[handle];
+            window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
+            if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
+            enable_debug_callback(window.w);
+            return {handle, window.w};
         }
 
-        rhi::buffer * create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
+        rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            GLuint buffer;
-            glCreateBuffers(1, &buffer);
-            GLbitfield flags = 0;
-            if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
-            glNamedBufferStorage(buffer, desc.size, initial_data, flags);
-
-            char * mapped = 0;
-            if(desc.dynamic) mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer, GL_WRITE_ONLY));
-            return out(new gl::buffer{buffer, mapped});
+            auto handle = input_layouts.alloc();
+            input_layouts[handle].bindings = bindings;
+            return handle;
         }
 
-        char * get_mapped_memory(rhi::buffer * buffer) override { return in(buffer)->mapped; }
-
-        rhi::shader * create_shader(const shader_module & module) override
+        rhi::shader create_shader(const shader_module & module) override
         {
+            auto handle = shaders.alloc();
+            auto & shader = shaders[handle];
+
             spirv_cross::CompilerGLSL compiler(module.spirv);
             const auto glsl = compiler.compile();
             const GLchar * source = glsl.c_str();
             GLint length = glsl.length();
 
-            auto shader = glCreateShader([&module]() 
+            shader.shader_object = glCreateShader([&module]() 
             {
                 switch(module.stage)
                 {
@@ -172,25 +157,25 @@ namespace gl
                 default: throw std::logic_error("unsupported shader_stage");
                 }
             }());
-            glShaderSource(shader, 1, &source, &length);
-            glCompileShader(shader);
+            glShaderSource(shader.shader_object, 1, &source, &length);
+            glCompileShader(shader.shader_object);
 
             GLint status;
-            glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+            glGetShaderiv(shader.shader_object, GL_COMPILE_STATUS, &status);
             if(status == GL_FALSE)
             {
-                glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
+                glGetShaderiv(shader.shader_object, GL_INFO_LOG_LENGTH, &length);
                 std::vector<char> buffer(length);
-                glGetShaderInfoLog(shader, buffer.size(), &length, buffer.data());
+                glGetShaderInfoLog(shader.shader_object, buffer.size(), &length, buffer.data());
                 throw std::runtime_error(buffer.data());
             }
-            return out(new gl::shader{shader});
+            return handle;
         }
 
-        rhi::pipeline * create_pipeline(const rhi::pipeline_desc & desc) override
+        rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
             auto program = glCreateProgram();
-            for(auto shader : desc.stages) glAttachShader(program, gl::in(shader)->shader_object);
+            for(auto shader : desc.stages) glAttachShader(program, shaders[shader].shader_object);
             glLinkProgram(program);
 
             GLint status, length;
@@ -202,27 +187,40 @@ namespace gl
                 glGetProgramInfoLog(program, buffer.size(), &length, buffer.data());
                 throw std::runtime_error(buffer.data());
             }
-            return out(new gl::pipeline{desc, program});
+
+            auto p = pipelines.alloc();
+            pipelines[p].desc = desc;
+            pipelines[p].program_object = program;
+            return p;
         }
 
-        rhi::vertex_format * create_vertex_format(const std::vector<rhi::vertex_binding_desc> & bindings) override
+        std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
-            return out(new gl::vertex_format{bindings});
+            auto handle = buffers.alloc();
+            auto & buffer = buffers[handle];
+            glCreateBuffers(1, &buffer.buffer_object);
+            GLbitfield flags = 0;
+            if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
+            glNamedBufferStorage(buffer.buffer_object, desc.size, initial_data, flags);
+            if(desc.dynamic) buffer.mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer.buffer_object, GL_WRITE_ONLY));
+            return {handle, buffer.mapped};
         }
 
-        void begin_render_pass(glfw::window & window) override
+        void begin_render_pass(rhi::window window) override
         {
-            const int2 fb_size = window.get_framebuffer_size();
-            glfwMakeContextCurrent(in(window).w);
-            glViewport(0, 0, fb_size.x, fb_size.y);
+            auto w = windows[window].w;
+            int width, height;
+            glfwGetFramebufferSize(w, &width, &height);            
+            glfwMakeContextCurrent(w);
+            glViewport(0, 0, width, height);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
 
-        void bind_pipeline(rhi::pipeline & pipe) override
+        void bind_pipeline(rhi::pipeline pipe) override
         {
-            current_pipeline = in(&pipe);
+            current_pipeline = &pipelines[pipe];
             glUseProgram(current_pipeline->program_object);
-            in(current_pipeline->desc.format)->bind_vertex_array();
+            input_layouts[current_pipeline->desc.input].bind_vertex_array();
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_NEVER | static_cast<int>(current_pipeline->desc.depth_test));
             glEnable(GL_CULL_FACE);
@@ -231,23 +229,23 @@ namespace gl
 
         void bind_uniform_buffer(int index, rhi::buffer_range range) override
         {
-            glBindBufferRange(GL_UNIFORM_BUFFER, index, gl::in(range.buffer)->buffer_object, range.offset, range.size);
+            glBindBufferRange(GL_UNIFORM_BUFFER, index, buffers[range.buffer].buffer_object, range.offset, range.size);
         }
 
         void bind_vertex_buffer(int index, rhi::buffer_range range) override
         {
-            for(auto & buf : in(current_pipeline->desc.format)->bindings)
+            for(auto & buf : input_layouts[current_pipeline->desc.input].bindings)
             {
                 if(buf.index == index)
                 {
-                    glBindVertexBuffer(index, gl::in(range.buffer)->buffer_object, range.offset, buf.stride);
+                    glBindVertexBuffer(index, buffers[range.buffer].buffer_object, range.offset, buf.stride);
                 }
             }        
         }
 
         void bind_index_buffer(rhi::buffer_range range) override
         {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, in(range.buffer)->buffer_object);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[range.buffer].buffer_object);
             index_buffer_offset = range.offset;
         }
 
@@ -277,9 +275,9 @@ namespace gl
 
         }
 
-        void present(glfw::window & window) override
+        void present(rhi::window window) override
         {
-            glfwSwapBuffers(in(window).w);
+            glfwSwapBuffers(windows[window].w);
         }
     };
 }
