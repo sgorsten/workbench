@@ -71,13 +71,13 @@ struct common_assets
     {
         shader_compiler compiler;
         vs = compiler.compile(shader_stage::vertex, R"(#version 450
-            layout(binding=0) uniform PerObject { mat4 u_transform; };
+            layout(set=0,binding=0) uniform PerObject { mat4 transform; } per_object;
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
             layout(location=0) out vec3 color;
             void main()
             {
-                gl_Position = u_transform * vec4(v_position,1);
+                gl_Position = per_object.transform * vec4(v_position,1);
                 color = v_color;
             }
         )");
@@ -86,6 +86,10 @@ struct common_assets
             layout(location=0) out vec4 f_color;
             void main() { f_color = vec4(color,1); }
         )");
+
+        for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
+        for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
+        for(auto & v : vs.outputs) { std::cout << "layout(location=" << v.location << ") out " << v.name << " : " << v.type << std::endl; }
 
         basis_mesh = make_basis_mesh();
         ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*5.0f, game_coords(coord_axis::forward)*5.0f);
@@ -122,7 +126,7 @@ public:
         basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
         ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
 
-        const uint32_t quad_indices[] {0,1,2, 0,2,3};
+        const uint32_t  quad_indices[] {0,1,2, 0,2,3};
         ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
