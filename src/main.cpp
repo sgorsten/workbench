@@ -273,6 +273,9 @@ int main(int argc, const char * argv[]) try
     auto dev2 = create_d3d11_device([](const char * message) { std::cerr << message << std::endl; });
     device_session session2 {assets, *dev2, {700,100}};
 
+    auto dev3 = create_vulkan_device([](const char * message) { std::cerr << message << std::endl; });
+    device_session session3 {assets, *dev3, {1300,100}};
+
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
     while(!session.get_window().should_close())
@@ -299,6 +302,7 @@ int main(int argc, const char * argv[]) try
 
         session.render_frame(cam);
         session2.render_frame(cam);
+        session3.render_frame(cam);
 
         // Poll events
         context.poll_events();

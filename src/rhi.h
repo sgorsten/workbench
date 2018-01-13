@@ -93,5 +93,6 @@ namespace rhi
     };
 }
 
-rhi::device * create_opengl_device(std::function<void(const char *)> debug_callback);
-rhi::device * create_d3d11_device(std::function<void(const char *)> debug_callback);
+std::shared_ptr<rhi::device> create_vulkan_device(std::function<void(const char *)> debug_callback);
+std::shared_ptr<rhi::device> create_opengl_device(std::function<void(const char *)> debug_callback);
+std::shared_ptr<rhi::device> create_d3d11_device(std::function<void(const char *)> debug_callback);

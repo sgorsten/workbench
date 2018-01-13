@@ -213,8 +213,6 @@ namespace d3d
             return handle;
         }
 
-
-
         rhi::shader create_shader(const shader_module & module) override
         {
             auto [handle, shader] = shaders.create();
@@ -347,7 +345,7 @@ namespace d3d
     };
 }
 
-rhi::device * create_d3d11_device(std::function<void(const char *)> debug_callback)
+std::shared_ptr<rhi::device> create_d3d11_device(std::function<void(const char *)> debug_callback)
 {
-    return new d3d::device(debug_callback);
+    return std::make_shared<d3d::device>(debug_callback);
 }

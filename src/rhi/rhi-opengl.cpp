@@ -298,7 +298,7 @@ namespace gl
     };
 }
 
-rhi::device * create_opengl_device(std::function<void(const char *)> debug_callback)
+std::shared_ptr<rhi::device> create_opengl_device(std::function<void(const char *)> debug_callback)
 {
-    return new gl::device(debug_callback);
+    return std::make_shared<gl::device>(debug_callback);
 }
