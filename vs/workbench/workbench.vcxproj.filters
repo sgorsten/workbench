@@ -8,13 +8,13 @@
     <ClCompile Include="..\..\dep\glad\src\glad.c">
       <Filter>glad</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\rhi-d3d11.cpp">
+    <ClCompile Include="..\..\src\rhi\rhi-d3d11.cpp">
       <Filter>rhi</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\rhi-internal.cpp">
+    <ClCompile Include="..\..\src\rhi\rhi-internal.cpp">
       <Filter>rhi</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\rhi-opengl.cpp">
+    <ClCompile Include="..\..\src\rhi\rhi-opengl.cpp">
       <Filter>rhi</Filter>
     </ClCompile>
   </ItemGroup>
@@ -24,7 +24,7 @@
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\shader.h" />
     <ClInclude Include="..\..\src\graphics.h" />
-    <ClInclude Include="..\..\src\rhi-internal.h">
+    <ClInclude Include="..\..\src\rhi\rhi-internal.h">
       <Filter>rhi</Filter>
     </ClInclude>
   </ItemGroup>

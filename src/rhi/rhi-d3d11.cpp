@@ -8,7 +8,7 @@
 #include <GLFW/glfw3native.h>
 #include <d3d11_1.h>
 #include <d3dcompiler.h>
-#include "../dep/SPIRV-Cross/spirv_hlsl.hpp"
+#include "../../dep/SPIRV-Cross/spirv_hlsl.hpp"
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 

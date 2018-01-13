@@ -2,7 +2,7 @@
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include "../dep/SPIRV-Cross/spirv_glsl.hpp"
+#include "../../dep/SPIRV-Cross/spirv_glsl.hpp"
 #pragma comment(lib, "opengl32.lib")
 
 namespace gl

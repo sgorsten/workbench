@@ -115,8 +115,8 @@ struct common_assets
         for(auto & v : vs.outputs) { std::cout << "layout(location=" << v.location << ") out " << v.name << " : " << v.type << std::endl; }
 
         basis_mesh = make_basis_mesh();
-        ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*5.0f, game_coords(coord_axis::forward)*5.0f);
-        box_mesh = make_box_mesh({1,0,0}, {-1,-1,-1}, {1,1,1});
+        ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
+        box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
     }
 };
 
@@ -198,23 +198,29 @@ public:
             dev.bind_vertex_buffer(0, basis_vertex_buffer);
             dev.draw(0, 6);
 
-            set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
-            dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*1.0f)));
-
+            // Draw the gorund
             dev.bind_pipeline(solid_pipe);
+            set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
+            dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*0.3f)));
             dev.bind_descriptor_set(pipe_layout, 1, set);
             dev.bind_vertex_buffer(0, ground_vertex_buffer);
             dev.bind_index_buffer(ground_index_buffer);
             dev.draw_indexed(0, 6);
 
-            set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
-            dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::left)*3.0f)));
-
-            dev.bind_pipeline(solid_pipe);
-            dev.bind_descriptor_set(pipe_layout, 1, set);
+            // Draw a bunch of boxes
             dev.bind_vertex_buffer(0, box_vertex_buffer);
             dev.bind_index_buffer(box_index_buffer);
-            dev.draw_indexed(0, 36);
+            for(int i=0; i<6; ++i)
+            {
+                for(int j=0; j<6; ++j)
+                {
+                    const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
+                    const auto set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
+                    dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(position)));
+                    dev.bind_descriptor_set(pipe_layout, 1, set);
+                    dev.draw_indexed(0, 36);
+                }
+            }            
         }
         dev.end_render_pass();
 

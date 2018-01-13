@@ -1,5 +1,5 @@
 #pragma once
-#include "rhi.h"
+#include "../rhi.h"
 
 template<class HANDLE, class TYPE> class object_set
 {
@@ -76,12 +76,12 @@ public:
     template<class BindBufferFunction>
     void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer) const
     {
-        auto & pipeline_layout = pipeline_layouts[layout];
-        auto & descriptor_set = descriptor_sets[set];
+        const auto & pipeline_layout = pipeline_layouts[layout];
+        const auto & descriptor_set = descriptor_sets[set];
         if(descriptor_set.layout != pipeline_layout.sets[set_index]) throw std::logic_error("descriptor_set_layout mismatch");
 
-        auto & descriptor_pool = descriptor_pools[descriptor_set.pool];
-        auto & descriptor_set_layout = descriptor_set_layouts[descriptor_set.layout];
+        const auto & descriptor_pool = descriptor_pools[descriptor_set.pool];
+        const auto & descriptor_set_layout = descriptor_set_layouts[descriptor_set.layout];
         // TODO: bind samplers
         for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.buffer_offsets[set_index] + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
     }
