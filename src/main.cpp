@@ -36,7 +36,6 @@ struct mesh
     std::vector<mesh_vertex> vertices;
     std::vector<int2> lines;
     std::vector<int3> triangles;
-    std::vector<int4> quads;
 };
 
 mesh make_basis_mesh()
@@ -64,15 +63,16 @@ mesh make_box_mesh(const float3 & color, const float3 & a, const float3 & b)
 
 mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3 & tangent_t)
 {
+    const auto normal = normalize(cross(tangent_s, tangent_t));
     mesh m;
     m.vertices =
     {
-        {-tangent_s-tangent_t, color},
-        {+tangent_s-tangent_t, color},
-        {+tangent_s+tangent_t, color},
-        {-tangent_s+tangent_t, color}
+        {-tangent_s-tangent_t, color, normal, {0,0}},
+        {+tangent_s-tangent_t, color, normal, {1,0}},
+        {+tangent_s+tangent_t, color, normal, {1,1}},
+        {-tangent_s+tangent_t, color, normal, {0,1}}
     };
-    m.quads = {{0,1,2,3}};
+    m.triangles = {{0,1,2},{0,2,3}};
     return m;
 }
 
@@ -80,13 +80,14 @@ struct common_assets
 {
     coord_system game_coords;
     mesh basis_mesh, ground_mesh, box_mesh;
-    shader_module vs, fs;
+    shader_module vs, fs, fs_unlit;
 
     common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
         shader_compiler compiler;
         vs = compiler.compile(shader_stage::vertex, R"(#version 450
-            layout(set=0,binding=0) uniform PerView { mat4 view_proj_matrix; } per_view;
+            layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
+            layout(set=0,binding=1) uniform PerView { mat4 view_proj_matrix; } per_view;
             layout(set=1,binding=0) uniform PerObject { mat4 model_matrix; } per_object;
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
@@ -103,11 +104,26 @@ struct common_assets
             }
         )");
         fs = compiler.compile(shader_stage::fragment, R"(#version 450
+            layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 color;
             layout(location=2) in vec3 normal;
             layout(location=0) out vec4 f_color;
-            void main() { f_color = vec4(color,1); }
+            void main() 
+            { 
+                vec3 light_vec = normalize(per_scene.light_pos - position);
+                vec3 normal_vec = normalize(normal);
+                f_color = vec4(color*max(dot(light_vec, normal_vec),0),1); 
+            }
+        )");
+        fs_unlit = compiler.compile(shader_stage::fragment, R"(#version 450
+            layout(location=0) in vec3 position;
+            layout(location=1) in vec3 color;
+            layout(location=0) out vec4 f_color;
+            void main() 
+            {
+                f_color = vec4(color,1);
+            }
         )");
 
         for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
@@ -127,7 +143,7 @@ class device_session
     dynamic_buffer uniform_buffer;
     rhi::descriptor_pool desc_pool;
 
-    rhi::descriptor_set_layout per_view_layout, per_object_layout;
+    rhi::descriptor_set_layout per_scene_view_layout, per_object_layout;
     rhi::pipeline_layout pipe_layout;    
     rhi::pipeline wire_pipe, solid_pipe;
     rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer;
@@ -151,20 +167,23 @@ public:
 
         auto vs = dev.create_shader(assets.vs);
         auto fs = dev.create_shader(assets.fs);
+        auto fs_unlit = dev.create_shader(assets.fs_unlit);
 
-        per_view_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
+        per_scene_view_layout = dev.create_descriptor_set_layout({
+            {0, rhi::descriptor_type::uniform_buffer, 1},
+            {1, rhi::descriptor_type::uniform_buffer, 1}
+        });
         per_object_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
-        pipe_layout = dev.create_pipeline_layout({per_view_layout, per_object_layout});
+        pipe_layout = dev.create_pipeline_layout({per_scene_view_layout, per_object_layout});
 
-        wire_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
+        wire_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
         solid_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
         basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
         ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
         box_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices);
 
-        const uint32_t quad_indices[] {0,1,2, 0,2,3};
-        ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
+        ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.ground_mesh.triangles);
         box_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.box_mesh.triangles);
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
@@ -184,8 +203,9 @@ public:
         uniform_buffer.reset();
 
         dev.reset_descriptor_pool(desc_pool);
-        auto per_view_set = dev.alloc_descriptor_set(desc_pool, per_view_layout);
-        dev.write_descriptor(per_view_set, 0, uniform_buffer.write(view_proj_matrix));
+        auto per_scene_view_set = dev.alloc_descriptor_set(desc_pool, per_scene_view_layout);
+        dev.write_descriptor(per_scene_view_set, 0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f));
+        dev.write_descriptor(per_scene_view_set, 1, uniform_buffer.write(view_proj_matrix));
 
         dev.begin_render_pass(rwindow);
         {
@@ -193,7 +213,7 @@ public:
             dev.write_descriptor(set, 0, uniform_buffer.write(float4x4{linalg::identity}));
 
             dev.bind_pipeline(wire_pipe);
-            dev.bind_descriptor_set(pipe_layout, 0, per_view_set);
+            dev.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
             dev.bind_descriptor_set(pipe_layout, 1, set);
             dev.bind_vertex_buffer(0, basis_vertex_buffer);
             dev.draw(0, 6);
