@@ -225,7 +225,7 @@ namespace d3d
             spirv_cross::CompilerHLSL compiler(module.spirv);
             compiler.set_options(options);
             const auto hlsl = compiler.compile();
-            //debug_callback(hlsl.c_str());
+            debug_callback(hlsl.c_str());
 
             const char * target = 0;
             switch(module.stage)
@@ -234,7 +234,7 @@ namespace d3d
             case shader_stage::fragment: target = "ps_5_0"; break;
             }
             ID3DBlob * shader_blob, * error_blob;
-            auto hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", target, D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, 0, &shader_blob, &error_blob);
+            auto hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", target, 0, 0, &shader_blob, &error_blob);
             if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
 
             switch(module.stage)

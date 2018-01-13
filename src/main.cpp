@@ -27,7 +27,8 @@ struct camera
 
 struct mesh_vertex
 {
-    float3 position, color;
+    float3 position, color, normal;
+    float2 texcoord;
 };
 
 struct mesh
@@ -43,6 +44,21 @@ mesh make_basis_mesh()
     mesh m;
     m.vertices = {{{0,0,0},{1,0,0}}, {{1,0,0},{1,0,0}}, {{0,0,0},{0,1,0}}, {{0,1,0},{0,1,0}}, {{0,0,0},{0,0,1}}, {{0,0,1},{0,0,1}}};
     m.lines = {{0,1},{2,3},{4,5}};
+    return m;
+}
+
+mesh make_box_mesh(const float3 & color, const float3 & a, const float3 & b)
+{
+    mesh m;
+    m.vertices = {
+        {{a.x,a.y,a.z}, color, {-1,0,0}, {0,0}}, {{a.x,a.y,b.z}, color, {-1,0,0}, {0,1}}, {{a.x,b.y,b.z}, color, {-1,0,0}, {1,1}}, {{a.x,b.y,a.z}, color, {-1,0,0}, {1,0}},
+        {{b.x,b.y,a.z}, color, {+1,0,0}, {0,0}}, {{b.x,b.y,b.z}, color, {+1,0,0}, {0,1}}, {{b.x,a.y,b.z}, color, {+1,0,0}, {1,1}}, {{b.x,a.y,a.z}, color, {+1,0,0}, {1,0}},
+        {{a.x,a.y,a.z}, color, {0,-1,0}, {0,0}}, {{b.x,a.y,a.z}, color, {0,-1,0}, {0,1}}, {{b.x,a.y,b.z}, color, {0,-1,0}, {1,1}}, {{a.x,a.y,b.z}, color, {0,-1,0}, {1,0}},
+        {{a.x,b.y,b.z}, color, {0,+1,0}, {0,0}}, {{b.x,b.y,b.z}, color, {0,+1,0}, {0,1}}, {{b.x,b.y,a.z}, color, {0,+1,0}, {1,1}}, {{a.x,b.y,a.z}, color, {0,+1,0}, {1,0}},
+        {{a.x,a.y,a.z}, color, {0,0,-1}, {0,0}}, {{a.x,b.y,a.z}, color, {0,0,-1}, {0,1}}, {{b.x,b.y,a.z}, color, {0,0,-1}, {1,1}}, {{b.x,a.y,a.z}, color, {0,0,-1}, {1,0}},
+        {{b.x,a.y,b.z}, color, {0,0,+1}, {0,0}}, {{b.x,b.y,b.z}, color, {0,0,+1}, {0,1}}, {{a.x,b.y,b.z}, color, {0,0,+1}, {1,1}}, {{a.x,a.y,b.z}, color, {0,0,+1}, {1,0}},
+    };
+    m.triangles = {{0,1,2},{0,2,3},{4,5,6},{4,6,7},{8,9,10},{8,10,11},{12,13,14},{12,14,15},{16,17,18},{16,18,19},{20,21,22},{20,22,23}};
     return m;
 }
 
@@ -63,26 +79,33 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
 struct common_assets
 {
     coord_system game_coords;
-    mesh basis_mesh;
-    mesh ground_mesh;
+    mesh basis_mesh, ground_mesh, box_mesh;
     shader_module vs, fs;
 
     common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
         shader_compiler compiler;
         vs = compiler.compile(shader_stage::vertex, R"(#version 450
-            layout(set=0,binding=0) uniform PerObject { mat4 transform; } per_object;
+            layout(set=0,binding=0) uniform PerView { mat4 view_proj_matrix; } per_view;
+            layout(set=0,binding=2) uniform PerObject { mat4 model_matrix; } per_object;
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
-            layout(location=0) out vec3 color;
+            layout(location=2) in vec3 v_normal;
+            layout(location=0) out vec3 position;
+            layout(location=1) out vec3 color;
+            layout(location=2) out vec3 normal;
             void main()
             {
-                gl_Position = per_object.transform * vec4(v_position,1);
+                position = (per_object.model_matrix * vec4(v_position,1)).xyz;
                 color = v_color;
+                normal = (per_object.model_matrix * vec4(v_normal,0)).xyz;
+                gl_Position = (per_view.view_proj_matrix * per_object.model_matrix) * vec4(v_position,1);
             }
         )");
         fs = compiler.compile(shader_stage::fragment, R"(#version 450
-            layout(location=0) in vec3 color;
+            layout(location=0) in vec3 position;
+            layout(location=1) in vec3 color;
+            layout(location=2) in vec3 normal;
             layout(location=0) out vec4 f_color;
             void main() { f_color = vec4(color,1); }
         )");
@@ -93,6 +116,7 @@ struct common_assets
 
         basis_mesh = make_basis_mesh();
         ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*5.0f, game_coords(coord_axis::forward)*5.0f);
+        box_mesh = make_box_mesh({1,0,0}, {-1,-1,-1}, {1,1,1});
     }
 };
 
@@ -101,19 +125,20 @@ class device_session
     rhi::device & dev;
     rhi::device_info info;
     rhi::pipeline wire_pipe, solid_pipe;
-    rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer;
+    rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer;
     dynamic_buffer uniform_buffer;
     rhi::window rwindow;
     std::unique_ptr<glfw::window> gwindow;
 public:
     device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : 
         dev{dev}, info{dev.get_info()}, 
-        uniform_buffer{dev, rhi::buffer_usage::uniform, 1024} 
+        uniform_buffer{dev, rhi::buffer_usage::uniform, 16*1024} 
     {
         auto mesh_layout = dev.create_input_layout({
             {0, sizeof(mesh_vertex), {
                 {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
                 {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
+                {2, rhi::attribute_format::float3, offsetof(mesh_vertex, normal)},
             }}
         });
 
@@ -125,9 +150,11 @@ public:
 
         basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
         ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
+        box_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices);
 
         const uint32_t  quad_indices[] {0,1,2, 0,2,3};
         ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
+        box_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.box_mesh.triangles);
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
         GLFWwindow * w;
@@ -147,16 +174,24 @@ public:
 
         dev.begin_render_pass(rwindow);
         {
-            dev.bind_pipeline(wire_pipe);
             dev.bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));
+
+            dev.bind_pipeline(wire_pipe);
+            dev.bind_uniform_buffer(2, uniform_buffer.write(float4x4{linalg::identity}));
             dev.bind_vertex_buffer(0, basis_vertex_buffer);
             dev.draw(0, 6);
 
             dev.bind_pipeline(solid_pipe);
-            dev.bind_uniform_buffer(0, uniform_buffer.write(mul(view_proj_matrix, translation_matrix(cam.coords(coord_axis::down)*0.1f))));
+            dev.bind_uniform_buffer(2, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*1.0f)));
             dev.bind_vertex_buffer(0, ground_vertex_buffer);
             dev.bind_index_buffer(ground_index_buffer);
             dev.draw_indexed(0, 6);
+
+            dev.bind_pipeline(solid_pipe);
+            dev.bind_uniform_buffer(2, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::left)*3.0f)));
+            dev.bind_vertex_buffer(0, box_vertex_buffer);
+            dev.bind_index_buffer(box_index_buffer);
+            dev.draw_indexed(0, 36);
         }
         dev.end_render_pass();
 

@@ -98,6 +98,16 @@ struct BufferRange
 	size_t range;
 };
 
+enum BufferPackingStandard
+{
+	BufferPackingStd140,
+	BufferPackingStd430,
+	BufferPackingStd140EnhancedLayout,
+	BufferPackingStd430EnhancedLayout,
+	BufferPackingHLSLCbuffer,
+	BufferPackingHLSLCbufferPackOffset
+};
+
 class Compiler
 {
 public:
@@ -155,10 +165,11 @@ public:
 
 	// If get_name() is an empty string, get the fallback name which will be used
 	// instead in the disassembled source.
-	virtual const std::string get_fallback_name(uint32_t id) const
-	{
-		return join("_", id);
-	}
+	virtual const std::string get_fallback_name(uint32_t id) const;
+
+	// If get_name() of a Block struct is an empty string, get the fallback name.
+	// This needs to be per-variable as multiple variables can use the same block type.
+	virtual const std::string get_block_fallback_name(uint32_t id) const;
 
 	// Given an OpTypeStruct in ID, obtain the identifier for member number "index".
 	// This may be an empty string.
@@ -197,7 +208,7 @@ public:
 
 	// Returns a vector of which members of a struct are potentially in use by a
 	// SPIR-V shader. The granularity of this analysis is per-member of a struct.
-	// This can be used for Buffer (UBO), BufferBlock (SSBO) and PushConstant blocks.
+	// This can be used for Buffer (UBO), BufferBlock/StorageBuffer (SSBO) and PushConstant blocks.
 	// ID is the Resource::id obtained from get_shader_resources().
 	std::vector<BufferRange> get_active_buffer_ranges(uint32_t id) const;
 
@@ -253,9 +264,25 @@ public:
 	std::vector<std::string> get_entry_points() const;
 	void set_entry_point(const std::string &name);
 
+	// Renames an entry point from old_name to new_name.
+	// If old_name is currently selected as the current entry point, it will continue to be the current entry point,
+	// albeit with a new name.
+	// get_entry_points() is essentially invalidated at this point.
+	void rename_entry_point(const std::string &old_name, const std::string &new_name);
+
 	// Returns the internal data structure for entry points to allow poking around.
 	const SPIREntryPoint &get_entry_point(const std::string &name) const;
 	SPIREntryPoint &get_entry_point(const std::string &name);
+
+	// Some shader languages restrict the names that can be given to entry points, and the
+	// corresponding backend will automatically rename an entry point name, during the call
+	// to compile() if it is illegal. For example, the common entry point name main() is
+	// illegal in MSL, and is renamed to an alternate name by the MSL backend.
+	// Given the original entry point name contained in the SPIR-V, this function returns
+	// the name, as updated by the backend during the call to compile(). If the name is not
+	// illegal, and has not been renamed, or if this function is called before compile(),
+	// this function will simply return the same name.
+	const std::string &get_cleansed_entry_point_name(const std::string &name) const;
 
 	// Query and modify OpExecutionMode.
 	uint64_t get_execution_mode_mask() const;
@@ -267,6 +294,25 @@ public:
 	// For execution modes which do not have arguments, 0 is returned.
 	uint32_t get_execution_mode_argument(spv::ExecutionMode mode, uint32_t index = 0) const;
 	spv::ExecutionModel get_execution_model() const;
+
+	// In SPIR-V, the compute work group size can be represented by a constant vector, in which case
+	// the LocalSize execution mode is ignored.
+	//
+	// This constant vector can be a constant vector, specialization constant vector, or partly specialized constant vector.
+	// To modify and query work group dimensions which are specialization constants, SPIRConstant values must be modified
+	// directly via get_constant() rather than using LocalSize directly. This function will return which constants should be modified.
+	//
+	// To modify dimensions which are *not* specialization constants, set_execution_mode should be used directly.
+	// Arguments to set_execution_mode which are specialization constants are effectively ignored during compilation.
+	// NOTE: This is somewhat different from how SPIR-V works. In SPIR-V, the constant vector will completely replace LocalSize,
+	// while in this interface, LocalSize is only ignored for specialization constants.
+	//
+	// The specialization constant will be written to x, y and z arguments.
+	// If the component is not a specialization constant, a zeroed out struct will be written.
+	// The return value is the constant ID of the builtin WorkGroupSize, but this is not expected to be useful
+	// for most use cases.
+	uint32_t get_work_group_size_specialization_constants(SpecializationConstant &x, SpecializationConstant &y,
+	                                                      SpecializationConstant &z) const;
 
 	// Analyzes all separate image and samplers used from the currently selected entry point,
 	// and re-routes them all to a combined image sampler instead.
@@ -364,6 +410,19 @@ public:
 	// Gets the list of all SPIR-V extensions which were declared in the SPIR-V module.
 	const std::vector<std::string> &get_declared_extensions() const;
 
+	// When declaring buffer blocks in GLSL, the name declared in the GLSL source
+	// might not be the same as the name declared in the SPIR-V module due to naming conflicts.
+	// In this case, SPIRV-Cross needs to find a fallback-name, and it might only
+	// be possible to know this name after compiling to GLSL.
+	// This is particularly important for HLSL input and UAVs which tends to reuse the same block type
+	// for multiple distinct blocks. For these cases it is not possible to modify the name of the type itself
+	// because it might be unique. Instead, you can use this interface to check after compilation which
+	// name was actually used if your input SPIR-V tends to have this problem.
+	// For other names like remapped names for variables, etc, it's generally enough to query the name of the variables
+	// after compiling, block names are an exception to this rule.
+	// ID is the name of a variable as returned by Resource::id, and must be a variable with a Block-like type.
+	std::string get_remapped_declared_block_name(uint32_t id) const;
+
 protected:
 	const uint32_t *stream(const Instruction &instr) const
 	{
@@ -452,6 +511,7 @@ protected:
 	std::unordered_set<uint32_t> loop_merge_targets;
 	std::unordered_set<uint32_t> selection_merge_targets;
 	std::unordered_set<uint32_t> multiselect_merge_targets;
+	std::unordered_map<uint32_t, uint32_t> continue_block_to_loop_header;
 
 	virtual std::string to_name(uint32_t id, bool allow_alias = true) const;
 	bool is_builtin_variable(const SPIRVariable &var) const;
@@ -467,6 +527,7 @@ protected:
 	bool expression_is_lvalue(uint32_t id) const;
 	bool variable_storage_is_aliased(const SPIRVariable &var);
 	SPIRVariable *maybe_get_backing_variable(uint32_t chain);
+	void mark_used_as_array_length(uint32_t id);
 
 	void register_read(uint32_t expr, uint32_t chain, bool forwarded);
 	void register_write(uint32_t chain);
@@ -642,6 +703,7 @@ protected:
 
 	std::unordered_set<uint32_t> forced_temporaries;
 	std::unordered_set<uint32_t> forwarded_temporaries;
+	std::unordered_set<uint32_t> hoisted_temporaries;
 
 	uint64_t active_input_builtins = 0;
 	uint64_t active_output_builtins = 0;
@@ -681,6 +743,7 @@ protected:
 
 	std::vector<spv::Capability> declared_capabilities;
 	std::vector<std::string> declared_extensions;
+	std::unordered_map<uint32_t, std::string> declared_block_names;
 };
 }
 
