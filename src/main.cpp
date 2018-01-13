@@ -244,7 +244,7 @@ int main(int argc, const char * argv[]) try
     auto dev = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
     device_session session {assets, *dev, {100,100}};
 
-    auto dev2 = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
+    auto dev2 = create_d3d11_device([](const char * message) { std::cerr << message << std::endl; });
     device_session session2 {assets, *dev2, {700,100}};
 
     double2 last_cursor;

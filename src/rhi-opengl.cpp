@@ -44,13 +44,7 @@ namespace gl
             glBindVertexArray(vertex_array);
         }
     };
-
-    struct shader
-    {
-        shader_module module;
-        //GLuint shader_object;
-    };
-
+    
     struct pipeline
     {
         rhi::pipeline_desc desc;
@@ -71,7 +65,7 @@ namespace gl
 
         descriptor_set_emulator desc_emulator;
         object_set<rhi::input_layout, input_layout> input_layouts;
-        object_set<rhi::shader, shader> shaders;
+        object_set<rhi::shader, shader_module> shaders;
         object_set<rhi::pipeline, pipeline> pipelines;
         object_set<rhi::buffer, buffer> buffers;
         object_set<rhi::window, window> windows;
@@ -147,7 +141,7 @@ namespace gl
         rhi::shader create_shader(const shader_module & module) override
         {
             auto [handle, shader] = shaders.create();
-            shader.module = module;
+            shader = module;
             return handle;
         }
 
@@ -158,7 +152,7 @@ namespace gl
             for(auto s : desc.stages)
             {
                 auto & shader = shaders[s];
-                spirv_cross::CompilerGLSL compiler(shader.module.spirv);
+                spirv_cross::CompilerGLSL compiler(shader.spirv);
 	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	            for (auto & resource : resources.uniform_buffers)
 	            {
@@ -172,11 +166,11 @@ namespace gl
                 const auto glsl = compiler.compile();
                 const GLchar * source = glsl.c_str();
                 GLint length = glsl.length();
-                debug_callback(source);
+                //debug_callback(source);
 
                 GLuint shader_object = glCreateShader([&shader]() 
                 {
-                    switch(shader.module.stage)
+                    switch(shader.stage)
                     {
                     case shader_stage::vertex: return GL_VERTEX_SHADER;
                     case shader_stage::fragment: return GL_FRAGMENT_SHADER;

@@ -31,12 +31,6 @@ namespace d3d
         std::vector<D3D11_INPUT_ELEMENT_DESC> input_descs;        
     };
 
-    struct shader
-    {
-        ID3DBlob * blob;
-        std::variant<ID3D11VertexShader *, ID3D11PixelShader *> shader_object;
-    };
-
     struct pipeline
     {
         rhi::pipeline_desc desc;
@@ -69,7 +63,7 @@ namespace d3d
 
         descriptor_set_emulator desc_emulator;
         object_set<rhi::input_layout, input_layout> input_layouts;
-        object_set<rhi::shader, shader> shaders;
+        object_set<rhi::shader, shader_module> shaders;
         object_set<rhi::pipeline, pipeline> pipelines;
         object_set<rhi::buffer, buffer> buffers;
         object_set<rhi::window, window> windows;
@@ -219,57 +213,60 @@ namespace d3d
             return handle;
         }
 
-        template<class T> rhi::shader create_shader(ID3DBlob * blob, HRESULT (__stdcall ID3D11Device::*create_func)(const void *, SIZE_T, ID3D11ClassLinkage *, T **))
-        {
-            T * s;
-            auto hr = (dev->*create_func)(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, &s);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::Create...Shader(...) failed");
 
-            auto [handle, shader] = shaders.create();
-            shader.blob = blob;
-            shader.shader_object = s;
-            return handle;
-        }
 
         rhi::shader create_shader(const shader_module & module) override
         {
-            spirv_cross::CompilerHLSL::Options options;
-            options.shader_model = 50;
-            spirv_cross::CompilerHLSL compiler(module.spirv);
-            compiler.set_options(options);
-            const auto hlsl = compiler.compile();
-            //debug_callback(hlsl.c_str());
-
-            const char * target = 0;
-            switch(module.stage)
-            {
-            case shader_stage::vertex: target = "vs_5_0"; break;
-            case shader_stage::fragment: target = "ps_5_0"; break;
-            }
-            ID3DBlob * shader_blob, * error_blob;
-            auto hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", target, 0, 0, &shader_blob, &error_blob);
-            if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
-
-            switch(module.stage)
-            {
-            case shader_stage::vertex: return create_shader(shader_blob, &ID3D11Device::CreateVertexShader);
-            case shader_stage::fragment: return create_shader(shader_blob, &ID3D11Device::CreatePixelShader);
-            default: throw std::logic_error("invalid shader_stage");
-            }
+            auto [handle, shader] = shaders.create();
+            shader = module;
+            return handle;
         }
 
         rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
+            auto & pipe_layout = desc_emulator.pipeline_layouts[desc.layout];
+            const auto & input_descs = input_layouts[desc.input].input_descs;
             auto [handle, pipeline] = pipelines.create();
             pipeline.desc = desc;
-            for(auto s : desc.stages) 
+            for(auto & s : desc.stages)
             {
-                std::visit([&pipeline](auto * s) { pipeline.set_shader(s); }, shaders[s].shader_object);
-                if(std::holds_alternative<ID3D11VertexShader*>(shaders[s].shader_object))
+                auto & shader = shaders[s];
+
+                // Compile SPIR-V to HLSL
+                spirv_cross::CompilerHLSL compiler(shader.spirv);
+	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+	            for (auto & resource : resources.uniform_buffers)
+	            {
+		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
+		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);	            
+                    auto & set_layout = desc_emulator.descriptor_set_layouts[pipe_layout.sets[set]];
+		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, pipe_layout.buffer_offsets[set] + set_layout.offsets[(int)binding]);
+	            }
+                spirv_cross::CompilerHLSL::Options options;
+                options.shader_model = 50;
+                compiler.set_options(options);
+                const auto hlsl = compiler.compile();
+                debug_callback(hlsl.c_str());
+
+                // Compile HLSL and create shader stages and input layout
+                HRESULT hr;
+                ID3DBlob * shader_blob, * error_blob;
+                switch(shader.stage)
                 {
-                    const auto & input_descs = input_layouts[desc.input].input_descs;
-                    auto hr = dev->CreateInputLayout(input_descs.data(), input_descs.size(), shaders[s].blob->GetBufferPointer(), shaders[s].blob->GetBufferSize(), &pipeline.layout);
+                case shader_stage::vertex: 
+                    hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &shader_blob, &error_blob);
+                    if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
+                    dev->CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipeline.vs);
+                    hr = dev->CreateInputLayout(input_descs.data(), input_descs.size(), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), &pipeline.layout);
                     if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateInputLayout(...) failed");
+                    break;
+                case shader_stage::fragment:
+                    hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &shader_blob, &error_blob);
+                    if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
+                    dev->CreatePixelShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipeline.ps);
+                    break;
+                default: throw std::logic_error("invalid shader_stage");
                 }
             }
             return handle;
