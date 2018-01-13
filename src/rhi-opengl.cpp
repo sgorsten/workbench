@@ -47,7 +47,8 @@ namespace gl
 
     struct shader
     {
-        GLuint shader_object;
+        shader_module module;
+        //GLuint shader_object;
     };
 
     struct pipeline
@@ -68,6 +69,7 @@ namespace gl
         pipeline * current_pipeline=0;
         size_t index_buffer_offset=0;
 
+        descriptor_set_emulator desc_emulator;
         object_set<rhi::input_layout, input_layout> input_layouts;
         object_set<rhi::shader, shader> shaders;
         object_set<rhi::pipeline, pipeline> pipelines;
@@ -128,50 +130,74 @@ namespace gl
             return {handle, window.w};
         }
 
+        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
+        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
+        rhi::descriptor_pool create_descriptor_pool() { return desc_emulator.create_descriptor_pool(); }
+        void reset_descriptor_pool(rhi::descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
+        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
+        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
+
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            auto [handle, input_layout] = input_layouts.create();
-            input_layout.bindings = bindings;
+            auto [handle, layout] = input_layouts.create();
+            layout.bindings = bindings;
             return handle;
         }
 
         rhi::shader create_shader(const shader_module & module) override
         {
             auto [handle, shader] = shaders.create();
-
-            spirv_cross::CompilerGLSL compiler(module.spirv);
-            const auto glsl = compiler.compile();
-            const GLchar * source = glsl.c_str();
-            GLint length = glsl.length();
-
-            shader.shader_object = glCreateShader([&module]() 
-            {
-                switch(module.stage)
-                {
-                case shader_stage::vertex: return GL_VERTEX_SHADER;
-                case shader_stage::fragment: return GL_FRAGMENT_SHADER;
-                default: throw std::logic_error("unsupported shader_stage");
-                }
-            }());
-            glShaderSource(shader.shader_object, 1, &source, &length);
-            glCompileShader(shader.shader_object);
-
-            GLint status;
-            glGetShaderiv(shader.shader_object, GL_COMPILE_STATUS, &status);
-            if(status == GL_FALSE)
-            {
-                glGetShaderiv(shader.shader_object, GL_INFO_LOG_LENGTH, &length);
-                std::vector<char> buffer(length);
-                glGetShaderInfoLog(shader.shader_object, buffer.size(), &length, buffer.data());
-                throw std::runtime_error(buffer.data());
-            }
+            shader.module = module;
             return handle;
         }
 
         rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
+            auto & pipe_layout = desc_emulator.pipeline_layouts[desc.layout];
             auto program = glCreateProgram();
-            for(auto shader : desc.stages) glAttachShader(program, shaders[shader].shader_object);
+            for(auto s : desc.stages)
+            {
+                auto & shader = shaders[s];
+                spirv_cross::CompilerGLSL compiler(shader.module.spirv);
+	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
+	            for (auto & resource : resources.uniform_buffers)
+	            {
+		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
+		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);	            
+                    auto & set_layout = desc_emulator.descriptor_set_layouts[pipe_layout.sets[set]];
+		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, pipe_layout.buffer_offsets[set] + set_layout.offsets[(int)binding]);
+	            }
+
+                const auto glsl = compiler.compile();
+                const GLchar * source = glsl.c_str();
+                GLint length = glsl.length();
+                debug_callback(source);
+
+                GLuint shader_object = glCreateShader([&shader]() 
+                {
+                    switch(shader.module.stage)
+                    {
+                    case shader_stage::vertex: return GL_VERTEX_SHADER;
+                    case shader_stage::fragment: return GL_FRAGMENT_SHADER;
+                    default: throw std::logic_error("unsupported shader_stage");
+                    }
+                }());
+                glShaderSource(shader_object, 1, &source, &length);
+                glCompileShader(shader_object);
+
+                GLint status;
+                glGetShaderiv(shader_object, GL_COMPILE_STATUS, &status);
+                if(status == GL_FALSE)
+                {
+                    glGetShaderiv(shader_object, GL_INFO_LOG_LENGTH, &length);
+                    std::vector<char> buffer(length);
+                    glGetShaderInfoLog(shader_object, buffer.size(), &length, buffer.data());
+                    throw std::runtime_error(buffer.data());
+                }
+            
+                glAttachShader(program, shader_object);
+            }
             glLinkProgram(program);
 
             GLint status, length;
@@ -220,6 +246,11 @@ namespace gl
             glDepthFunc(GL_NEVER | static_cast<int>(current_pipeline->desc.depth_test));
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
+        }
+
+        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
+        {
+            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range) { bind_uniform_buffer(index, range); });
         }
 
         void bind_uniform_buffer(int index, rhi::buffer_range range) override

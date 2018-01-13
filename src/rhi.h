@@ -19,11 +19,19 @@ namespace rhi
     template<class T> bool operator != (const handle<T> & a, const handle<T> & b) { return a.id != b.id; }
 
     // Object types
+    using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
+    using pipeline_layout = handle<struct pipeline_layout_tag>;
+    using descriptor_pool = handle<struct descriptor_pool_tag>;
+    using descriptor_set = handle<struct descriptor_set_tag>;
     using input_layout = handle<struct input_layout_tag>;
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;
     using buffer = handle<struct buffer_tag>;
     using window = handle<struct window_tag>;
+
+    // Descriptor set layout creation info
+    enum class descriptor_type { combined_image_sampler, uniform_buffer };
+    struct descriptor_binding { int index; descriptor_type type; int count; };
 
     // Input layout creation info
     enum class attribute_format { float1, float2, float3, float4 };
@@ -35,6 +43,7 @@ namespace rhi
     enum class compare_op { never, less, equal, less_or_equal, greater, not_equal, greater_or_equal, always };
     struct pipeline_desc
     {
+        pipeline_layout layout;             // descriptors
         input_layout input;                 // input state
         std::vector<shader> stages;         // programmable stages
         primitive_topology topology;        // rasterizer state
@@ -58,14 +67,22 @@ namespace rhi
     {
         virtual auto get_info() const -> device_info = 0;
 
+        virtual auto create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) -> descriptor_set_layout = 0;
+        virtual auto create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) -> pipeline_layout = 0;
+        virtual auto create_descriptor_pool() -> descriptor_pool = 0;
         virtual auto create_input_layout(const std::vector<vertex_binding_desc> & bindings) -> input_layout = 0;
         virtual auto create_shader(const shader_module & module) -> shader = 0;
         virtual auto create_pipeline(const pipeline_desc & desc) -> pipeline = 0;
         virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
         virtual auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<window, GLFWwindow *> = 0;
 
+        virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
+        virtual auto alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) -> descriptor_set = 0;
+        virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
+
         virtual void begin_render_pass(window window) = 0;
         virtual void bind_pipeline(pipeline pipe) = 0;
+        virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
         virtual void bind_uniform_buffer(int index, buffer_range range) = 0;
         virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
         virtual void bind_index_buffer(buffer_range range) = 0;

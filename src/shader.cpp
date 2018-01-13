@@ -162,7 +162,7 @@ struct spirv_parser
             }
         }
         if(type.op == spv::OpTypeSampledImage) return get_type(type.contents[0], matrix_layout);
-        if(type.op == spv::OpTypeArray) return {shader_module::array{std::make_unique<shader_module::type>(get_type(type.contents[0], matrix_layout)), get_array_length(type.contents[1]), meta.get_decoration(spv::DecorationArrayStride)}};
+        if(type.op == spv::OpTypeArray) return {shader_module::array{shader_module::type(get_type(type.contents[0], matrix_layout)), get_array_length(type.contents[1]), meta.get_decoration(spv::DecorationArrayStride)}};
         if(type.op == spv::OpTypeStruct)
         {
             shader_module::structure s {meta.name};
@@ -173,7 +173,7 @@ struct spirv_parser
                 auto & member_meta = meta.members[i];
                 std::optional<shader_module::matrix_layout> matrix_layout;
                 if(auto stride = member_meta.get_decoration(spv::DecorationMatrixStride)) matrix_layout = shader_module::matrix_layout{*stride, member_meta.has_decoration(spv::DecorationRowMajor)};
-                s.members.push_back({member_meta.name, std::make_unique<shader_module::type>(get_type(type.contents[i], matrix_layout)), member_meta.get_decoration(spv::DecorationOffset)});
+                s.members.push_back({member_meta.name, shader_module::type(get_type(type.contents[i], matrix_layout)), member_meta.get_decoration(spv::DecorationOffset)});
             }
             return {std::move(s)};
         }

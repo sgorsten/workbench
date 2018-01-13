@@ -20,6 +20,11 @@ namespace d3d
         char * mapped = 0;
     };
 
+    struct descriptor_set_layout
+    {
+        std::vector<rhi::descriptor_binding> bindings;
+    };
+
     struct input_layout
     {
         std::vector<rhi::vertex_binding_desc> bindings;
@@ -62,6 +67,7 @@ namespace d3d
         IDXGIFactory * factory;
         ID3D11RasterizerState * rasterizer_state;
 
+        descriptor_set_emulator desc_emulator;
         object_set<rhi::input_layout, input_layout> input_layouts;
         object_set<rhi::shader, shader> shaders;
         object_set<rhi::pipeline, pipeline> pipelines;
@@ -184,6 +190,13 @@ namespace d3d
             return {handle, buffer.mapped};
         }
 
+        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
+        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
+        rhi::descriptor_pool create_descriptor_pool() { return desc_emulator.create_descriptor_pool(); }
+        void reset_descriptor_pool(rhi::descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
+        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
+        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
+
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
             auto [handle, input_layout] = input_layouts.create();
@@ -225,7 +238,7 @@ namespace d3d
             spirv_cross::CompilerHLSL compiler(module.spirv);
             compiler.set_options(options);
             const auto hlsl = compiler.compile();
-            debug_callback(hlsl.c_str());
+            //debug_callback(hlsl.c_str());
 
             const char * target = 0;
             switch(module.stage)
@@ -288,6 +301,11 @@ namespace d3d
             case rhi::primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
             case rhi::primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
             }
+        }
+
+        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
+        {
+            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range) { bind_uniform_buffer(index, range); });
         }
 
         void bind_uniform_buffer(int index, rhi::buffer_range range) override

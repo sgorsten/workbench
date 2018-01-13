@@ -8,16 +8,33 @@
 enum class shader_stage { vertex, fragment };
 enum class sampler_dim { _1d, _2d, _3d, cube, rect, buffer, subpass_data };
 
+template<class T> class indirect
+{
+    std::unique_ptr<T> value;
+public:
+    indirect() : value{std::make_unique<T>()} {}
+    indirect(const T & r) : value{std::make_unique<T>(r)} {}
+    indirect(const indirect & r) : value{std::make_unique<T>(*r.value)} {}
+
+    indirect & operator = (const T & r) { value = std::make_unique<T>(r); return *this; }
+    indirect & operator = (const indirect & r) { value = std::make_unique<T>(*r.value); return *this; }
+
+    T & operator * () { return *value; }
+    T * operator -> () { return value.get(); }
+    const T & operator * () const { return *value; }
+    const T * operator -> () const { return value.get(); }
+};
+
 // Reflection information for a single shader
 struct shader_module
 {
     enum scalar_type { uint_, int_, float_, double_ };
     struct type;
     struct matrix_layout { uint32_t stride; bool row_major; };
-    struct structure_member { std::string name; std::unique_ptr<const type> type; std::optional<uint32_t> offset; };   
+    struct structure_member { std::string name; indirect<type> type; std::optional<uint32_t> offset; };   
     struct sampler { scalar_type channel; sampler_dim dim; bool arrayed, multisampled, shadow; };
     struct numeric { scalar_type scalar; uint32_t row_count, column_count; std::optional<matrix_layout> matrix_layout; };
-    struct array { std::unique_ptr<const type> element; uint32_t length; std::optional<uint32_t> stride; };
+    struct array { indirect<type> element; uint32_t length; std::optional<uint32_t> stride; };
     struct structure { std::string name; std::vector<structure_member> members; };
     struct type { std::variant<sampler, numeric, array, structure> contents; };
     struct interface { uint32_t location; std::string name; type type; };

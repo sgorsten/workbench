@@ -87,7 +87,7 @@ struct common_assets
         shader_compiler compiler;
         vs = compiler.compile(shader_stage::vertex, R"(#version 450
             layout(set=0,binding=0) uniform PerView { mat4 view_proj_matrix; } per_view;
-            layout(set=0,binding=2) uniform PerObject { mat4 model_matrix; } per_object;
+            layout(set=1,binding=0) uniform PerObject { mat4 model_matrix; } per_object;
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
             layout(location=2) in vec3 v_normal;
@@ -124,9 +124,14 @@ class device_session
 {
     rhi::device & dev;
     rhi::device_info info;
+    dynamic_buffer uniform_buffer;
+    rhi::descriptor_pool desc_pool;
+
+    rhi::descriptor_set_layout per_view_layout, per_object_layout;
+    rhi::pipeline_layout pipe_layout;    
     rhi::pipeline wire_pipe, solid_pipe;
     rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer;
-    dynamic_buffer uniform_buffer;
+    
     rhi::window rwindow;
     std::unique_ptr<glfw::window> gwindow;
 public:
@@ -134,6 +139,8 @@ public:
         dev{dev}, info{dev.get_info()}, 
         uniform_buffer{dev, rhi::buffer_usage::uniform, 16*1024} 
     {
+        desc_pool = dev.create_descriptor_pool();
+
         auto mesh_layout = dev.create_input_layout({
             {0, sizeof(mesh_vertex), {
                 {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
@@ -145,14 +152,18 @@ public:
         auto vs = dev.create_shader(assets.vs);
         auto fs = dev.create_shader(assets.fs);
 
-        wire_pipe = dev.create_pipeline({mesh_layout, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
-        solid_pipe = dev.create_pipeline({mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+        per_view_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
+        per_object_layout = dev.create_descriptor_set_layout({{1, rhi::descriptor_type::uniform_buffer, 1}});
+        pipe_layout = dev.create_pipeline_layout({per_view_layout, per_object_layout});
+
+        wire_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});
+        solid_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
         basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
         ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
         box_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices);
 
-        const uint32_t  quad_indices[] {0,1,2, 0,2,3};
+        const uint32_t quad_indices[] {0,1,2, 0,2,3};
         ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, quad_indices);
         box_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.box_mesh.triangles);
 
@@ -172,23 +183,35 @@ public:
         const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
         uniform_buffer.reset();
 
+        dev.reset_descriptor_pool(desc_pool);
+        auto per_view_set = dev.alloc_descriptor_set(desc_pool, per_view_layout);
+        dev.write_descriptor(per_view_set, 0, uniform_buffer.write(view_proj_matrix));
+
         dev.begin_render_pass(rwindow);
         {
-            dev.bind_uniform_buffer(0, uniform_buffer.write(view_proj_matrix));
+            auto set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
+            dev.write_descriptor(set, 0, uniform_buffer.write(float4x4{linalg::identity}));
 
             dev.bind_pipeline(wire_pipe);
-            dev.bind_uniform_buffer(2, uniform_buffer.write(float4x4{linalg::identity}));
+            dev.bind_descriptor_set(pipe_layout, 0, per_view_set);
+            dev.bind_descriptor_set(pipe_layout, 1, set);
             dev.bind_vertex_buffer(0, basis_vertex_buffer);
             dev.draw(0, 6);
 
+            set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
+            dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*1.0f)));
+
             dev.bind_pipeline(solid_pipe);
-            dev.bind_uniform_buffer(2, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*1.0f)));
+            dev.bind_descriptor_set(pipe_layout, 1, set);
             dev.bind_vertex_buffer(0, ground_vertex_buffer);
             dev.bind_index_buffer(ground_index_buffer);
             dev.draw_indexed(0, 6);
 
+            set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
+            dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::left)*3.0f)));
+
             dev.bind_pipeline(solid_pipe);
-            dev.bind_uniform_buffer(2, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::left)*3.0f)));
+            dev.bind_descriptor_set(pipe_layout, 1, set);
             dev.bind_vertex_buffer(0, box_vertex_buffer);
             dev.bind_index_buffer(box_index_buffer);
             dev.draw_indexed(0, 36);
@@ -221,7 +244,7 @@ int main(int argc, const char * argv[]) try
     auto dev = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
     device_session session {assets, *dev, {100,100}};
 
-    auto dev2 = create_d3d11_device([](const char * message) { std::cerr << message << std::endl; });
+    auto dev2 = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
     device_session session2 {assets, *dev2, {700,100}};
 
     double2 last_cursor;
