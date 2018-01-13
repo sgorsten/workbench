@@ -139,6 +139,12 @@ namespace vk
         std::vector<rhi::vertex_binding_desc> bindings;
     };
 
+    struct shader
+    {
+        VkShaderModule module;
+        shader_stage stage;
+    };
+
     struct pipeline
     {
         rhi::pipeline_desc desc;
@@ -197,7 +203,7 @@ namespace vk
         object_set<rhi::descriptor_pool, VkDescriptorPool> descriptor_pools;
         object_set<rhi::descriptor_set, VkDescriptorSet> descriptor_sets;
         object_set<rhi::input_layout, input_layout> input_layouts;
-        object_set<rhi::shader, shader_module> shaders;
+        object_set<rhi::shader, shader> shaders;
         object_set<rhi::pipeline, pipeline> pipelines;
         object_set<rhi::buffer, buffer> buffers;
         object_set<rhi::window, window> windows;
@@ -214,12 +220,80 @@ namespace vk
 
         std::tuple<rhi::window, GLFWwindow *> create_window(const int2 & dimensions, std::string_view title) override;
 
-        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override { return {}; }
-        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override { return {}; }
-        rhi::descriptor_pool create_descriptor_pool() { return {}; }
-        void reset_descriptor_pool(rhi::descriptor_pool pool) {}
-        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) { return {}; }
-        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) {}
+        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override 
+        { 
+            std::vector<VkDescriptorSetLayoutBinding> set_bindings(bindings.size());
+            for(size_t i=0; i<bindings.size(); ++i)
+            {
+                set_bindings[i].binding = bindings[i].index;
+                switch(bindings[i].type)
+                {
+                case rhi::descriptor_type::combined_image_sampler: set_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; break;
+                case rhi::descriptor_type::uniform_buffer: set_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; break;
+                }
+                set_bindings[i].descriptorCount = bindings[i].count;
+                set_bindings[i].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
+            }
+        
+            VkDescriptorSetLayoutCreateInfo create_info {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+            create_info.bindingCount = set_bindings.size();
+            create_info.pBindings = set_bindings.data();
+
+            auto [handle, layout] = descriptor_set_layouts.create();
+            check(vkCreateDescriptorSetLayout(dev, &create_info, nullptr, &layout));
+            return handle;
+        }
+
+        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override 
+        { 
+            std::vector<VkDescriptorSetLayout> set_layouts;
+            for(auto s : sets) set_layouts.push_back(descriptor_set_layouts[s]);
+
+            VkPipelineLayoutCreateInfo create_info {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            create_info.setLayoutCount = set_layouts.size();
+            create_info.pSetLayouts = set_layouts.data();
+
+            auto [handle, layout] = pipeline_layouts.create();
+            check(vkCreatePipelineLayout(dev, &create_info, nullptr, &layout));
+            return handle;
+        }
+
+        rhi::descriptor_pool create_descriptor_pool() 
+        { 
+            auto [handle, pool] = descriptor_pools.create();
+            const VkDescriptorPoolSize pool_sizes[] {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1024}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1024}};
+            VkDescriptorPoolCreateInfo descriptor_pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            descriptor_pool_info.poolSizeCount = 2;
+            descriptor_pool_info.pPoolSizes = pool_sizes;
+            descriptor_pool_info.maxSets = 1024;
+            descriptor_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+            check(vkCreateDescriptorPool(dev, &descriptor_pool_info, nullptr, &pool));
+            return handle;
+        }
+        void reset_descriptor_pool(rhi::descriptor_pool pool) 
+        {
+            vkResetDescriptorPool(dev, descriptor_pools[pool], 0);
+        }
+        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) 
+        { 
+             auto & p = descriptor_pools[pool];
+
+            VkDescriptorSetAllocateInfo alloc_info {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            alloc_info.descriptorPool = p;
+            alloc_info.descriptorSetCount = 1;
+            alloc_info.pSetLayouts = &descriptor_set_layouts[layout];
+
+            auto [handle, set] = descriptor_sets.create();
+            check(vkAllocateDescriptorSets(dev, &alloc_info, &set));
+            //p.descriptor_sets.push_back(descriptor_set);
+            return handle;
+        }
+        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) 
+        {
+            VkDescriptorBufferInfo buffer_info { buffers[range.buffer].buffer_object, range.offset, range.size };
+            VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor_sets[set], binding, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
+            vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
+        }
 
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
@@ -230,8 +304,12 @@ namespace vk
 
         rhi::shader create_shader(const shader_module & module) override
         {
+            VkShaderModuleCreateInfo create_info {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            create_info.codeSize = module.spirv.size() * sizeof(uint32_t);
+            create_info.pCode = module.spirv.data();
             auto [handle, shader] = shaders.create();
-            shader = module;
+            check(vkCreateShaderModule(dev, &create_info, nullptr, &shader.module));
+            shader.stage = module.stage;
             return handle;
         }
 
@@ -239,6 +317,121 @@ namespace vk
         {
             auto [handle, pipeline] = pipelines.create();
             pipeline.desc = desc;
+            //return handle;
+
+            VkPipelineInputAssemblyStateCreateInfo inputAssembly {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+            switch(desc.topology)
+            {
+            case rhi::primitive_topology::points: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
+            case rhi::primitive_topology::lines: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
+            case rhi::primitive_topology::triangles: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
+            }
+            inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+            const VkViewport viewport {};
+            const VkRect2D scissor {};
+            VkPipelineViewportStateCreateInfo viewportState {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+            viewportState.viewportCount = 1;
+            viewportState.pViewports = &viewport;
+            viewportState.scissorCount = 1;
+            viewportState.pScissors = &scissor;
+
+            VkPipelineRasterizationStateCreateInfo rasterizer {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+            rasterizer.depthClampEnable = VK_FALSE;
+            rasterizer.rasterizerDiscardEnable = VK_FALSE;
+            rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+            rasterizer.lineWidth = 1.0f;
+            rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+            rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            rasterizer.depthBiasEnable = VK_FALSE;
+            rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+            rasterizer.depthBiasClamp = 0.0f; // Optional
+            rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
+
+            VkPipelineMultisampleStateCreateInfo multisampling {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+            multisampling.sampleShadingEnable = VK_FALSE;
+            multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            multisampling.minSampleShading = 1.0f; // Optional
+            multisampling.pSampleMask = nullptr; /// Optional
+            multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+            multisampling.alphaToOneEnable = VK_FALSE; // Optional
+
+            VkPipelineColorBlendAttachmentState colorBlendAttachment {};
+            VkPipelineColorBlendStateCreateInfo colorBlending {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+            colorBlending.logicOpEnable = VK_FALSE;
+            colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
+            if(true) //render_pass.has_color_attachments())
+            {
+                colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                colorBlendAttachment.blendEnable = VK_FALSE;
+                colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+                colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+                colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+                colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+                colorBlending.attachmentCount = 1;
+                colorBlending.pAttachments = &colorBlendAttachment;
+            }
+            colorBlending.blendConstants[0] = 0.0f; // Optional
+            colorBlending.blendConstants[1] = 0.0f; // Optional
+            colorBlending.blendConstants[2] = 0.0f; // Optional
+            colorBlending.blendConstants[3] = 0.0f; // Optional
+
+            const VkDynamicState dynamic_states[] {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+            VkPipelineDynamicStateCreateInfo dynamicState {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+            dynamicState.dynamicStateCount = 2;
+            dynamicState.pDynamicStates = dynamic_states;
+
+            VkPipelineDepthStencilStateCreateInfo depth_stencil_state {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+            depth_stencil_state.depthWriteEnable = VK_FALSE;
+            depth_stencil_state.depthTestEnable = VK_FALSE;
+            depth_stencil_state.depthCompareOp = VK_COMPARE_OP_LESS;
+
+            // TODO: Fix this
+            VkPipelineShaderStageCreateInfo stages[2] 
+            {
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, shaders[desc.stages[0]].module, "main"},
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, shaders[desc.stages[1]].module, "main"},
+            };
+            
+            std::vector<VkVertexInputBindingDescription> bindings;
+            std::vector<VkVertexInputAttributeDescription> attributes;
+            for(auto & b : input_layouts[desc.input].bindings)
+            {
+                bindings.push_back({(uint32_t)b.index, (uint32_t)b.stride, VK_VERTEX_INPUT_RATE_VERTEX});
+                for(auto & a : b.attributes)
+                {
+                    switch(a.type)
+                    {
+                    case rhi::attribute_format::float1: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32_SFLOAT, (uint32_t)a.offset}); break;
+                    case rhi::attribute_format::float2: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32_SFLOAT, (uint32_t)a.offset}); break;
+                    case rhi::attribute_format::float3: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32_SFLOAT, (uint32_t)a.offset}); break;
+                    case rhi::attribute_format::float4: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32A32_SFLOAT, (uint32_t)a.offset}); break;
+                    }
+                }
+            }
+            VkPipelineVertexInputStateCreateInfo vertex_input_state {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, nullptr, 0, bindings.size(), bindings.data(), attributes.size(), attributes.data()};
+
+            VkGraphicsPipelineCreateInfo pipelineInfo {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            pipelineInfo.stageCount = 2; //stages.size;
+            pipelineInfo.pStages = stages;
+            pipelineInfo.pVertexInputState = &vertex_input_state;
+            pipelineInfo.pInputAssemblyState = &inputAssembly;
+            pipelineInfo.pViewportState = &viewportState;
+            pipelineInfo.pRasterizationState = &rasterizer;
+            pipelineInfo.pMultisampleState = &multisampling;
+            pipelineInfo.pDepthStencilState = &depth_stencil_state;
+            pipelineInfo.pColorBlendState = &colorBlending;
+            pipelineInfo.pDynamicState = &dynamicState;
+            pipelineInfo.layout = pipeline_layouts[desc.layout];
+            pipelineInfo.renderPass = windows[rhi::window{1}].render_pass;
+            pipelineInfo.subpass = 0;
+            pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+            pipelineInfo.basePipelineIndex = -1; // Optional
+
+            check(vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline.pipeline_object));
             return handle;
         }
 
@@ -252,12 +445,12 @@ namespace vk
             auto & fb = win.swapchain_framebuffer;
             check(vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
 
-            VkClearValue clear_values[] {{0, 0, 0, 1}, {1.0f, 0}};
+            VkClearValue clear_values[] {{0, 0, 0, 1}}; //, {1.0f, 0}};
             VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
             pass_begin_info.renderPass = windows[window].render_pass;//objects[render_pass];
             pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
             pass_begin_info.renderArea = {{0,0},{(uint32_t)fb.dims.x,(uint32_t)fb.dims.y}};
-            pass_begin_info.clearValueCount = 2; //narrow(countof(clear_values));
+            pass_begin_info.clearValueCount = 1; //narrow(countof(clear_values));
             pass_begin_info.pClearValues = clear_values;
 
             cmd = begin_transient();
@@ -270,32 +463,33 @@ namespace vk
 
         void bind_pipeline(rhi::pipeline pipe) override
         {
-
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[pipe].pipeline_object);
         }
 
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
         {
-
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layouts[layout], set_index, 1, &descriptor_sets[set], 0, nullptr);
         }
 
         void bind_vertex_buffer(int index, rhi::buffer_range range) override
         {
-    
+            VkDeviceSize offset = range.offset;
+            vkCmdBindVertexBuffers(cmd, index, 1, &buffers[range.buffer].buffer_object, &offset);
         }
 
         void bind_index_buffer(rhi::buffer_range range) override
         {
-
+            vkCmdBindIndexBuffer(cmd, buffers[range.buffer].buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
         }
 
         void draw(int first_vertex, int vertex_count) override
         {
-
+            vkCmdDraw(cmd, vertex_count, 1, first_vertex, 0);
         }
 
         void draw_indexed(int first_index, int index_count) override
         {
-
+            vkCmdDrawIndexed(cmd, index_count, 1, first_index, 0, 0);
         }
 
         void end_render_pass() override

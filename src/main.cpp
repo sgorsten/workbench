@@ -176,6 +176,12 @@ public:
         per_object_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
         pipe_layout = dev.create_pipeline_layout({per_scene_view_layout, per_object_layout});
 
+        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
+        GLFWwindow * w;
+        std::tie(rwindow, w) = dev.create_window({512,512}, ss.str());
+        gwindow = std::make_unique<glfw::window>(w);
+        gwindow->set_pos(window_pos);
+
         wire_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
         solid_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
@@ -186,11 +192,7 @@ public:
         ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.ground_mesh.triangles);
         box_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.box_mesh.triangles);
 
-        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
-        GLFWwindow * w;
-        std::tie(rwindow, w) = dev.create_window({512,512}, ss.str());
-        gwindow = std::make_unique<glfw::window>(w);
-        gwindow->set_pos(window_pos);
+
     }
 
     glfw::window & get_window() { return *gwindow; }
