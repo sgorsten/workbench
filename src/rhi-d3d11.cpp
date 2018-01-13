@@ -224,7 +224,6 @@ namespace d3d
 
         rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
-            auto & pipe_layout = desc_emulator.pipeline_layouts[desc.layout];
             const auto & input_descs = input_layouts[desc.input].input_descs;
             auto [handle, pipeline] = pipelines.create();
             pipeline.desc = desc;
@@ -235,13 +234,12 @@ namespace d3d
                 // Compile SPIR-V to HLSL
                 spirv_cross::CompilerHLSL compiler(shader.spirv);
 	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
-	            for (auto & resource : resources.uniform_buffers)
+	            for(auto & resource : resources.uniform_buffers)
 	            {
 		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);	            
-                    auto & set_layout = desc_emulator.descriptor_set_layouts[pipe_layout.sets[set]];
+		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
 		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
-		            compiler.set_decoration(resource.id, spv::DecorationBinding, pipe_layout.buffer_offsets[set] + set_layout.offsets[(int)binding]);
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, desc_emulator.get_flat_buffer_binding(desc.layout, set, binding));
 	            }
                 spirv_cross::CompilerHLSL::Options options;
                 options.shader_model = 50;
@@ -302,14 +300,12 @@ namespace d3d
 
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
         {
-            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range) { bind_uniform_buffer(index, range); });
-        }
-
-        void bind_uniform_buffer(int index, rhi::buffer_range range) override
-        {
-            const UINT first_constant = range.offset/16, num_constants = (range.size+255)/256*16;
-            ctx->VSSetConstantBuffers1(index, 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
-            ctx->PSSetConstantBuffers1(index, 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
+            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range) 
+            { 
+                const UINT first_constant = range.offset/16, num_constants = (range.size+255)/256*16;
+                ctx->VSSetConstantBuffers1(index, 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
+                ctx->PSSetConstantBuffers1(index, 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
+            });
         }
 
         void bind_vertex_buffer(int index, rhi::buffer_range range) override

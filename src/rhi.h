@@ -83,7 +83,6 @@ namespace rhi
         virtual void begin_render_pass(window window) = 0;
         virtual void bind_pipeline(pipeline pipe) = 0;
         virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
-        virtual void bind_uniform_buffer(int index, buffer_range range) = 0;
         virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
         virtual void bind_index_buffer(buffer_range range) = 0;
         virtual void draw(int first_vertex, int vertex_count) = 0;

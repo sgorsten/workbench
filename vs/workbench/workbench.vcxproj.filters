@@ -10,6 +10,7 @@
     <ClCompile Include="..\..\dep\glad\src\glad.c">
       <Filter>glad</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\rhi-internal.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\io.h" />

@@ -147,20 +147,18 @@ namespace gl
 
         rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
-            auto & pipe_layout = desc_emulator.pipeline_layouts[desc.layout];
             auto program = glCreateProgram();
             for(auto s : desc.stages)
             {
                 auto & shader = shaders[s];
                 spirv_cross::CompilerGLSL compiler(shader.spirv);
 	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
-	            for (auto & resource : resources.uniform_buffers)
+	            for(auto & resource : resources.uniform_buffers)
 	            {
 		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);	            
-                    auto & set_layout = desc_emulator.descriptor_set_layouts[pipe_layout.sets[set]];
+		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
 		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
-		            compiler.set_decoration(resource.id, spv::DecorationBinding, pipe_layout.buffer_offsets[set] + set_layout.offsets[(int)binding]);
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, desc_emulator.get_flat_buffer_binding(desc.layout, set, binding));
 	            }
 
                 const auto glsl = compiler.compile();
@@ -244,12 +242,10 @@ namespace gl
 
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
         {
-            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range) { bind_uniform_buffer(index, range); });
-        }
-
-        void bind_uniform_buffer(int index, rhi::buffer_range range) override
-        {
-            glBindBufferRange(GL_UNIFORM_BUFFER, index, buffers[range.buffer].buffer_object, range.offset, range.size);
+            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range)
+            {
+                glBindBufferRange(GL_UNIFORM_BUFFER, index, buffers[range.buffer].buffer_object, range.offset, range.size);
+            });
         }
 
         void bind_vertex_buffer(int index, rhi::buffer_range range) override
