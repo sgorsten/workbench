@@ -37,7 +37,7 @@ namespace vk
         case VK_ERROR_VALIDATION_FAILED_EXT: return "VK_ERROR_VALIDATION_FAILED_EXT";
         case VK_ERROR_INVALID_SHADER_NV: return "VK_ERROR_INVALID_SHADER_NV";
         case VK_ERROR_OUT_OF_POOL_MEMORY_KHR: return "VK_ERROR_OUT_OF_POOL_MEMORY_KHR";
-        default: return ""; // fail_fast();
+        default: fail_fast();
         }
     }
 
@@ -236,7 +236,7 @@ namespace vk
             }
         
             VkDescriptorSetLayoutCreateInfo create_info {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-            create_info.bindingCount = set_bindings.size();
+            create_info.bindingCount = exactly(set_bindings.size());
             create_info.pBindings = set_bindings.data();
 
             auto [handle, layout] = descriptor_set_layouts.create();
@@ -250,7 +250,7 @@ namespace vk
             for(auto s : sets) set_layouts.push_back(descriptor_set_layouts[s]);
 
             VkPipelineLayoutCreateInfo create_info {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-            create_info.setLayoutCount = set_layouts.size();
+            create_info.setLayoutCount = exactly(set_layouts.size());
             create_info.pSetLayouts = set_layouts.data();
 
             auto [handle, layout] = pipeline_layouts.create();
@@ -291,7 +291,7 @@ namespace vk
         void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) 
         {
             VkDescriptorBufferInfo buffer_info { buffers[range.buffer].buffer_object, range.offset, range.size };
-            VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor_sets[set], binding, 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
+            VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor_sets[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
             vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
         }
 
@@ -412,7 +412,7 @@ namespace vk
                     }
                 }
             }
-            VkPipelineVertexInputStateCreateInfo vertex_input_state {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, nullptr, 0, bindings.size(), bindings.data(), attributes.size(), attributes.data()};
+            VkPipelineVertexInputStateCreateInfo vertex_input_state {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, nullptr, 0, exactly(bindings.size()), bindings.data(), exactly(attributes.size()), attributes.data()};
 
             VkGraphicsPipelineCreateInfo pipelineInfo {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
             pipelineInfo.stageCount = 2; //stages.size;
@@ -543,7 +543,7 @@ vk::device::device(std::function<void(const char *)> debug_callback) : debug_cal
     const VkApplicationInfo app_info {VK_STRUCTURE_TYPE_APPLICATION_INFO, nullptr, "simple-scene", VK_MAKE_VERSION(1,0,0), "No Engine", VK_MAKE_VERSION(0,0,0), VK_API_VERSION_1_0};
     const char * layers[] {"VK_LAYER_LUNARG_standard_validation"};
     extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-    const VkInstanceCreateInfo instance_info {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, nullptr, {}, &app_info, 1, layers, extensions.size(), extensions.data()};
+    const VkInstanceCreateInfo instance_info {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, nullptr, {}, &app_info, 1, layers, exactly(extensions.size()), extensions.data()};
     check(vkCreateInstance(&instance_info, nullptr, &instance));
     auto vkCreateDebugReportCallbackEXT = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT"));
     vkDestroyDebugReportCallbackEXT = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"));
@@ -561,7 +561,7 @@ vk::device::device(std::function<void(const char *)> debug_callback) : debug_cal
     selection = select_physical_device(instance, device_extensions);
     const float queue_priorities[] {1.0f};
     const VkDeviceQueueCreateInfo queue_infos[] {{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, nullptr, {}, selection.queue_family, 1, queue_priorities}};
-    const VkDeviceCreateInfo device_info {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, nullptr, {}, 1, queue_infos, 1, layers, device_extensions.size(), device_extensions.data()};
+    const VkDeviceCreateInfo device_info {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, nullptr, {}, 1, queue_infos, 1, layers, exactly(device_extensions.size()), device_extensions.data()};
     check(vkCreateDevice(selection.physical_device, &device_info, nullptr, &dev));
     vkGetDeviceQueue(dev, selection.queue_family, 0, &queue);
     vkGetPhysicalDeviceMemoryProperties(selection.physical_device, &mem_props);
@@ -779,11 +779,11 @@ std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dim
         //attachment_refs.push_back({narrow(color_attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
         //subpass_desc.pDepthStencilAttachment = &attachment_refs[color_attachments.size()];
     }
-    subpass_desc.colorAttachmentCount = color_attachments.size();
+    subpass_desc.colorAttachmentCount = exactly(color_attachments.size());
     subpass_desc.pColorAttachments = attachment_refs.data();
     
     VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-    render_pass_info.attachmentCount = attachments.size(); //narrow(countof(attachments));
+    render_pass_info.attachmentCount = exactly(attachments.size());
     render_pass_info.pAttachments = attachments.data();
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass_desc;
@@ -804,7 +804,7 @@ std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dim
         std::vector<VkImageView> attachments {win.swapchain_image_views[i]}; //, objects[win.depth_image].image_view};
         VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
         framebuffer_info.renderPass = win.render_pass; //objects[render_pass];
-        framebuffer_info.attachmentCount = attachments.size();
+        framebuffer_info.attachmentCount = exactly(attachments.size());
         framebuffer_info.pAttachments = attachments.data();
         framebuffer_info.width = dimensions.x;
         framebuffer_info.height = dimensions.y;

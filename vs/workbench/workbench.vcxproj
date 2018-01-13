@@ -131,7 +131,6 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>DOCTEST_CONFIG_DISABLE;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(Vulkan_SDK)\include;..\..\dep\include;..\..\dep\glfw-3.2.1\include;..\..\dep\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -152,7 +151,6 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>DOCTEST_CONFIG_DISABLE;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(Vulkan_SDK)\include;..\..\dep\include;..\..\dep\glfw-3.2.1\include;..\..\dep\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -167,6 +165,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\dep\glad\src\glad.c" />
+    <ClCompile Include="..\..\src\core.cpp" />
     <ClCompile Include="..\..\src\geometry.cpp" />
     <ClCompile Include="..\..\src\io.cpp" />
     <ClCompile Include="..\..\src\main.cpp" />
@@ -177,12 +176,14 @@
     <ClCompile Include="..\..\src\shader.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\src\core.h" />
     <ClInclude Include="..\..\src\geometry.h" />
     <ClInclude Include="..\..\src\graphics.h" />
     <ClInclude Include="..\..\src\io.h" />
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\rhi\rhi-internal.h" />
     <ClInclude Include="..\..\src\shader.h" />
+    <ClInclude Include="..\..\src\test.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\dep\glfw-3.2.1\glfw.vcxproj">

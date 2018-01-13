@@ -20,6 +20,7 @@
     <ClCompile Include="..\..\src\rhi\rhi-vulkan.cpp">
       <Filter>rhi</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\core.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\io.h" />
@@ -30,6 +31,8 @@
     <ClInclude Include="..\..\src\rhi\rhi-internal.h">
       <Filter>rhi</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\core.h" />
+    <ClInclude Include="..\..\src\test.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="glad">

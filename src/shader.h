@@ -4,6 +4,7 @@
 #include <vector>
 #include <variant>
 #include <optional>
+#include "core.h"
 
 enum class shader_stage { vertex, fragment };
 enum class sampler_dim { _1d, _2d, _3d, cube, rect, buffer, subpass_data };

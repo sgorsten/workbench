@@ -155,7 +155,7 @@ namespace d3d
             auto [handle, buffer] = buffers.create();
 
             D3D11_BUFFER_DESC buffer_desc {};
-            buffer_desc.ByteWidth = desc.size;
+            buffer_desc.ByteWidth = exactly(desc.size);
             buffer_desc.Usage = desc.dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
             buffer_desc.BindFlags = 0;
             switch(desc.usage)
@@ -254,7 +254,7 @@ namespace d3d
                     hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &shader_blob, &error_blob);
                     if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
                     dev->CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipeline.vs);
-                    hr = dev->CreateInputLayout(input_descs.data(), input_descs.size(), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), &pipeline.layout);
+                    hr = dev->CreateInputLayout(input_descs.data(), exactly(input_descs.size()), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), &pipeline.layout);
                     if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateInputLayout(...) failed");
                     break;
                 case shader_stage::fragment:
@@ -298,11 +298,11 @@ namespace d3d
 
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
         {
-            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range) 
+            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](size_t index, rhi::buffer_range range) 
             { 
-                const UINT first_constant = range.offset/16, num_constants = (range.size+255)/256*16;
-                ctx->VSSetConstantBuffers1(index, 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
-                ctx->PSSetConstantBuffers1(index, 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
+                const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
+                ctx->VSSetConstantBuffers1(exactly(index), 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
+                ctx->PSSetConstantBuffers1(exactly(index), 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
             });
         }
 
@@ -312,7 +312,7 @@ namespace d3d
             {
                 if(buf.index == index)
                 {
-                    const UINT stride = buf.stride, offset = range.offset;
+                    const UINT stride = exactly(buf.stride), offset = exactly(range.offset);
                     ctx->IASetVertexBuffers(index, 1, &buffers[range.buffer].buffer_object, &stride, &offset);
                 }
             }
@@ -320,7 +320,7 @@ namespace d3d
 
         void bind_index_buffer(rhi::buffer_range range) override
         {
-            ctx->IASetIndexBuffer(buffers[range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, range.offset);
+            ctx->IASetIndexBuffer(buffers[range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(range.offset));
         }
 
         void draw(int first_vertex, int vertex_count) override

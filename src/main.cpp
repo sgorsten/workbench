@@ -1,7 +1,5 @@
 #include "graphics.h"
 #include "io.h"
-
-#define DOCTEST_CONFIG_NO_SHORT_MACRO_NAMES
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest.h>
 #include <chrono>

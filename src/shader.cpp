@@ -170,7 +170,7 @@ struct spirv_parser
             // meta.has_decoration(spv::DecorationBufferBlock) is true if this struct is used for VK_DESCRIPTOR_TYPE_STORAGE_BUFFER/VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
             for(size_t i=0; i<type.contents.size(); ++i)
             {
-                auto & member_meta = meta.members[i];
+                auto & member_meta = meta.members[exactly(i)];
                 std::optional<shader_module::matrix_layout> matrix_layout;
                 if(auto stride = member_meta.get_decoration(spv::DecorationMatrixStride)) matrix_layout = shader_module::matrix_layout{*stride, member_meta.has_decoration(spv::DecorationRowMajor)};
                 s.members.push_back({member_meta.name, shader_module::type(get_type(type.contents[i], matrix_layout)), member_meta.get_decoration(spv::DecorationOffset)});

@@ -163,7 +163,7 @@ namespace gl
 
                 const auto glsl = compiler.compile();
                 const GLchar * source = glsl.c_str();
-                GLint length = glsl.length();
+                GLint length = exactly(glsl.length());
                 //debug_callback(source);
 
                 GLuint shader_object = glCreateShader([&shader]() 
@@ -184,7 +184,7 @@ namespace gl
                 {
                     glGetShaderiv(shader_object, GL_INFO_LOG_LENGTH, &length);
                     std::vector<char> buffer(length);
-                    glGetShaderInfoLog(shader_object, buffer.size(), &length, buffer.data());
+                    glGetShaderInfoLog(shader_object, exactly(buffer.size()), &length, buffer.data());
                     throw std::runtime_error(buffer.data());
                 }
             
@@ -198,7 +198,7 @@ namespace gl
             {
                 glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
                 std::vector<char> buffer(length);
-                glGetProgramInfoLog(program, buffer.size(), &length, buffer.data());
+                glGetProgramInfoLog(program, exactly(buffer.size()), &length, buffer.data());
                 throw std::runtime_error(buffer.data());
             }
 
@@ -242,9 +242,9 @@ namespace gl
 
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
         {
-            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](int index, rhi::buffer_range range)
+            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](size_t index, rhi::buffer_range range)
             {
-                glBindBufferRange(GL_UNIFORM_BUFFER, index, buffers[range.buffer].buffer_object, range.offset, range.size);
+                glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), buffers[range.buffer].buffer_object, range.offset, range.size);
             });
         }
 
