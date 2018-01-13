@@ -1,10 +1,12 @@
 #include "rhi-internal.h"
 
-int descriptor_set_emulator::get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding)
+int descriptor_set_emulator::get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const
 {
-    auto & pipe_layout = pipeline_layouts[layout];
-    auto & set_layout = descriptor_set_layouts[pipe_layout.sets[set]];
-    return pipe_layout.buffer_offsets[set] + set_layout.offsets[binding];
+    const auto & pipe_layout = pipeline_layouts[layout];
+    const auto & set_layout = descriptor_set_layouts[pipe_layout.sets[set]];
+    auto it = set_layout.offsets.find(binding);
+    if(it == set_layout.offsets.end()) throw std::logic_error("invalid binding");
+    return pipe_layout.buffer_offsets[set] + it->second;
 }
 
 rhi::descriptor_set_layout descriptor_set_emulator::create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings)
@@ -44,8 +46,7 @@ rhi::pipeline_layout descriptor_set_emulator::create_pipeline_layout(const std::
 
 rhi::descriptor_pool descriptor_set_emulator::create_descriptor_pool()
 {
-    auto [handle, pool] = descriptor_pools.create();
-    return handle;
+    return std::get<rhi::descriptor_pool>(descriptor_pools.create());
 }
 
 void descriptor_set_emulator::reset_descriptor_pool(rhi::descriptor_pool pool)
@@ -66,7 +67,7 @@ rhi::descriptor_set descriptor_set_emulator::alloc_descriptor_set(rhi::descripto
 
     auto handle = dpool.sets[dpool.used_sets++];
     auto & dset = descriptor_sets[handle];
-    auto & dlayout = descriptor_set_layouts[layout];
+    const auto & dlayout = descriptor_set_layouts[layout];
     dset.layout = layout;
     dset.buffer_offset = dpool.buffer_bindings.size();
     dpool.buffer_bindings.resize(dset.buffer_offset + dlayout.num_buffers);
@@ -77,7 +78,9 @@ void descriptor_set_emulator::write_descriptor(rhi::descriptor_set set, int bind
 {
     auto & dset = descriptor_sets[set];
     auto & dpool = descriptor_pools[dset.pool];
-    auto & dlayout = descriptor_set_layouts[dset.layout];
+    const auto & dlayout = descriptor_set_layouts[dset.layout];
     // TODO: Check that this is actually a buffer binding
-    dpool.buffer_bindings[dset.buffer_offset + dlayout.offsets[binding]] = range;
+    auto it = dlayout.offsets.find(binding);
+    if(it == dlayout.offsets.end()) throw std::logic_error("invalid binding");
+    dpool.buffer_bindings[dset.buffer_offset + it->second] = range;
 }

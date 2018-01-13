@@ -153,7 +153,7 @@ public:
         auto fs = dev.create_shader(assets.fs);
 
         per_view_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
-        per_object_layout = dev.create_descriptor_set_layout({{1, rhi::descriptor_type::uniform_buffer, 1}});
+        per_object_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
         pipe_layout = dev.create_pipeline_layout({per_view_layout, per_object_layout});
 
         wire_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::lines, rhi::compare_op::less});

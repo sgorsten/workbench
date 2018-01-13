@@ -6,10 +6,11 @@ template<class HANDLE, class TYPE> class object_set
     std::unordered_map<int, TYPE> objects;
     int next_id = 1;
 public:
-    std::tuple<HANDLE, TYPE &> create() 
+    const TYPE & operator[] (HANDLE h) const
     { 
-        const int id = next_id++;
-        return {HANDLE{id}, objects[id]};
+        const auto it = objects.find(h.id);
+        if(it == objects.end()) throw std::logic_error("invalid handle");
+        return it->second;
     }
 
     TYPE & operator[] (HANDLE h) 
@@ -17,6 +18,12 @@ public:
         const auto it = objects.find(h.id);
         if(it == objects.end()) throw std::logic_error("invalid handle");
         return it->second;
+    }
+
+    std::tuple<HANDLE, TYPE &> create() 
+    { 
+        const int id = next_id++;
+        return {HANDLE{id}, objects[id]};
     }
 };
 
@@ -56,7 +63,7 @@ class descriptor_set_emulator
     object_set<rhi::descriptor_pool, emulated_descriptor_pool> descriptor_pools;
     object_set<rhi::descriptor_set, emulated_descriptor_set> descriptor_sets;
 public:
-    int get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding);
+    int get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const;
 
     rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings);
     rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets);
@@ -67,7 +74,7 @@ public:
     void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range);
 
     template<class BindBufferFunction>
-    void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer)
+    void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer) const
     {
         auto & pipeline_layout = pipeline_layouts[layout];
         auto & descriptor_set = descriptor_sets[set];
