@@ -243,7 +243,7 @@ namespace d3d
                 options.shader_model = 50;
                 compiler.set_options(options);
                 const auto hlsl = compiler.compile();
-                debug_callback(hlsl.c_str());
+                //debug_callback(hlsl.c_str());
 
                 // Compile HLSL and create shader stages and input layout
                 HRESULT hr;

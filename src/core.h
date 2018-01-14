@@ -6,9 +6,10 @@
 [[noreturn]] void fail_fast(); // Call debug_break() and then exit
 void debug_break(); // If a debugger is attached, break, otherwise do nothing
 
-// equivalent(a, b) returns true if a and b represent the same integer value, independent of underlying type
-template<class A, class B> constexpr std::enable_if_t<std::is_integral_v<A> && std::is_integral_v<B>, bool> equivalent(A a, B b)
+// equivalent(a, b) returns true if a and b represent the same number, independent of underlying type
+template<class A, class B> constexpr std::enable_if_t<std::is_arithmetic_v<A> && std::is_arithmetic_v<B>, bool> equivalent(A a, B b)
 {
+    if constexpr(std::is_floating_point_v<A> != std::is_floating_point_v<B>) return a == static_cast<A>(b) && static_cast<B>(a) == b;
     if constexpr(std::is_signed_v<A> && std::is_unsigned_v<B>) if(a < 0) return false;
     if constexpr(std::is_signed_v<B> && std::is_unsigned_v<A>) if(b < 0) return false;
     return a == b;

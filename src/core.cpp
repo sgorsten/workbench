@@ -110,6 +110,12 @@ DOCTEST_TEST_CASE("comparisons")
     DOCTEST_CHECK( !equivalent<int64_t, uint16_t>(-10, -10) );
     DOCTEST_CHECK( !equivalent<int64_t, uint32_t>(-10, -10) );
     DOCTEST_CHECK( !equivalent<int64_t, uint64_t>(-10, -10) );
+
+    DOCTEST_CHECK( equivalent<int, float>(10, 10.0f) );
+    DOCTEST_CHECK( !equivalent<int, float>(10, 10.001f) );
+
+    DOCTEST_CHECK( equivalent<int, float>(16777216, 16777216.0f) );
+    DOCTEST_CHECK( !equivalent<int, float>(16777217, 16777217.0f) );
 }
 
 #ifdef _WIN32
