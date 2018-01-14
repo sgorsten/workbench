@@ -61,12 +61,14 @@ namespace d3d
         IDXGIFactory * factory;
         ID3D11RasterizerState * rasterizer_state;
 
-        descriptor_set_emulator desc_emulator;
-        object_set<rhi::input_layout, input_layout> input_layouts;
-        object_set<rhi::shader, shader_module> shaders;
-        object_set<rhi::pipeline, pipeline> pipelines;
-        object_set<rhi::buffer, buffer> buffers;
-        object_set<rhi::window, window> windows;
+        template<class T> struct traits;
+        template<> struct traits<rhi::buffer> { using type = buffer; };
+        template<> struct traits<rhi::input_layout> { using type = input_layout; };
+        template<> struct traits<rhi::shader> { using type = shader_module; }; 
+        template<> struct traits<rhi::pipeline> { using type = pipeline; };
+        template<> struct traits<rhi::window> { using type = window; };
+        heterogeneous_object_set<traits, rhi::buffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
+        descriptor_emulator desc_emulator;
 
         pipeline * current_pipeline;   
 
@@ -107,7 +109,7 @@ namespace d3d
 
         auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<rhi::window, GLFWwindow *> override 
         {
-            auto [handle, window] = windows.create();
+            auto [handle, window] = objects.create<rhi::window>();
 
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
@@ -152,7 +154,7 @@ namespace d3d
 
         std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
-            auto [handle, buffer] = buffers.create();
+            auto [handle, buffer] = objects.create<rhi::buffer>();
 
             D3D11_BUFFER_DESC buffer_desc {};
             buffer_desc.ByteWidth = exactly(desc.size);
@@ -193,7 +195,7 @@ namespace d3d
 
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            auto [handle, input_layout] = input_layouts.create();
+            auto [handle, input_layout] = objects.create<rhi::input_layout>();
 
             input_layout.bindings = bindings;
             for(auto & buf : bindings)
@@ -215,19 +217,19 @@ namespace d3d
 
         rhi::shader create_shader(const shader_module & module) override
         {
-            auto [handle, shader] = shaders.create();
+            auto [handle, shader] = objects.create<rhi::shader>();
             shader = module;
             return handle;
         }
 
         rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
         {
-            const auto & input_descs = input_layouts[desc.input].input_descs;
-            auto [handle, pipeline] = pipelines.create();
+            const auto & input_descs = objects[desc.input].input_descs;
+            auto [handle, pipeline] = objects.create<rhi::pipeline>();
             pipeline.desc = desc;
             for(auto & s : desc.stages)
             {
-                auto & shader = shaders[s];
+                auto & shader = objects[s];
 
                 // Compile SPIR-V to HLSL
                 spirv_cross::CompilerHLSL compiler(shader.spirv);
@@ -268,14 +270,14 @@ namespace d3d
             return handle;
         }
 
-        void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
-        void destroy_pipeline_layout(rhi::pipeline_layout layout) override { desc_emulator.destroy(layout); }
+        void destroy_buffer(rhi::buffer buffer) override { objects.destroy(buffer); }
         void destroy_descriptor_pool(rhi::descriptor_pool pool) override { desc_emulator.destroy(pool); }
-        void destroy_input_layout(rhi::input_layout layout) override { input_layouts.destroy(layout); }
-        void destroy_shader(rhi::shader shader) override { shaders.destroy(shader); }
-        void destroy_pipeline(rhi::pipeline pipeline)  override { pipelines.destroy(pipeline); }
-        void destroy_buffer(rhi::buffer buffer) override { buffers.destroy(buffer); }
-        void destroy_window(rhi::window window) override { windows.destroy(window); }
+        void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
+        void destroy_pipeline_layout(rhi::pipeline_layout layout) override { desc_emulator.destroy(layout); }        
+        void destroy_input_layout(rhi::input_layout layout) override { objects.destroy(layout); }
+        void destroy_shader(rhi::shader shader) override { objects.destroy(shader); }
+        void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }        
+        void destroy_window(rhi::window window) override { objects.destroy(window); }
 
         void begin_render_pass(rhi::window window) override
         {
@@ -283,17 +285,17 @@ namespace d3d
             ctx->RSSetState(rasterizer_state);
 
             FLOAT rgba[] {0,0,0,1};
-            ctx->ClearRenderTargetView(windows[window].render_target_view, rgba);
-            ctx->ClearDepthStencilView(windows[window].depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
+            ctx->ClearRenderTargetView(objects[window].render_target_view, rgba);
+            ctx->ClearDepthStencilView(objects[window].depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
-            ctx->OMSetRenderTargets(1, &windows[window].render_target_view, windows[window].depth_stencil_view);
+            ctx->OMSetRenderTargets(1, &objects[window].render_target_view, objects[window].depth_stencil_view);
             D3D11_VIEWPORT vp {0, 0, 512, 512, 0, 1};
             ctx->RSSetViewports(1, &vp);
         }
 
         void bind_pipeline(rhi::pipeline pipe) override
         {
-            current_pipeline = &pipelines[pipe];
+            current_pipeline = &objects[pipe];
             ctx->IASetInputLayout(current_pipeline->layout);
             ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
             ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
@@ -310,26 +312,26 @@ namespace d3d
             desc_emulator.bind_descriptor_set(layout, set_index, set, [this](size_t index, rhi::buffer_range range) 
             { 
                 const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
-                ctx->VSSetConstantBuffers1(exactly(index), 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
-                ctx->PSSetConstantBuffers1(exactly(index), 1, &buffers[range.buffer].buffer_object, &first_constant, &num_constants);
+                ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
+                ctx->PSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
             });
         }
 
         void bind_vertex_buffer(int index, rhi::buffer_range range) override
         {
-            for(auto & buf : input_layouts[current_pipeline->desc.input].bindings)
+            for(auto & buf : objects[current_pipeline->desc.input].bindings)
             {
                 if(buf.index == index)
                 {
                     const UINT stride = exactly(buf.stride), offset = exactly(range.offset);
-                    ctx->IASetVertexBuffers(index, 1, &buffers[range.buffer].buffer_object, &stride, &offset);
+                    ctx->IASetVertexBuffers(index, 1, &objects[range.buffer].buffer_object, &stride, &offset);
                 }
             }
         }
 
         void bind_index_buffer(rhi::buffer_range range) override
         {
-            ctx->IASetIndexBuffer(buffers[range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(range.offset));
+            ctx->IASetIndexBuffer(objects[range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(range.offset));
         }
 
         void draw(int first_vertex, int vertex_count) override
@@ -349,7 +351,7 @@ namespace d3d
 
         void present(rhi::window window) override
         {
-            windows[window].swap_chain->Present(1, 0);
+            objects[window].swap_chain->Present(1, 0);
         }
 
         void wait_idle() override { ctx->Flush(); }

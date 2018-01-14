@@ -63,12 +63,14 @@ namespace gl
         pipeline * current_pipeline=0;
         size_t index_buffer_offset=0;
 
-        descriptor_set_emulator desc_emulator;
-        object_set<rhi::input_layout, input_layout> input_layouts;
-        object_set<rhi::shader, shader_module> shaders;
-        object_set<rhi::pipeline, pipeline> pipelines;
-        object_set<rhi::buffer, buffer> buffers;
-        object_set<rhi::window, window> windows;
+        template<class T> struct traits;
+        template<> struct traits<rhi::buffer> { using type = buffer; };
+        template<> struct traits<rhi::input_layout> { using type = input_layout; };
+        template<> struct traits<rhi::shader> { using type = shader_module; }; 
+        template<> struct traits<rhi::pipeline> { using type = pipeline; };
+        template<> struct traits<rhi::window> { using type = window; };
+        heterogeneous_object_set<traits, rhi::buffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
+        descriptor_emulator desc_emulator;
 
         void enable_debug_callback(GLFWwindow * window)
         {
@@ -117,7 +119,7 @@ namespace gl
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
             glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
-            auto [handle, window] = windows.create();
+            auto [handle, window] = objects.create<rhi::window>();
             window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
             if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
             enable_debug_callback(window.w);
@@ -133,14 +135,14 @@ namespace gl
 
         rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
         {
-            auto [handle, layout] = input_layouts.create();
+            auto [handle, layout] = objects.create<rhi::input_layout>();
             layout.bindings = bindings;
             return handle;
         }
 
         rhi::shader create_shader(const shader_module & module) override
         {
-            auto [handle, shader] = shaders.create();
+            auto [handle, shader] = objects.create<rhi::shader>();
             shader = module;
             return handle;
         }
@@ -150,7 +152,7 @@ namespace gl
             auto program = glCreateProgram();
             for(auto s : desc.stages)
             {
-                auto & shader = shaders[s];
+                auto & shader = objects[s];
                 spirv_cross::CompilerGLSL compiler(shader.spirv);
 	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	            for(auto & resource : resources.uniform_buffers)
@@ -202,7 +204,7 @@ namespace gl
                 throw std::runtime_error(buffer.data());
             }
 
-            auto [handle, pipeline] = pipelines.create();
+            auto [handle, pipeline] = objects.create<rhi::pipeline>();
             pipeline.desc = desc;
             pipeline.program_object = program;
             return handle;
@@ -210,7 +212,7 @@ namespace gl
 
         std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
-            auto [handle, buffer] = buffers.create();
+            auto [handle, buffer] = objects.create<rhi::buffer>();
             glCreateBuffers(1, &buffer.buffer_object);
             GLbitfield flags = 0;
             if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
@@ -219,18 +221,18 @@ namespace gl
             return {handle, buffer.mapped};
         }
 
+        void destroy_buffer(rhi::buffer buffer) override { objects.destroy(buffer); }
+        void destroy_descriptor_pool(rhi::descriptor_pool pool) override { desc_emulator.destroy(pool); }
         void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
         void destroy_pipeline_layout(rhi::pipeline_layout layout) override { desc_emulator.destroy(layout); }
-        void destroy_descriptor_pool(rhi::descriptor_pool pool) override { desc_emulator.destroy(pool); }
-        void destroy_input_layout(rhi::input_layout layout) override { input_layouts.destroy(layout); }
-        void destroy_shader(rhi::shader shader) override { shaders.destroy(shader); }
-        void destroy_pipeline(rhi::pipeline pipeline)  override { pipelines.destroy(pipeline); }
-        void destroy_buffer(rhi::buffer buffer) override { buffers.destroy(buffer); }
-        void destroy_window(rhi::window window) override { windows.destroy(window); }
+        void destroy_input_layout(rhi::input_layout layout) override { objects.destroy(layout); }
+        void destroy_shader(rhi::shader shader) override { objects.destroy(shader); }
+        void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }       
+        void destroy_window(rhi::window window) override { objects.destroy(window); }
 
         void begin_render_pass(rhi::window window) override
         {
-            auto w = windows[window].w;
+            auto w = objects[window].w;
             int width, height;
             glfwGetFramebufferSize(w, &width, &height);            
             glfwMakeContextCurrent(w);
@@ -240,9 +242,9 @@ namespace gl
 
         void bind_pipeline(rhi::pipeline pipe) override
         {
-            current_pipeline = &pipelines[pipe];
+            current_pipeline = &objects[pipe];
             glUseProgram(current_pipeline->program_object);
-            input_layouts[current_pipeline->desc.input].bind_vertex_array();
+            objects[current_pipeline->desc.input].bind_vertex_array();
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_NEVER | static_cast<int>(current_pipeline->desc.depth_test));
             glEnable(GL_CULL_FACE);
@@ -253,24 +255,24 @@ namespace gl
         {
             desc_emulator.bind_descriptor_set(layout, set_index, set, [this](size_t index, rhi::buffer_range range)
             {
-                glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), buffers[range.buffer].buffer_object, range.offset, range.size);
+                glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), objects[range.buffer].buffer_object, range.offset, range.size);
             });
         }
 
         void bind_vertex_buffer(int index, rhi::buffer_range range) override
         {
-            for(auto & buf : input_layouts[current_pipeline->desc.input].bindings)
+            for(auto & buf : objects[current_pipeline->desc.input].bindings)
             {
                 if(buf.index == index)
                 {
-                    glBindVertexBuffer(index, buffers[range.buffer].buffer_object, range.offset, buf.stride);
+                    glBindVertexBuffer(index, objects[range.buffer].buffer_object, range.offset, buf.stride);
                 }
             }        
         }
 
         void bind_index_buffer(rhi::buffer_range range) override
         {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffers[range.buffer].buffer_object);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, objects[range.buffer].buffer_object);
             index_buffer_offset = range.offset;
         }
 
@@ -302,7 +304,7 @@ namespace gl
 
         void present(rhi::window window) override
         {
-            glfwSwapBuffers(windows[window].w);
+            glfwSwapBuffers(objects[window].w);
         }
 
         void wait_idle() override { glFlush(); }

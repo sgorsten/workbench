@@ -65,28 +65,59 @@ namespace rhi
 
     struct device
     {
+        //////////
+        // info //
+        //////////
+
         virtual auto get_info() const -> device_info = 0;
+
+        /////////////
+        // buffers //
+        /////////////
+
+        virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
+        virtual void destroy_buffer(buffer buffer) = 0;
+
+        /////////////////
+        // descriptors //
+        /////////////////
+
+        virtual auto create_descriptor_pool() -> descriptor_pool = 0;
+        virtual void destroy_descriptor_pool(descriptor_pool pool) = 0;
 
         virtual auto create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) -> descriptor_set_layout = 0;
         virtual void destroy_descriptor_set_layout(descriptor_set_layout layout) = 0;
-        virtual auto create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) -> pipeline_layout = 0;
-        virtual void destroy_pipeline_layout(pipeline_layout layout) = 0;
-        virtual auto create_descriptor_pool() -> descriptor_pool = 0;
-        virtual void destroy_descriptor_pool(descriptor_pool pool) = 0;
-        virtual auto create_input_layout(const std::vector<vertex_binding_desc> & bindings) -> input_layout = 0;
-        virtual void destroy_input_layout(input_layout layout) = 0;
-        virtual auto create_shader(const shader_module & module) -> shader = 0;
-        virtual void destroy_shader(shader shader) = 0;
-        virtual auto create_pipeline(const pipeline_desc & desc) -> pipeline = 0;
-        virtual void destroy_pipeline(pipeline pipeline) = 0;
-        virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
-        virtual void destroy_buffer(buffer buffer) = 0;
-        virtual auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<window, GLFWwindow *> = 0;
-        virtual void destroy_window(window window) = 0;
 
         virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
         virtual auto alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) -> descriptor_set = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
+
+        ///////////////
+        // pipelines //
+        ///////////////
+
+        virtual auto create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) -> pipeline_layout = 0;
+        virtual void destroy_pipeline_layout(pipeline_layout layout) = 0;
+
+        virtual auto create_input_layout(const std::vector<vertex_binding_desc> & bindings) -> input_layout = 0;
+        virtual void destroy_input_layout(input_layout layout) = 0;
+
+        virtual auto create_shader(const shader_module & module) -> shader = 0;
+        virtual void destroy_shader(shader shader) = 0;
+
+        virtual auto create_pipeline(const pipeline_desc & desc) -> pipeline = 0;
+        virtual void destroy_pipeline(pipeline pipeline) = 0;
+
+        /////////////
+        // windows //
+        /////////////
+
+        virtual auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<window, GLFWwindow *> = 0;
+        virtual void destroy_window(window window) = 0;
+
+        ///////////////
+        // rendering //
+        ///////////////
 
         virtual void begin_render_pass(window window) = 0;
         virtual void bind_pipeline(pipeline pipe) = 0;
