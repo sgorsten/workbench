@@ -261,11 +261,6 @@ namespace gl
         void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }       
         void destroy_window(rhi::window window) override { objects.destroy(window); }
 
-        void begin_frame(rhi::window window) override
-        {
-        
-        }
-
         void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override
         {
             auto & fb = objects[framebuffer];
@@ -338,7 +333,7 @@ namespace gl
 
         }
 
-        void end_frame(rhi::window window) override
+        void present(rhi::window window) override
         {
             glfwSwapBuffers(objects[window].w);
         }

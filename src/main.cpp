@@ -221,56 +221,56 @@ public:
 
     void render_frame(const camera & cam)
     {
-        // Render frame
+        // Reset resources
+        uniform_buffer.reset();
+        dev->reset_descriptor_pool(desc_pool);
+
+        // Set up per scene and per view uniforms
         const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.5f, 100.0f, linalg::pos_z, info.z_range);
         const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
-        uniform_buffer.reset();
+        auto per_scene_view_set = dev->alloc_descriptor_set(desc_pool, per_scene_view_layout);
+        dev->write_descriptor(per_scene_view_set, 0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f));
+        dev->write_descriptor(per_scene_view_set, 1, uniform_buffer.write(view_proj_matrix));
 
-        dev->reset_descriptor_pool(desc_pool);
-        dev->begin_frame(rwindow);
+        // Draw objects to our framebuffer
+        dev->begin_render_pass(pass, dev->get_swapchain_framebuffer(rwindow));
         {
-            auto per_scene_view_set = dev->alloc_descriptor_set(desc_pool, per_scene_view_layout);
-            dev->write_descriptor(per_scene_view_set, 0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f));
-            dev->write_descriptor(per_scene_view_set, 1, uniform_buffer.write(view_proj_matrix));
+            auto set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
+            dev->write_descriptor(set, 0, uniform_buffer.write(float4x4{linalg::identity}));
 
-            dev->begin_render_pass(pass, dev->get_swapchain_framebuffer(rwindow));
+            dev->bind_pipeline(wire_pipe);
+            dev->bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
+            dev->bind_descriptor_set(pipe_layout, 1, set);
+            dev->bind_vertex_buffer(0, basis_vertex_buffer);
+            dev->draw(0, 6);
+
+            // Draw the gorund
+            dev->bind_pipeline(solid_pipe);
+            set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
+            dev->write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*0.3f)));
+            dev->bind_descriptor_set(pipe_layout, 1, set);
+            dev->bind_vertex_buffer(0, ground_vertex_buffer);
+            dev->bind_index_buffer(ground_index_buffer);
+            dev->draw_indexed(0, 6);
+
+            // Draw a bunch of boxes
+            dev->bind_vertex_buffer(0, box_vertex_buffer);
+            dev->bind_index_buffer(box_index_buffer);
+            for(int i=0; i<6; ++i)
             {
-                auto set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
-                dev->write_descriptor(set, 0, uniform_buffer.write(float4x4{linalg::identity}));
-
-                dev->bind_pipeline(wire_pipe);
-                dev->bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
-                dev->bind_descriptor_set(pipe_layout, 1, set);
-                dev->bind_vertex_buffer(0, basis_vertex_buffer);
-                dev->draw(0, 6);
-
-                // Draw the gorund
-                dev->bind_pipeline(solid_pipe);
-                set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
-                dev->write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*0.3f)));
-                dev->bind_descriptor_set(pipe_layout, 1, set);
-                dev->bind_vertex_buffer(0, ground_vertex_buffer);
-                dev->bind_index_buffer(ground_index_buffer);
-                dev->draw_indexed(0, 6);
-
-                // Draw a bunch of boxes
-                dev->bind_vertex_buffer(0, box_vertex_buffer);
-                dev->bind_index_buffer(box_index_buffer);
-                for(int i=0; i<6; ++i)
+                for(int j=0; j<6; ++j)
                 {
-                    for(int j=0; j<6; ++j)
-                    {
-                        const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
-                        const auto set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
-                        dev->write_descriptor(set, 0, uniform_buffer.write(translation_matrix(position)));
-                        dev->bind_descriptor_set(pipe_layout, 1, set);
-                        dev->draw_indexed(0, 36);
-                    }
-                }            
-            }
-            dev->end_render_pass();
+                    const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
+                    const auto set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
+                    dev->write_descriptor(set, 0, uniform_buffer.write(translation_matrix(position)));
+                    dev->bind_descriptor_set(pipe_layout, 1, set);
+                    dev->draw_indexed(0, 36);
+                }
+            }            
         }
-        dev->end_frame(rwindow);
+        dev->end_render_pass();
+
+        dev->present(rwindow);
     }
 };
 

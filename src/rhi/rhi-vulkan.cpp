@@ -159,7 +159,6 @@ namespace vk
 
         // rendering
         VkCommandBuffer cmd;
-        void begin_frame(rhi::window window) override;
         void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override;
         void bind_pipeline(rhi::pipeline pipe) override;
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override;
@@ -168,7 +167,7 @@ namespace vk
         void draw(int first_vertex, int vertex_count) override;
         void draw_indexed(int first_index, int index_count) override;
         void end_render_pass() override;
-        void end_frame(rhi::window window) override;
+        void present(rhi::window window) override;
         void wait_idle() override;
     };
 }
@@ -871,6 +870,8 @@ rhi::window vk::device::create_window(rhi::render_pass pass, const int2 & dimens
     }   
     win.swapchain_framebuffer = fb_handle;
 
+    // Acquire the first image
+    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
     return handle;
 }
 
@@ -892,13 +893,6 @@ void vk::device::destroy_window(rhi::window window)
 // vk::device rendering //
 //////////////////////////
 
-void vk::device::begin_frame(rhi::window window)
-{
-    auto & win = objects[window];
-    auto & fb = objects[win.swapchain_framebuffer];
-    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
-}
-
 void vk::device::begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer)
 {
     auto & fb = objects[framebuffer];
@@ -913,9 +907,8 @@ void vk::device::begin_render_pass(rhi::render_pass pass, rhi::framebuffer frame
 
     cmd = begin_transient();
     vkCmdBeginRenderPass(cmd, &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-    const VkViewport viewports[] {{exactly(pass_begin_info.renderArea.offset.x), exactly(pass_begin_info.renderArea.offset.y), 
-        exactly(pass_begin_info.renderArea.extent.width), exactly(pass_begin_info.renderArea.extent.height), 0.0f, 1.0f}};
-    vkCmdSetViewport(cmd, 0, 1, viewports);
+    const VkViewport viewports[] {{0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1}};
+    vkCmdSetViewport(cmd, 0, exactly(countof(viewports)), viewports);
     vkCmdSetScissor(cmd, 0, 1, &pass_begin_info.renderArea);    
 }
 
@@ -955,7 +948,7 @@ void vk::device::end_render_pass()
     vkCmdEndRenderPass(cmd);
 }
 
-void vk::device::end_frame(rhi::window window)
+void vk::device::present(rhi::window window)
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(cmd)); 
 
@@ -983,6 +976,9 @@ void vk::device::end_frame(rhi::window window)
     check("vkQueueWaitIdle", vkQueueWaitIdle(queue)); // TODO: Do something with fences instead
     vkFreeCommandBuffers(dev, staging_pool, 1, &cmd);
     cmd = 0;
+
+    auto & fb = objects[win.swapchain_framebuffer];
+    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
 }
 
 void vk::device::wait_idle() 

@@ -305,12 +305,7 @@ namespace d3d
         void destroy_shader(rhi::shader shader) override { objects.destroy(shader); }
         void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }        
         void destroy_window(rhi::window window) override { objects.destroy(window); }
-
-        void begin_frame(rhi::window window) override
-        {
         
-        }
-
         void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override
         {
             auto & fb = objects[framebuffer];
@@ -378,12 +373,9 @@ namespace d3d
             ctx->DrawIndexed(index_count, first_index, 0);
         }
 
-        void end_render_pass() override
-        {
+        void end_render_pass() override {}
 
-        }
-
-        void end_frame(rhi::window window) override
+        void present(rhi::window window) override
         {
             objects[window].swap_chain->Present(1, 0);
         }

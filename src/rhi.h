@@ -130,7 +130,6 @@ namespace rhi
         // rendering //
         ///////////////
 
-        virtual void begin_frame(window window) = 0;
         virtual void begin_render_pass(render_pass pass, framebuffer framebuffer) = 0;
         virtual void bind_pipeline(pipeline pipe) = 0;
         virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
@@ -139,7 +138,7 @@ namespace rhi
         virtual void draw(int first_vertex, int vertex_count) = 0;
         virtual void draw_indexed(int first_index, int index_count) = 0;
         virtual void end_render_pass() = 0;
-        virtual void end_frame(window window) = 0;
+        virtual void present(window window) = 0;
         virtual void wait_idle() = 0;
     };
 }
