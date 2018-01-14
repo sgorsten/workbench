@@ -13,6 +13,18 @@ namespace gl
         char * mapped = 0;
     };
 
+    struct render_pass
+    {
+        rhi::render_pass_desc desc;
+    };
+
+    struct framebuffer
+    {
+        GLFWwindow * context;
+        GLuint framebuffer_object;
+        int2 dims;
+    };
+
     struct input_layout
     {
         std::vector<rhi::vertex_binding_desc> bindings;
@@ -54,6 +66,7 @@ namespace gl
     struct window
     {
         GLFWwindow * w;
+        rhi::framebuffer fb;
     };
 
     struct device : rhi::device
@@ -65,11 +78,13 @@ namespace gl
 
         template<class T> struct traits;
         template<> struct traits<rhi::buffer> { using type = buffer; };
+        template<> struct traits<rhi::render_pass> { using type = render_pass; };
+        template<> struct traits<rhi::framebuffer> { using type = framebuffer; };
         template<> struct traits<rhi::input_layout> { using type = input_layout; };
         template<> struct traits<rhi::shader> { using type = shader_module; }; 
         template<> struct traits<rhi::pipeline> { using type = pipeline; };
         template<> struct traits<rhi::window> { using type = window; };
-        heterogeneous_object_set<traits, rhi::buffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
+        heterogeneous_object_set<traits, rhi::buffer, rhi::render_pass, rhi::framebuffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
         descriptor_emulator desc_emulator;
 
         void enable_debug_callback(GLFWwindow * window)
@@ -111,7 +126,15 @@ namespace gl
         
         rhi::device_info get_info() const override { return {"OpenGL 4.5 Core", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
 
-        std::tuple<rhi::window, GLFWwindow *> create_window(const int2 & dimensions, std::string_view title) override 
+        rhi::render_pass create_render_pass(const rhi::render_pass_desc & desc) override 
+        {
+            auto [handle, pass] = objects.create<rhi::render_pass>();
+            pass.desc = desc;
+            return handle;
+        }
+        void destroy_render_pass(rhi::render_pass pass) override { objects.destroy(pass); }
+
+        rhi::window create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) override
         {
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
@@ -123,8 +146,16 @@ namespace gl
             window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
             if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
             enable_debug_callback(window.w);
-            return {handle, window.w};
+
+            auto [fb_handle, fb] = objects.create<rhi::framebuffer>();
+            fb.context = window.w;
+            fb.framebuffer_object = 0;
+            fb.dims = dimensions;
+            window.fb = fb_handle;
+            return {handle};
         }
+        GLFWwindow * get_glfw_window(rhi::window window) override { return objects[window].w; }
+        rhi::framebuffer get_swapchain_framebuffer(rhi::window window) override { return objects[window].fb; }
 
         rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
         rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
@@ -160,7 +191,7 @@ namespace gl
 		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
 		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
 		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
-		            compiler.set_decoration(resource.id, spv::DecorationBinding, desc_emulator.get_flat_buffer_binding(desc.layout, set, binding));
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_buffer_binding(desc.layout, set, binding)));
 	            }
 
                 const auto glsl = compiler.compile();
@@ -230,13 +261,17 @@ namespace gl
         void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }       
         void destroy_window(rhi::window window) override { objects.destroy(window); }
 
-        void begin_render_pass(rhi::window window) override
+        void begin_frame(rhi::window window) override
         {
-            auto w = objects[window].w;
-            int width, height;
-            glfwGetFramebufferSize(w, &width, &height);            
-            glfwMakeContextCurrent(w);
-            glViewport(0, 0, width, height);
+        
+        }
+
+        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override
+        {
+            auto & fb = objects[framebuffer];
+            glfwMakeContextCurrent(fb.context);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
+            glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
 
@@ -303,7 +338,7 @@ namespace gl
 
         }
 
-        void present(rhi::window window) override
+        void end_frame(rhi::window window) override
         {
             glfwSwapBuffers(objects[window].w);
         }

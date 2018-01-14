@@ -21,6 +21,8 @@ namespace rhi
     // Object types
     using buffer = handle<struct buffer_tag>;
     using image = handle<struct image_tag>;
+    using render_pass = handle<struct render_pass_tag>;
+    using framebuffer = handle<struct framebuffer_tag>;
     using descriptor_pool = handle<struct descriptor_pool_tag>;
     using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
     using descriptor_set = handle<struct descriptor_set_tag>;
@@ -29,6 +31,8 @@ namespace rhi
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;
     using window = handle<struct window_tag>;
+
+    struct render_pass_desc {};
 
     // Descriptor set layout creation info
     enum class descriptor_type { combined_image_sampler, uniform_buffer };
@@ -44,6 +48,7 @@ namespace rhi
     enum class compare_op { never, less, equal, less_or_equal, greater, not_equal, greater_or_equal, always };
     struct pipeline_desc
     {
+        render_pass pass;
         pipeline_layout layout;                 // descriptors
         input_layout input;                     // input state
         std::vector<shader> stages;             // programmable stages
@@ -79,6 +84,9 @@ namespace rhi
         virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
         virtual void destroy_buffer(buffer buffer) = 0;
 
+        virtual auto create_render_pass(const render_pass_desc & desc) -> render_pass = 0;
+        virtual void destroy_render_pass(render_pass pass) = 0;
+
         /////////////////
         // descriptors //
         /////////////////
@@ -113,14 +121,17 @@ namespace rhi
         // windows //
         /////////////
 
-        virtual auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<window, GLFWwindow *> = 0;
+        virtual auto create_window(render_pass pass, const int2 & dimensions, std::string_view title) -> window = 0;
+        virtual auto get_glfw_window(window window) -> GLFWwindow * = 0;
+        virtual auto get_swapchain_framebuffer(window window) -> framebuffer = 0;
         virtual void destroy_window(window window) = 0;
 
         ///////////////
         // rendering //
         ///////////////
 
-        virtual void begin_render_pass(window window) = 0;
+        virtual void begin_frame(window window) = 0;
+        virtual void begin_render_pass(render_pass pass, framebuffer framebuffer) = 0;
         virtual void bind_pipeline(pipeline pipe) = 0;
         virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
         virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
@@ -128,7 +139,7 @@ namespace rhi
         virtual void draw(int first_vertex, int vertex_count) = 0;
         virtual void draw_indexed(int first_index, int index_count) = 0;
         virtual void end_render_pass() = 0;
-        virtual void present(window window) = 0;
+        virtual void end_frame(window window) = 0;
         virtual void wait_idle() = 0;
     };
 }

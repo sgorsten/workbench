@@ -28,7 +28,9 @@ public:
 
     void destroy(Handle h)
     {
-        objects.erase(h.id);
+        auto it = objects.find(h.id);
+        if(it == objects.end()) throw std::logic_error("invalid handle");
+        objects.erase(it);
     }
 };
 
@@ -81,7 +83,7 @@ class descriptor_emulator
     template<> struct traits<rhi::pipeline_layout> { using type = pipeline_layout; };
     heterogeneous_object_set<traits, rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set, rhi::pipeline_layout> objects;
 public:
-    int get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const;
+    size_t get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const;
 
     rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings);
     rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets);

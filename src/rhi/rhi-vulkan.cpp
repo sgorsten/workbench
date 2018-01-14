@@ -66,8 +66,7 @@ namespace vk
         VkSemaphore image_available {}, render_finished {};
         uint2 dims;
         rhi::image depth_image;
-        VkRenderPass render_pass;
-        framebuffer swapchain_framebuffer;
+        rhi::framebuffer swapchain_framebuffer;
     };
 
     struct device : rhi::device
@@ -92,15 +91,18 @@ namespace vk
         template<class T> struct traits;
         template<> struct traits<rhi::buffer> { using type = buffer; };
         template<> struct traits<rhi::image> { using type = image; };
+        template<> struct traits<rhi::render_pass> { using type = VkRenderPass; };
+        template<> struct traits<rhi::framebuffer> { using type = framebuffer; };
         template<> struct traits<rhi::descriptor_pool> { using type = VkDescriptorPool; };
-        template<> struct traits<rhi::descriptor_set_layout> { using type = VkDescriptorSetLayout; };      
+        template<> struct traits<rhi::descriptor_set_layout> { using type = VkDescriptorSetLayout; };
         template<> struct traits<rhi::descriptor_set> { using type = VkDescriptorSet; };
         template<> struct traits<rhi::pipeline_layout> { using type = VkPipelineLayout; };
         template<> struct traits<rhi::input_layout> { using type = input_layout; };
         template<> struct traits<rhi::shader> { using type = shader; }; 
         template<> struct traits<rhi::pipeline> { using type = pipeline; };
         template<> struct traits<rhi::window> { using type = window; };
-        heterogeneous_object_set<traits, rhi::buffer, rhi::image, rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set,
+        heterogeneous_object_set<traits, rhi::buffer, rhi::image, rhi::render_pass, rhi::framebuffer,
+            rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set,
             rhi::pipeline_layout, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
 
         device(std::function<void(const char *)> debug_callback);
@@ -120,6 +122,10 @@ namespace vk
 
         rhi::image make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect);
         void destroy_image(rhi::image image);
+        void destroy_framebuffer(rhi::framebuffer framebuffer);
+
+        rhi::render_pass create_render_pass(const rhi::render_pass_desc & desc) override;
+        void destroy_render_pass(rhi::render_pass pass) override;
 
         // descriptors
         rhi::descriptor_pool create_descriptor_pool() override;
@@ -146,12 +152,15 @@ namespace vk
         void destroy_pipeline(rhi::pipeline pipeline) override;
 
         // windows
-        std::tuple<rhi::window, GLFWwindow *> create_window(const int2 & dimensions, std::string_view title) override;
+        rhi::window create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) override;
+        GLFWwindow * get_glfw_window(rhi::window window) override { return objects[window].glfw_window; }
+        rhi::framebuffer get_swapchain_framebuffer(rhi::window window) override { return objects[window].swapchain_framebuffer; }
         void destroy_window(rhi::window window) override;
 
         // rendering
         VkCommandBuffer cmd;
-        void begin_render_pass(rhi::window window) override;
+        void begin_frame(rhi::window window) override;
+        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override;
         void bind_pipeline(rhi::pipeline pipe) override;
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override;
         void bind_vertex_buffer(int index, rhi::buffer_range range) override;
@@ -159,7 +168,7 @@ namespace vk
         void draw(int first_vertex, int vertex_count) override;
         void draw_indexed(int first_index, int index_count) override;
         void end_render_pass() override;
-        void present(rhi::window window) override;
+        void end_frame(rhi::window window) override;
         void wait_idle() override;
     };
 }
@@ -479,6 +488,49 @@ void vk::device::destroy_image(rhi::image image)
     objects.destroy(image); 
 }
 
+void vk::device::destroy_framebuffer(rhi::framebuffer framebuffer)
+{
+    for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
+    objects.destroy(framebuffer);
+}
+
+static VkAttachmentDescription make_attachment_description(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp load_op, VkImageLayout initial_layout=VK_IMAGE_LAYOUT_UNDEFINED, VkAttachmentStoreOp store_op=VK_ATTACHMENT_STORE_OP_DONT_CARE, VkImageLayout final_layout=VK_IMAGE_LAYOUT_UNDEFINED)
+{
+    return {0, format, samples, load_op, store_op, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, initial_layout, final_layout};
+}
+
+rhi::render_pass vk::device::create_render_pass(const rhi::render_pass_desc & desc) 
+{
+    const VkAttachmentDescription attachments[]
+    {
+        make_attachment_description(selection.surface_format.format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR),
+        make_attachment_description(VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED)
+    };
+    const VkAttachmentReference color_refs[] {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    const VkAttachmentReference depth_ref {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+
+    VkSubpassDescription subpass_desc {};
+    subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass_desc.colorAttachmentCount = exactly(countof(color_refs));
+    subpass_desc.pColorAttachments = color_refs;
+    subpass_desc.pDepthStencilAttachment = &depth_ref;
+    
+    VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    render_pass_info.attachmentCount = exactly(countof(attachments));
+    render_pass_info.pAttachments = attachments;
+    render_pass_info.subpassCount = 1;
+    render_pass_info.pSubpasses = &subpass_desc;
+
+    auto [handle, pass] = objects.create<rhi::render_pass>();
+    check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass));
+    return handle;
+}
+void vk::device::destroy_render_pass(rhi::render_pass pass)
+{ 
+    vkDestroyRenderPass(dev, objects[pass], nullptr);
+    objects.destroy(pass); 
+}
+
 ////////////////////////////
 // vk::device descriptors //
 ////////////////////////////
@@ -720,7 +772,7 @@ rhi::pipeline vk::device::create_pipeline(const rhi::pipeline_desc & desc)
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = objects[desc.layout];
-    pipelineInfo.renderPass = objects[rhi::window{1}].render_pass;
+    pipelineInfo.renderPass = objects[rhi::render_pass{1}];
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
     pipelineInfo.basePipelineIndex = -1; // Optional
@@ -738,12 +790,7 @@ void vk::device::destroy_pipeline(rhi::pipeline pipeline)
 // vk::device windows //
 ////////////////////////
 
-VkAttachmentDescription make_attachment_description(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp load_op, VkImageLayout initial_layout=VK_IMAGE_LAYOUT_UNDEFINED, VkAttachmentStoreOp store_op=VK_ATTACHMENT_STORE_OP_DONT_CARE, VkImageLayout final_layout=VK_IMAGE_LAYOUT_UNDEFINED)
-{
-    return {0, format, samples, load_op, store_op, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, initial_layout, final_layout};
-}
-
-std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dimensions, std::string_view title) 
+rhi::window vk::device::create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) 
 {
     const std::string buffer {begin(title), end(title)};
     auto [handle, win] = objects.create<rhi::window>();
@@ -804,38 +851,9 @@ std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dim
     VkSemaphoreCreateInfo semaphore_info {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     check("vkCreateSemaphore", vkCreateSemaphore(dev, &semaphore_info, nullptr, &win.image_available));
     check("vkCreateSemaphore", vkCreateSemaphore(dev, &semaphore_info, nullptr, &win.render_finished));
-
-    ///////////// render pass //////////
-
-    // Create render pass
-    const VkAttachmentDescription attachments[]
-    {
-        make_attachment_description(selection.surface_format.format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR),
-        make_attachment_description(VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED)
-    };
-    const VkAttachmentReference color_refs[] {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-    const VkAttachmentReference depth_ref {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-
-    VkSubpassDescription subpass_desc {};
-    subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass_desc.colorAttachmentCount = exactly(countof(color_refs));
-    subpass_desc.pColorAttachments = color_refs;
-    subpass_desc.pDepthStencilAttachment = &depth_ref;
     
-    VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-    render_pass_info.attachmentCount = exactly(countof(attachments));
-    render_pass_info.pAttachments = attachments;
-    render_pass_info.subpassCount = 1;
-    render_pass_info.pSubpasses = &subpass_desc;
-
-    //auto [handle, render_pass] = objects.create<gfx::render_pass>();
-    check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &win.render_pass));
-
-    //////////
-
     // Create swapchain framebuffer
-    auto & fb = win.swapchain_framebuffer;
-    //auto [fb_handle, fb] = objects.create<gfx::framebuffer>();
+    auto [fb_handle, fb] = objects.create<rhi::framebuffer>();
     fb.dims = dimensions;
     fb.framebuffers.resize(win.swapchain_image_views.size());
     win.depth_image = make_render_target(dimensions, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -843,7 +861,7 @@ std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dim
     {
         std::vector<VkImageView> attachments {win.swapchain_image_views[i], objects[win.depth_image].image_view};
         VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        framebuffer_info.renderPass = win.render_pass; //objects[render_pass];
+        framebuffer_info.renderPass = objects[pass];
         framebuffer_info.attachmentCount = exactly(attachments.size());
         framebuffer_info.pAttachments = attachments.data();
         framebuffer_info.width = dimensions.x;
@@ -851,17 +869,16 @@ std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dim
         framebuffer_info.layers = 1;
         check("vkCreateFramebuffer", vkCreateFramebuffer(dev, &framebuffer_info, nullptr, &fb.framebuffers[i]));
     }   
-    //win.swapchain_framebuffer = fb_handle;
+    win.swapchain_framebuffer = fb_handle;
 
-    return {handle, win.glfw_window};
+    return handle;
 }
 
 void vk::device::destroy_window(rhi::window window)
 { 
     auto & win = objects[window];
-    for(auto fb : win.swapchain_framebuffer.framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
+    destroy_framebuffer(win.swapchain_framebuffer);
     destroy_image(win.depth_image);
-    vkDestroyRenderPass(dev, win.render_pass, nullptr);
     vkDestroySemaphore(dev, win.render_finished, nullptr);
     vkDestroySemaphore(dev, win.image_available, nullptr);
     for(auto view : win.swapchain_image_views) vkDestroyImageView(dev, view, nullptr);
@@ -875,24 +892,29 @@ void vk::device::destroy_window(rhi::window window)
 // vk::device rendering //
 //////////////////////////
 
-void vk::device::begin_render_pass(rhi::window window)
+void vk::device::begin_frame(rhi::window window)
 {
     auto & win = objects[window];
-    auto & fb = win.swapchain_framebuffer;
+    auto & fb = objects[win.swapchain_framebuffer];
     check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
+}
+
+void vk::device::begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer)
+{
+    auto & fb = objects[framebuffer];
 
     VkClearValue clear_values[] {{0, 0, 0, 1}, {1.0f, 0}};
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass_begin_info.renderPass = objects[window].render_pass;//objects[render_pass];
+    pass_begin_info.renderPass = objects[pass];
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
-    pass_begin_info.renderArea = {{0,0},{(uint32_t)fb.dims.x,(uint32_t)fb.dims.y}};
+    pass_begin_info.renderArea = {{0,0},{exactly(fb.dims.x),exactly(fb.dims.y)}};
     pass_begin_info.clearValueCount = exactly(countof(clear_values));
     pass_begin_info.pClearValues = clear_values;
 
     cmd = begin_transient();
     vkCmdBeginRenderPass(cmd, &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-    const VkViewport viewports[] {{static_cast<float>(pass_begin_info.renderArea.offset.x), static_cast<float>(pass_begin_info.renderArea.offset.y), 
-        static_cast<float>(pass_begin_info.renderArea.extent.width), static_cast<float>(pass_begin_info.renderArea.extent.height), 0.0f, 1.0f}};
+    const VkViewport viewports[] {{exactly(pass_begin_info.renderArea.offset.x), exactly(pass_begin_info.renderArea.offset.y), 
+        exactly(pass_begin_info.renderArea.extent.width), exactly(pass_begin_info.renderArea.extent.height), 0.0f, 1.0f}};
     vkCmdSetViewport(cmd, 0, 1, viewports);
     vkCmdSetScissor(cmd, 0, 1, &pass_begin_info.renderArea);    
 }
@@ -933,7 +955,7 @@ void vk::device::end_render_pass()
     vkCmdEndRenderPass(cmd);
 }
 
-void vk::device::present(rhi::window window)
+void vk::device::end_frame(rhi::window window)
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(cmd)); 
 
@@ -955,7 +977,7 @@ void vk::device::present(rhi::window window)
     present_info.pWaitSemaphores = &win.render_finished;
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &win.swapchain;
-    present_info.pImageIndices = &win.swapchain_framebuffer.current_index;
+    present_info.pImageIndices = &objects[win.swapchain_framebuffer].current_index;
     check("vkQueuePresentKHR", vkQueuePresentKHR(queue, &present_info));
             
     check("vkQueueWaitIdle", vkQueueWaitIdle(queue)); // TODO: Do something with fences instead

@@ -1,6 +1,6 @@
 #include "rhi-internal.h"
 
-int descriptor_emulator::get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const
+size_t descriptor_emulator::get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const
 {
     const auto & pipe_layout = objects[layout];
     const auto & set_layout = objects[pipe_layout.sets[set]];

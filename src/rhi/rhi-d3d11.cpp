@@ -34,6 +34,18 @@ namespace d3d
         char * mapped = 0;
     };
 
+    struct render_pass
+    {
+        rhi::render_pass_desc desc;
+    };
+
+    struct framebuffer
+    {
+        int2 dims;
+        ID3D11RenderTargetView * render_target_view;
+        ID3D11DepthStencilView * depth_stencil_view;
+    };
+
     struct descriptor_set_layout
     {
         std::vector<rhi::descriptor_binding> bindings;
@@ -58,12 +70,9 @@ namespace d3d
     struct window
     {
         GLFWwindow * w;
-
         IDXGISwapChain * swap_chain;
-        ID3D11RenderTargetView * render_target_view;
-
         ID3D11Texture2D * depth_texture;
-        ID3D11DepthStencilView * depth_stencil_view;
+        rhi::framebuffer fb;
     };
 
     struct device : rhi::device
@@ -77,11 +86,13 @@ namespace d3d
 
         template<class T> struct traits;
         template<> struct traits<rhi::buffer> { using type = buffer; };
+        template<> struct traits<rhi::render_pass> { using type = render_pass; };
+        template<> struct traits<rhi::framebuffer> { using type = framebuffer; };
         template<> struct traits<rhi::input_layout> { using type = input_layout; };
         template<> struct traits<rhi::shader> { using type = shader_module; }; 
         template<> struct traits<rhi::pipeline> { using type = pipeline; };
         template<> struct traits<rhi::window> { using type = window; };
-        heterogeneous_object_set<traits, rhi::buffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
+        heterogeneous_object_set<traits, rhi::buffer, rhi::render_pass, rhi::framebuffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
         descriptor_emulator desc_emulator;
 
         pipeline * current_pipeline;   
@@ -110,9 +121,20 @@ namespace d3d
 
         rhi::device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
 
-        auto create_window(const int2 & dimensions, std::string_view title) -> std::tuple<rhi::window, GLFWwindow *> override 
+        rhi::render_pass create_render_pass(const rhi::render_pass_desc & desc) override 
         {
+            auto [handle, pass] = objects.create<rhi::render_pass>();
+            pass.desc = desc;
+            return handle;
+        }
+        void destroy_render_pass(rhi::render_pass pass) override { objects.destroy(pass); }
+
+        rhi::window create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) override
+        {
+            auto [fb_handle, fb] = objects.create<rhi::framebuffer>();
             auto [handle, window] = objects.create<rhi::window>();
+            fb.dims = dimensions;
+            window.fb = fb_handle;
 
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
@@ -134,7 +156,7 @@ namespace d3d
             hr = window.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image);
             if(FAILED(hr)) throw std::runtime_error("IDXGISwapChain::GetBuffer(...) failed");
 
-            hr = dev->CreateRenderTargetView(image, nullptr, &window.render_target_view);
+            hr = dev->CreateRenderTargetView(image, nullptr, &fb.render_target_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
             D3D11_TEXTURE2D_DESC desc {};
@@ -149,11 +171,13 @@ namespace d3d
             hr = dev->CreateTexture2D(&desc, nullptr, &window.depth_texture);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateTexture2D(...) failed");
 
-            hr = dev->CreateDepthStencilView(window.depth_texture, nullptr, &window.depth_stencil_view);
+            hr = dev->CreateDepthStencilView(window.depth_texture, nullptr, &fb.depth_stencil_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
-            return {handle, window.w};
+            return {handle};
         }
+        GLFWwindow * get_glfw_window(rhi::window window) override { return objects[window].w; }
+        rhi::framebuffer get_swapchain_framebuffer(rhi::window window) override { return objects[window].fb; }
 
         std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
         {
@@ -242,7 +266,7 @@ namespace d3d
 		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
 		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
 		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
-		            compiler.set_decoration(resource.id, spv::DecorationBinding, desc_emulator.get_flat_buffer_binding(desc.layout, set, binding));
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_buffer_binding(desc.layout, set, binding)));
 	            }
                 spirv_cross::CompilerHLSL::Options options;
                 options.shader_model = 50;
@@ -282,17 +306,24 @@ namespace d3d
         void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }        
         void destroy_window(rhi::window window) override { objects.destroy(window); }
 
-        void begin_render_pass(rhi::window window) override
+        void begin_frame(rhi::window window) override
         {
+        
+        }
+
+        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override
+        {
+            auto & fb = objects[framebuffer];
+
             ctx->ClearState();
             ctx->RSSetState(rasterizer_state);
 
             FLOAT rgba[] {0,0,0,1};
-            ctx->ClearRenderTargetView(objects[window].render_target_view, rgba);
-            ctx->ClearDepthStencilView(objects[window].depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
+            ctx->ClearRenderTargetView(fb.render_target_view, rgba);
+            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
-            ctx->OMSetRenderTargets(1, &objects[window].render_target_view, objects[window].depth_stencil_view);
-            D3D11_VIEWPORT vp {0, 0, 512, 512, 0, 1};
+            ctx->OMSetRenderTargets(1, &fb.render_target_view, fb.depth_stencil_view);
+            D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
             ctx->RSSetViewports(1, &vp);
         }
 
@@ -352,7 +383,7 @@ namespace d3d
 
         }
 
-        void present(rhi::window window) override
+        void end_frame(rhi::window window) override
         {
             objects[window].swap_chain->Present(1, 0);
         }
