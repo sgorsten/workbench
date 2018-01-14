@@ -19,14 +19,15 @@ namespace rhi
     template<class T> bool operator != (const handle<T> & a, const handle<T> & b) { return a.id != b.id; }
 
     // Object types
-    using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
-    using pipeline_layout = handle<struct pipeline_layout_tag>;
+    using buffer = handle<struct buffer_tag>;
+    using image = handle<struct image_tag>;
     using descriptor_pool = handle<struct descriptor_pool_tag>;
+    using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
     using descriptor_set = handle<struct descriptor_set_tag>;
+    using pipeline_layout = handle<struct pipeline_layout_tag>;
     using input_layout = handle<struct input_layout_tag>;
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;
-    using buffer = handle<struct buffer_tag>;
     using window = handle<struct window_tag>;
 
     // Descriptor set layout creation info
@@ -43,11 +44,11 @@ namespace rhi
     enum class compare_op { never, less, equal, less_or_equal, greater, not_equal, greater_or_equal, always };
     struct pipeline_desc
     {
-        pipeline_layout layout;             // descriptors
-        input_layout input;                 // input state
-        std::vector<shader> stages;         // programmable stages
-        primitive_topology topology;        // rasterizer state
-        compare_op depth_test;
+        pipeline_layout layout;                 // descriptors
+        input_layout input;                     // input state
+        std::vector<shader> stages;             // programmable stages
+        primitive_topology topology;            // rasterizer state
+        std::optional<compare_op> depth_test;
     };
 
     // Buffer creation info

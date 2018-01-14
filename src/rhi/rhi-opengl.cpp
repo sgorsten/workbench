@@ -242,13 +242,14 @@ namespace gl
 
         void bind_pipeline(rhi::pipeline pipe) override
         {
-            current_pipeline = &objects[pipe];
-            glUseProgram(current_pipeline->program_object);
-            objects[current_pipeline->desc.input].bind_vertex_array();
-            glEnable(GL_DEPTH_TEST);
-            glDepthFunc(GL_NEVER | static_cast<int>(current_pipeline->desc.depth_test));
+            auto & p = objects[pipe];
+            glUseProgram(p.program_object);
+            objects[p.desc.input].bind_vertex_array();
+            (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
+            if(p.desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*p.desc.depth_test));
             glEnable(GL_CULL_FACE);
             glCullFace(GL_BACK);
+            current_pipeline = &p;
         }
 
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override

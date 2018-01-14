@@ -1,6 +1,5 @@
 #include "rhi-internal.h"
-
-#include <variant>
+#include <sstream>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -14,6 +13,21 @@
 
 namespace d3d
 {
+    struct error : public std::error_category
+    {
+        const char * name() const noexcept override { return "HRESULT"; }
+        std::string message(int value) const override { return std::to_string(value); }
+        static const std::error_category & instance() { static error inst; return inst; }
+    };
+    void check(const char * func, HRESULT result)
+    {
+        if(FAILED(result))
+        {
+            std::ostringstream ss; ss << func << "(...) failed";
+            throw std::system_error(std::error_code(exactly(result), error::instance()), ss.str());
+        }
+    }
+
     struct buffer
     {
         ID3D11Buffer * buffer_object;
@@ -77,32 +91,21 @@ namespace d3d
             const D3D_FEATURE_LEVEL feature_levels[] {D3D_FEATURE_LEVEL_11_1};
             ID3D11Device * dev11;
             ID3D11DeviceContext * ctx11;
-            auto hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_DEBUG, feature_levels, 1, D3D11_SDK_VERSION, &dev11, nullptr, &ctx11);
-            if(FAILED(hr)) throw std::runtime_error("D3D11CreateDevice(...) failed");
-
-            hr = dev11->QueryInterface(__uuidof(ID3D11Device1), (void **)&dev);
-            if(FAILED(hr)) throw std::runtime_error("IUnknown::QueryInterface(...) failed");
-
-            hr = ctx11->QueryInterface(__uuidof(ID3D11DeviceContext1), (void **)&ctx);
-            if(FAILED(hr)) throw std::runtime_error("IUnknown::QueryInterface(...) failed");
-            
-            IDXGIDevice * dxgi_dev = nullptr;
-            hr = dev->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi_dev);
-            if(FAILED(hr)) throw std::runtime_error("IUnknown::QueryInterface(...) failed");
+            IDXGIDevice * dxgi_dev;
+            check("D3D11CreateDevice", D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_DEBUG, feature_levels, 1, D3D11_SDK_VERSION, &dev11, nullptr, &ctx11));
+            check("IUnknown::QueryInterface", dev11->QueryInterface(__uuidof(ID3D11Device1), (void **)&dev));
+            check("IUnknown::QueryInterface", ctx11->QueryInterface(__uuidof(ID3D11DeviceContext1), (void **)&ctx));
+            check("IUnknown::QueryInterface", dev->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi_dev));
 
             IDXGIAdapter * adapter = nullptr;
-            hr = dxgi_dev->GetAdapter(&adapter);
-            if(FAILED(hr)) throw std::runtime_error("IDXGIDevice::GetAdapter(...) failed");
-
-            hr = adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory);
-            if(FAILED(hr)) throw std::runtime_error("IDXGIAdapter::GetParent(...) failed");
+            check("IDXGIDevice::GetAdapter", dxgi_dev->GetAdapter(&adapter));
+            check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory));
 
             D3D11_RASTERIZER_DESC rdesc {};
             rdesc.FillMode = D3D11_FILL_SOLID;
             rdesc.CullMode = D3D11_CULL_BACK;
             rdesc.FrontCounterClockwise = TRUE;
-            hr = dev->CreateRasterizerState(&rdesc, &rasterizer_state);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRasterizerState(...) failed");            
+            check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rdesc, &rasterizer_state));
         }
 
         rhi::device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
