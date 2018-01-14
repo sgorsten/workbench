@@ -31,6 +31,7 @@ namespace rhi
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;
     using window = handle<struct window_tag>;
+    using command_buffer = handle<struct command_buffer_tag>;
 
     struct render_pass_desc {};
 
@@ -130,15 +131,18 @@ namespace rhi
         // rendering //
         ///////////////
 
-        virtual void begin_render_pass(render_pass pass, framebuffer framebuffer) = 0;
-        virtual void bind_pipeline(pipeline pipe) = 0;
-        virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
-        virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
-        virtual void bind_index_buffer(buffer_range range) = 0;
-        virtual void draw(int first_vertex, int vertex_count) = 0;
-        virtual void draw_indexed(int first_index, int index_count) = 0;
-        virtual void end_render_pass() = 0;
-        virtual void present(window window) = 0;
+        virtual auto start_command_buffer() -> command_buffer = 0;
+
+        virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) = 0;
+        virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;
+        virtual void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) = 0;
+        virtual void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) = 0;
+        virtual void bind_index_buffer(command_buffer cmd, buffer_range range) = 0;
+        virtual void draw(command_buffer cmd, int first_vertex, int vertex_count) = 0;
+        virtual void draw_indexed(command_buffer cmd, int first_index, int index_count) = 0;
+        virtual void end_render_pass(command_buffer cmd) = 0;
+
+        virtual void present(command_buffer submit, window window) = 0;
         virtual void wait_idle() = 0;
     };
 }

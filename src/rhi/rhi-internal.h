@@ -111,3 +111,33 @@ public:
     void destroy(rhi::pipeline_layout layout) { objects.destroy(layout); }
     void destroy(rhi::descriptor_pool pool) { objects.destroy(pool); }
 };
+
+struct begin_render_pass_command { rhi::render_pass pass; rhi::framebuffer framebuffer; };
+struct bind_pipeline_command { rhi::pipeline pipe; };
+struct bind_descriptor_set_command { rhi::pipeline_layout layout; int set_index; rhi::descriptor_set set; };
+struct bind_vertex_buffer_command { int index; rhi::buffer_range range; };
+struct bind_index_buffer_command { rhi::buffer_range range; };
+struct draw_command { int first_vertex, vertex_count; };
+struct draw_indexed_command { int first_index, index_count; };
+struct end_render_pass_command {};
+
+class command_emulator
+{
+    using command = std::variant<begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
+    struct command_buffer { std::vector<command> commands; };
+    object_set<rhi::command_buffer, command_buffer> buffers;
+public:
+    rhi::command_buffer create_command_buffer() { return std::get<rhi::command_buffer>(buffers.create()); }
+    void destroy_command_buffer(rhi::command_buffer cmd) { buffers.destroy(cmd); }
+
+    void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer}); }
+    void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
+    void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) { buffers[cmd].commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }
+    void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) { buffers[cmd].commands.push_back(bind_vertex_buffer_command{index, range}); }
+    void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) { buffers[cmd].commands.push_back(bind_index_buffer_command{range}); }
+    void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) { buffers[cmd].commands.push_back(draw_command{first_vertex, vertex_count}); }
+    void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) { buffers[cmd].commands.push_back(draw_indexed_command{first_index, index_count}); }
+    void end_render_pass(rhi::command_buffer cmd) { buffers[cmd].commands.push_back(end_render_pass_command{}); }
+
+    template<class ExecuteCommandFunction> void execute(rhi::command_buffer cmd, ExecuteCommandFunction execute_command) const { for(auto & command : buffers[cmd].commands) std::visit(execute_command, command); }
+};

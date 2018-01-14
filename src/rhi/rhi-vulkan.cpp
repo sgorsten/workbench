@@ -101,9 +101,11 @@ namespace vk
         template<> struct traits<rhi::shader> { using type = shader; }; 
         template<> struct traits<rhi::pipeline> { using type = pipeline; };
         template<> struct traits<rhi::window> { using type = window; };
+        template<> struct traits<rhi::command_buffer> { using type = VkCommandBuffer; };
         heterogeneous_object_set<traits, rhi::buffer, rhi::image, rhi::render_pass, rhi::framebuffer,
             rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set,
-            rhi::pipeline_layout, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
+            rhi::pipeline_layout, rhi::input_layout, rhi::shader, rhi::pipeline, 
+            rhi::window, rhi::command_buffer> objects;
 
         device(std::function<void(const char *)> debug_callback);
         ~device();
@@ -158,16 +160,17 @@ namespace vk
         void destroy_window(rhi::window window) override;
 
         // rendering
-        VkCommandBuffer cmd;
-        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override;
-        void bind_pipeline(rhi::pipeline pipe) override;
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override;
-        void bind_vertex_buffer(int index, rhi::buffer_range range) override;
-        void bind_index_buffer(rhi::buffer_range range) override;
-        void draw(int first_vertex, int vertex_count) override;
-        void draw_indexed(int first_index, int index_count) override;
-        void end_render_pass() override;
-        void present(rhi::window window) override;
+        rhi::command_buffer start_command_buffer() override;
+        void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) override;
+        void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) override;
+        void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override;
+        void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) override;
+        void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) override;
+        void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) override;
+        void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) override;
+        void end_render_pass(rhi::command_buffer cmd) override;
+
+        void present(rhi::command_buffer submit, rhi::window window) override;
         void wait_idle() override;
     };
 }
@@ -893,7 +896,14 @@ void vk::device::destroy_window(rhi::window window)
 // vk::device rendering //
 //////////////////////////
 
-void vk::device::begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer)
+rhi::command_buffer vk::device::start_command_buffer()
+{
+    auto [handle, cmd] = objects.create<rhi::command_buffer>();
+    cmd = begin_transient();
+    return handle;
+}
+
+void vk::device::begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer)
 {
     auto & fb = objects[framebuffer];
 
@@ -905,52 +915,51 @@ void vk::device::begin_render_pass(rhi::render_pass pass, rhi::framebuffer frame
     pass_begin_info.clearValueCount = exactly(countof(clear_values));
     pass_begin_info.pClearValues = clear_values;
 
-    cmd = begin_transient();
-    vkCmdBeginRenderPass(cmd, &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(objects[cmd], &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
     const VkViewport viewports[] {{0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1}};
-    vkCmdSetViewport(cmd, 0, exactly(countof(viewports)), viewports);
-    vkCmdSetScissor(cmd, 0, 1, &pass_begin_info.renderArea);    
+    vkCmdSetViewport(objects[cmd], 0, exactly(countof(viewports)), viewports);
+    vkCmdSetScissor(objects[cmd], 0, 1, &pass_begin_info.renderArea);    
 }
 
-void vk::device::bind_pipeline(rhi::pipeline pipe)
+void vk::device::bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe)
 {
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, objects[pipe].pipeline_object);
+    vkCmdBindPipeline(objects[cmd], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[pipe].pipeline_object);
 }
 
-void vk::device::bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set)
+void vk::device::bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set)
 {
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, objects[layout], set_index, 1, &objects[set], 0, nullptr);
+    vkCmdBindDescriptorSets(objects[cmd], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[layout], set_index, 1, &objects[set], 0, nullptr);
 }
 
-void vk::device::bind_vertex_buffer(int index, rhi::buffer_range range)
+void vk::device::bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range)
 {
     VkDeviceSize offset = range.offset;
-    vkCmdBindVertexBuffers(cmd, index, 1, &objects[range.buffer].buffer_object, &offset);
+    vkCmdBindVertexBuffers(objects[cmd], index, 1, &objects[range.buffer].buffer_object, &offset);
 }
 
-void vk::device::bind_index_buffer(rhi::buffer_range range)
+void vk::device::bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range)
 {
-    vkCmdBindIndexBuffer(cmd, objects[range.buffer].buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(objects[cmd], objects[range.buffer].buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
 }
 
-void vk::device::draw(int first_vertex, int vertex_count)
+void vk::device::draw(rhi::command_buffer cmd, int first_vertex, int vertex_count)
 {
-    vkCmdDraw(cmd, vertex_count, 1, first_vertex, 0);
+    vkCmdDraw(objects[cmd], vertex_count, 1, first_vertex, 0);
 }
 
-void vk::device::draw_indexed(int first_index, int index_count)
+void vk::device::draw_indexed(rhi::command_buffer cmd, int first_index, int index_count)
 {
-    vkCmdDrawIndexed(cmd, index_count, 1, first_index, 0, 0);
+    vkCmdDrawIndexed(objects[cmd], index_count, 1, first_index, 0, 0);
 }
 
-void vk::device::end_render_pass()
+void vk::device::end_render_pass(rhi::command_buffer cmd)
 {
-    vkCmdEndRenderPass(cmd);
+    vkCmdEndRenderPass(objects[cmd]);
 }
 
-void vk::device::present(rhi::window window)
+void vk::device::present(rhi::command_buffer submit, rhi::window window)
 {
-    check("vkEndCommandBuffer", vkEndCommandBuffer(cmd)); 
+    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[submit])); 
 
     auto & win = objects[window];
 
@@ -960,7 +969,7 @@ void vk::device::present(rhi::window window)
     submit_info.pWaitSemaphores = &win.image_available;
     submit_info.pWaitDstStageMask = wait_stages;
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &cmd;
+    submit_info.pCommandBuffers = &objects[submit];
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &win.render_finished;
     check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submit_info, nullptr)); //objects[fence]));
@@ -974,8 +983,7 @@ void vk::device::present(rhi::window window)
     check("vkQueuePresentKHR", vkQueuePresentKHR(queue, &present_info));
             
     check("vkQueueWaitIdle", vkQueueWaitIdle(queue)); // TODO: Do something with fences instead
-    vkFreeCommandBuffers(dev, staging_pool, 1, &cmd);
-    cmd = 0;
+    vkFreeCommandBuffers(dev, staging_pool, 1, &objects[submit]);
 
     auto & fb = objects[win.swapchain_framebuffer];
     check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));

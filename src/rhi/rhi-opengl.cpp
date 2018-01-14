@@ -86,6 +86,7 @@ namespace gl
         template<> struct traits<rhi::window> { using type = window; };
         heterogeneous_object_set<traits, rhi::buffer, rhi::render_pass, rhi::framebuffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
         descriptor_emulator desc_emulator;
+        command_emulator cmd_emulator;
 
         void enable_debug_callback(GLFWwindow * window)
         {
@@ -261,81 +262,88 @@ namespace gl
         void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }       
         void destroy_window(rhi::window window) override { objects.destroy(window); }
 
-        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override
+        void submit_command_buffer(rhi::command_buffer cmd)
         {
-            auto & fb = objects[framebuffer];
-            glfwMakeContextCurrent(fb.context);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
-            glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        }
-
-        void bind_pipeline(rhi::pipeline pipe) override
-        {
-            auto & p = objects[pipe];
-            glUseProgram(p.program_object);
-            objects[p.desc.input].bind_vertex_array();
-            (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
-            if(p.desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*p.desc.depth_test));
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            current_pipeline = &p;
-        }
-
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
-        {
-            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](size_t index, rhi::buffer_range range)
-            {
-                glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), objects[range.buffer].buffer_object, range.offset, range.size);
-            });
-        }
-
-        void bind_vertex_buffer(int index, rhi::buffer_range range) override
-        {
-            for(auto & buf : objects[current_pipeline->desc.input].bindings)
-            {
-                if(buf.index == index)
+            cmd_emulator.execute(cmd, overload(
+                [this](const begin_render_pass_command & c)
                 {
-                    glBindVertexBuffer(index, objects[range.buffer].buffer_object, range.offset, buf.stride);
-                }
-            }        
+                    auto & fb = objects[c.framebuffer];
+                    glfwMakeContextCurrent(fb.context);
+                    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
+                    glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
+                    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                },
+                [this](const bind_pipeline_command & c)
+                {
+                    auto & p = objects[c.pipe];
+                    glUseProgram(p.program_object);
+                    objects[p.desc.input].bind_vertex_array();
+                    (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
+                    if(p.desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*p.desc.depth_test));
+                    glEnable(GL_CULL_FACE);
+                    glCullFace(GL_BACK);
+                    current_pipeline = &p;
+                },
+                [this](const bind_descriptor_set_command & c)
+                {
+                    desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, [this](size_t index, rhi::buffer_range range)
+                    {
+                        glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), objects[range.buffer].buffer_object, range.offset, range.size);
+                    });
+                },
+                [this](const bind_vertex_buffer_command & c)
+                {
+                    for(auto & buf : objects[current_pipeline->desc.input].bindings)
+                    {
+                        if(buf.index == c.index)
+                        {
+                            glBindVertexBuffer(c.index, objects[c.range.buffer].buffer_object, c.range.offset, buf.stride);
+                        }
+                    }        
+                },
+                [this](const bind_index_buffer_command & c)
+                {
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, objects[c.range.buffer].buffer_object);
+                    index_buffer_offset = c.range.offset;
+                },
+                [this](const draw_command & c)
+                {
+                    switch(current_pipeline->desc.topology)
+                    {
+                    case rhi::primitive_topology::points: glDrawArrays(GL_POINTS, c.first_vertex, c.vertex_count); break;
+                    case rhi::primitive_topology::lines: glDrawArrays(GL_LINES, c.first_vertex, c.vertex_count); break;
+                    case rhi::primitive_topology::triangles: glDrawArrays(GL_TRIANGLES, c.first_vertex, c.vertex_count); break;
+                    }
+                },
+                [this](const draw_indexed_command & c)
+                {
+                    auto indices = (const void *)(index_buffer_offset + c.first_index*sizeof(uint32_t));
+                    switch(current_pipeline->desc.topology)
+                    {
+                    case rhi::primitive_topology::points: glDrawElements(GL_POINTS, c.index_count, GL_UNSIGNED_INT, indices); break;
+                    case rhi::primitive_topology::lines: glDrawElements(GL_LINES, c.index_count, GL_UNSIGNED_INT, indices); break;
+                    case rhi::primitive_topology::triangles: glDrawElements(GL_TRIANGLES, c.index_count, GL_UNSIGNED_INT, indices); break;
+                    }
+                },
+                [this](const end_render_pass_command &) {}
+            ));
         }
 
-        void bind_index_buffer(rhi::buffer_range range) override
-        {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, objects[range.buffer].buffer_object);
-            index_buffer_offset = range.offset;
-        }
+        rhi::command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
+        void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
+        void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
+        void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
+        void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
+        void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
+        void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
+        void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
+        void end_render_pass(rhi::command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void draw(int first_vertex, int vertex_count) override
+        void present(rhi::command_buffer submit, rhi::window window) override
         {
-            switch(current_pipeline->desc.topology)
-            {
-            case rhi::primitive_topology::points: glDrawArrays(GL_POINTS, first_vertex, vertex_count); break;
-            case rhi::primitive_topology::lines: glDrawArrays(GL_LINES, first_vertex, vertex_count); break;
-            case rhi::primitive_topology::triangles: glDrawArrays(GL_TRIANGLES, first_vertex, vertex_count); break;
-            }
-        }
-
-        void draw_indexed(int first_index, int index_count) override
-        {
-            auto indices = (const void *)(index_buffer_offset + first_index*sizeof(uint32_t));
-            switch(current_pipeline->desc.topology)
-            {
-            case rhi::primitive_topology::points: glDrawElements(GL_POINTS, index_count, GL_UNSIGNED_INT, indices); break;
-            case rhi::primitive_topology::lines: glDrawElements(GL_LINES, index_count, GL_UNSIGNED_INT, indices); break;
-            case rhi::primitive_topology::triangles: glDrawElements(GL_TRIANGLES, index_count, GL_UNSIGNED_INT, indices); break;
-            }
-        }
-
-        void end_render_pass() override
-        {
-
-        }
-
-        void present(rhi::window window) override
-        {
+            submit_command_buffer(submit);
             glfwSwapBuffers(objects[window].w);
+            cmd_emulator.destroy_command_buffer(submit);            
         }
 
         void wait_idle() override { glFlush(); }

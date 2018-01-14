@@ -94,6 +94,7 @@ namespace d3d
         template<> struct traits<rhi::window> { using type = window; };
         heterogeneous_object_set<traits, rhi::buffer, rhi::render_pass, rhi::framebuffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
         descriptor_emulator desc_emulator;
+        command_emulator cmd_emulator;
 
         pipeline * current_pipeline;   
 
@@ -306,78 +307,79 @@ namespace d3d
         void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }        
         void destroy_window(rhi::window window) override { objects.destroy(window); }
         
-        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) override
+        void submit_command_buffer(rhi::command_buffer cmd)
         {
-            auto & fb = objects[framebuffer];
-
-            ctx->ClearState();
-            ctx->RSSetState(rasterizer_state);
-
-            FLOAT rgba[] {0,0,0,1};
-            ctx->ClearRenderTargetView(fb.render_target_view, rgba);
-            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
-
-            ctx->OMSetRenderTargets(1, &fb.render_target_view, fb.depth_stencil_view);
-            D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
-            ctx->RSSetViewports(1, &vp);
-        }
-
-        void bind_pipeline(rhi::pipeline pipe) override
-        {
-            current_pipeline = &objects[pipe];
-            ctx->IASetInputLayout(current_pipeline->layout);
-            ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
-            ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
-            switch(current_pipeline->desc.topology)
-            {
-            case rhi::primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
-            case rhi::primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
-            case rhi::primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
-            }
-        }
-
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override
-        {
-            desc_emulator.bind_descriptor_set(layout, set_index, set, [this](size_t index, rhi::buffer_range range) 
-            { 
-                const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
-                ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
-                ctx->PSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
-            });
-        }
-
-        void bind_vertex_buffer(int index, rhi::buffer_range range) override
-        {
-            for(auto & buf : objects[current_pipeline->desc.input].bindings)
-            {
-                if(buf.index == index)
+            cmd_emulator.execute(cmd, overload(
+                [this](const begin_render_pass_command & c)
                 {
-                    const UINT stride = exactly(buf.stride), offset = exactly(range.offset);
-                    ctx->IASetVertexBuffers(index, 1, &objects[range.buffer].buffer_object, &stride, &offset);
-                }
-            }
+                    auto & fb = objects[c.framebuffer];
+
+                    ctx->ClearState();
+                    ctx->RSSetState(rasterizer_state);
+
+                    FLOAT rgba[] {0,0,0,1};
+                    ctx->ClearRenderTargetView(fb.render_target_view, rgba);
+                    ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+                    ctx->OMSetRenderTargets(1, &fb.render_target_view, fb.depth_stencil_view);
+                    D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
+                    ctx->RSSetViewports(1, &vp);
+                },
+                [this](const bind_pipeline_command & c)
+                {
+                    current_pipeline = &objects[c.pipe];
+                    ctx->IASetInputLayout(current_pipeline->layout);
+                    ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
+                    ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
+                    switch(current_pipeline->desc.topology)
+                    {
+                    case rhi::primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
+                    case rhi::primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
+                    case rhi::primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
+                    }
+                },
+                [this](const bind_descriptor_set_command & c)
+                {
+                    desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, [this](size_t index, rhi::buffer_range range) 
+                    { 
+                        const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
+                        ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
+                        ctx->PSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
+                    });
+                },
+                [this](const bind_vertex_buffer_command & c)
+                {
+                    for(auto & buf : objects[current_pipeline->desc.input].bindings)
+                    {
+                        if(buf.index == c.index)
+                        {
+                            const UINT stride = exactly(buf.stride), offset = exactly(c.range.offset);
+                            ctx->IASetVertexBuffers(c.index, 1, &objects[c.range.buffer].buffer_object, &stride, &offset);
+                        }
+                    }      
+                },
+                [this](const bind_index_buffer_command & c) { ctx->IASetIndexBuffer(objects[c.range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); },
+                [this](const draw_command & c) { ctx->Draw(c.vertex_count, c.first_vertex); },
+                [this](const draw_indexed_command & c) { ctx->DrawIndexed(c.index_count, c.first_index, 0); },
+                [this](const end_render_pass_command &) {}
+            ));
         }
 
-        void bind_index_buffer(rhi::buffer_range range) override
-        {
-            ctx->IASetIndexBuffer(objects[range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(range.offset));
-        }
+        rhi::command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
+        void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
+        void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
+        void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
+        void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
+        void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
+        void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
+        void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
+        void end_render_pass(rhi::command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void draw(int first_vertex, int vertex_count) override
+        void present(rhi::command_buffer submit, rhi::window window) override
         {
-            ctx->Draw(vertex_count, first_vertex);
-        }
-
-        void draw_indexed(int first_index, int index_count) override
-        {
-            ctx->DrawIndexed(index_count, first_index, 0);
-        }
-
-        void end_render_pass() override {}
-
-        void present(rhi::window window) override
-        {
+            submit_command_buffer(submit);
             objects[window].swap_chain->Present(1, 0);
+            cmd_emulator.destroy_command_buffer(submit);
         }
 
         void wait_idle() override { ctx->Flush(); }

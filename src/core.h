@@ -37,3 +37,18 @@ template<class T, size_t N> constexpr size_t countof(const T (&)[N]) { return N;
 template<class T, size_t N> constexpr size_t countof(const std::array<T,N> &) { return N; }
 template<class T> constexpr size_t countof(const std::initializer_list<T> & ilist) { return ilist.size(); }
 template<class T> constexpr size_t countof(const std::vector<T> & vec) { return vec.size(); }
+
+// Helper to produce overload sets of lambdas
+template<class... F> struct overload_set;
+template<class Last> struct overload_set<Last> : Last
+{
+    overload_set(Last last) : Last(last) {}
+    using Last::operator();
+};
+template<class First, class... Rest> struct overload_set<First,Rest...> : First, overload_set<Rest...>
+{
+    overload_set(First first, Rest... rest) : First(first), overload_set<Rest...>(rest...) {}
+    using First::operator();
+    using overload_set<Rest...>::operator();
+};
+template<class... F> overload_set<F...> overload(F... f) { return {f...}; }
