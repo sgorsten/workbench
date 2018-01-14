@@ -268,6 +268,15 @@ namespace d3d
             return handle;
         }
 
+        void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
+        void destroy_pipeline_layout(rhi::pipeline_layout layout) override { desc_emulator.destroy(layout); }
+        void destroy_descriptor_pool(rhi::descriptor_pool pool) override { desc_emulator.destroy(pool); }
+        void destroy_input_layout(rhi::input_layout layout) override { input_layouts.destroy(layout); }
+        void destroy_shader(rhi::shader shader) override { shaders.destroy(shader); }
+        void destroy_pipeline(rhi::pipeline pipeline)  override { pipelines.destroy(pipeline); }
+        void destroy_buffer(rhi::buffer buffer) override { buffers.destroy(buffer); }
+        void destroy_window(rhi::window window) override { windows.destroy(window); }
+
         void begin_render_pass(rhi::window window) override
         {
             ctx->ClearState();
@@ -342,6 +351,8 @@ namespace d3d
         {
             windows[window].swap_chain->Present(1, 0);
         }
+
+        void wait_idle() override { ctx->Flush(); }
     };
 }
 

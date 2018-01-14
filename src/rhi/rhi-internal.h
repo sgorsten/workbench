@@ -1,29 +1,34 @@
 #pragma once
 #include "../rhi.h"
 
-template<class HANDLE, class TYPE> class object_set
+template<class Handle, class Type> class object_set
 {
-    std::unordered_map<int, TYPE> objects;
+    std::unordered_map<int, Type> objects;
     int next_id = 1;
 public:
-    const TYPE & operator[] (HANDLE h) const
+    const Type & operator[] (Handle h) const
     { 
         const auto it = objects.find(h.id);
         if(it == objects.end()) throw std::logic_error("invalid handle");
         return it->second;
     }
 
-    TYPE & operator[] (HANDLE h) 
+    Type & operator[] (Handle h) 
     { 
         const auto it = objects.find(h.id);
         if(it == objects.end()) throw std::logic_error("invalid handle");
         return it->second;
     }
 
-    std::tuple<HANDLE, TYPE &> create() 
+    std::tuple<Handle, Type &> create() 
     { 
         const int id = next_id++;
-        return {HANDLE{id}, objects[id]};
+        return {Handle{id}, objects[id]};
+    }
+
+    void destroy(Handle h)
+    {
+        objects.erase(h.id);
     }
 };
 
@@ -85,4 +90,9 @@ public:
         // TODO: bind samplers
         for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.buffer_offsets[set_index] + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
     }
+
+    // TODO: Check for dependencies before wiping out
+    void destroy(rhi::descriptor_set_layout layout) { descriptor_set_layouts.destroy(layout); }
+    void destroy(rhi::pipeline_layout layout) { pipeline_layouts.destroy(layout); }
+    void destroy(rhi::descriptor_pool pool) { descriptor_pools.destroy(pool); }
 };

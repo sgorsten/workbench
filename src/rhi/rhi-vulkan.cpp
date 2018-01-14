@@ -7,54 +7,14 @@
 
 namespace vk
 {
-    const char * to_string(VkResult result)
-    {
-        switch(result)
-        {
-        case VK_SUCCESS: return "VK_SUCCESS";
-        case VK_NOT_READY: return "VK_NOT_READY";
-        case VK_TIMEOUT: return "VK_TIMEOUT";
-        case VK_EVENT_SET: return "VK_EVENT_SET";
-        case VK_EVENT_RESET: return "VK_EVENT_RESET";
-        case VK_INCOMPLETE: return "VK_INCOMPLETE";
-        case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
-        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
-        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
-        case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
-        case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED";
-        case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
-        case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
-        case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
-        case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
-        case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
-        case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
-        case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL";
-        case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
-        case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR";
-        case VK_SUBOPTIMAL_KHR: return "VK_SUBOPTIMAL_KHR";
-        case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
-        case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: return "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR";
-        case VK_ERROR_VALIDATION_FAILED_EXT: return "VK_ERROR_VALIDATION_FAILED_EXT";
-        case VK_ERROR_INVALID_SHADER_NV: return "VK_ERROR_INVALID_SHADER_NV";
-        case VK_ERROR_OUT_OF_POOL_MEMORY_KHR: return "VK_ERROR_OUT_OF_POOL_MEMORY_KHR";
-        default: fail_fast();
-        }
-    }
-
+    const char * to_string(VkResult result);
     struct vulkan_error : public std::error_category
     {
         const char * name() const noexcept override { return "VkResult"; }
         std::string message(int value) const override { return std::to_string(static_cast<VkResult>(value)); }
         static const std::error_category & instance() { static vulkan_error inst; return inst; }
     };
-
-    void check(VkResult result)
-    {
-        if(result != VK_SUCCESS)
-        {
-            throw std::system_error(std::error_code(result, vulkan_error::instance()), "VkResult");
-        }
-    }
+    void check(VkResult result);
 
     struct physical_device_selection
     {
@@ -65,74 +25,6 @@ namespace vk
         uint32_t swap_image_count;
         VkSurfaceTransformFlagBitsKHR surface_transform;
     };
-
-    bool has_extension(const std::vector<VkExtensionProperties> & extensions, std::string_view name)
-    {
-        return std::find_if(begin(extensions), end(extensions), [name](const VkExtensionProperties & p) { return p.extensionName == name; }) != end(extensions);
-    }
-
-    physical_device_selection select_physical_device(VkInstance instance, const std::vector<const char *> & required_extensions)
-    {
-        glfwDefaultWindowHints();
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_VISIBLE, 0);
-        GLFWwindow * example_window = glfwCreateWindow(256, 256, "", nullptr, nullptr);
-        VkSurfaceKHR example_surface = 0;
-        check(glfwCreateWindowSurface(instance, example_window, nullptr, &example_surface));
-
-        uint32_t device_count = 0;
-        check(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
-        std::vector<VkPhysicalDevice> physical_devices(device_count);
-        check(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices.data()));
-        for(auto & d : physical_devices)
-        {
-            // Skip physical devices which do not support our desired extensions
-            uint32_t extension_count = 0;
-            check(vkEnumerateDeviceExtensionProperties(d, 0, &extension_count, nullptr));
-            std::vector<VkExtensionProperties> extensions(extension_count);
-            check(vkEnumerateDeviceExtensionProperties(d, 0, &extension_count, extensions.data()));
-            for(auto req : required_extensions) if(!has_extension(extensions, req)) continue;
-
-            // Skip physical devices who do not support at least one format and present mode for our example surface
-            VkSurfaceCapabilitiesKHR surface_caps;
-            check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(d, example_surface, &surface_caps));
-            uint32_t surface_format_count = 0, present_mode_count = 0;
-            check(vkGetPhysicalDeviceSurfaceFormatsKHR(d, example_surface, &surface_format_count, nullptr));
-            std::vector<VkSurfaceFormatKHR> surface_formats(surface_format_count);
-            check(vkGetPhysicalDeviceSurfaceFormatsKHR(d, example_surface, &surface_format_count, surface_formats.data()));
-            check(vkGetPhysicalDeviceSurfacePresentModesKHR(d, example_surface, &present_mode_count, nullptr));
-            std::vector<VkPresentModeKHR> surface_present_modes(present_mode_count);
-            check(vkGetPhysicalDeviceSurfacePresentModesKHR(d, example_surface, &present_mode_count, surface_present_modes.data()));
-            if(surface_formats.empty() || surface_present_modes.empty()) continue;
-        
-            // Select a format
-            VkSurfaceFormatKHR surface_format = surface_formats[0];
-            for(auto f : surface_formats) if(f.format==VK_FORMAT_R8G8B8A8_UNORM && f.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) surface_format = f;
-            if(surface_format.format == VK_FORMAT_UNDEFINED) surface_format = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-
-            // Select a presentation mode
-            VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
-            for(auto mode : surface_present_modes) if(mode == VK_PRESENT_MODE_MAILBOX_KHR) present_mode = mode;
-
-            // Look for a queue family that supports both graphics and presentation to our example surface
-            uint32_t queue_family_count = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties(d, &queue_family_count, nullptr);
-            std::vector<VkQueueFamilyProperties> queue_family_props(queue_family_count);
-            vkGetPhysicalDeviceQueueFamilyProperties(d, &queue_family_count, queue_family_props.data());
-            for(uint32_t i=0; i<queue_family_props.size(); ++i)
-            {
-                VkBool32 present = VK_FALSE;
-                check(vkGetPhysicalDeviceSurfaceSupportKHR(d, i, example_surface, &present));
-                if((queue_family_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && present) 
-                {
-                    vkDestroySurfaceKHR(instance, example_surface, nullptr);
-                    glfwDestroyWindow(example_window);
-                    return {d, i, surface_format, present_mode, std::min(surface_caps.minImageCount+1, surface_caps.maxImageCount), surface_caps.currentTransform};
-                }
-            }
-        }
-        throw std::runtime_error("no suitable Vulkan device present");
-    }
 
     struct input_layout
     {
@@ -219,6 +111,7 @@ namespace vk
         rhi::device_info get_info() const override { return {"Vulkan 1.0", {coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
 
         std::tuple<rhi::window, GLFWwindow *> create_window(const int2 & dimensions, std::string_view title) override;
+        void destroy_window(rhi::window window) override;
 
         rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override 
         { 
@@ -437,6 +330,43 @@ namespace vk
 
         std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override;
 
+        void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override 
+        { 
+            vkDestroyDescriptorSetLayout(dev, descriptor_set_layouts[layout], nullptr);
+            descriptor_set_layouts.destroy(layout); 
+        }
+        void destroy_pipeline_layout(rhi::pipeline_layout layout) override
+        {
+            vkDestroyPipelineLayout(dev, pipeline_layouts[layout], nullptr);
+            pipeline_layouts.destroy(layout); 
+        }
+        void destroy_descriptor_pool(rhi::descriptor_pool pool) override
+        {
+            vkDestroyDescriptorPool(dev, descriptor_pools[pool], nullptr);
+            descriptor_pools.destroy(pool); 
+        }
+        void destroy_input_layout(rhi::input_layout layout) override
+        {
+            input_layouts.destroy(layout); 
+        }
+        void destroy_shader(rhi::shader shader) override
+        {
+            vkDestroyShaderModule(dev, shaders[shader].module, nullptr);
+            shaders.destroy(shader); 
+        }
+        void destroy_pipeline(rhi::pipeline pipeline) override
+        {
+            vkDestroyPipeline(dev, pipelines[pipeline].pipeline_object, nullptr);
+            pipelines.destroy(pipeline); 
+        }
+        void destroy_buffer(rhi::buffer buffer) override
+        {
+            vkDestroyBuffer(dev, buffers[buffer].buffer_object, nullptr);
+            if(buffers[buffer].mapped) vkUnmapMemory(dev, buffers[buffer].memory_object);
+            vkFreeMemory(dev, buffers[buffer].memory_object, nullptr);
+            buffers.destroy(buffer); 
+        }
+
         VkCommandBuffer cmd;
 
         void begin_render_pass(rhi::window window) override
@@ -526,6 +456,8 @@ namespace vk
             vkFreeCommandBuffers(dev, staging_pool, 1, &cmd);
             cmd = 0;
         }
+
+        void wait_idle() override { vkDeviceWaitIdle(dev); }
     };
 }
 
@@ -533,6 +465,131 @@ std::shared_ptr<rhi::device> create_vulkan_device(std::function<void(const char 
 {
     return std::make_shared<vk::device>(debug_callback);
 }
+
+////////////////////
+// error handling //
+////////////////////
+
+const char * vk::to_string(VkResult result)
+{
+    switch(result)
+    {
+    case VK_SUCCESS: return "VK_SUCCESS";
+    case VK_NOT_READY: return "VK_NOT_READY";
+    case VK_TIMEOUT: return "VK_TIMEOUT";
+    case VK_EVENT_SET: return "VK_EVENT_SET";
+    case VK_EVENT_RESET: return "VK_EVENT_RESET";
+    case VK_INCOMPLETE: return "VK_INCOMPLETE";
+    case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+    case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+    case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+    case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+    case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED";
+    case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
+    case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+    case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
+    case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+    case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
+    case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+    case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL";
+    case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
+    case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR";
+    case VK_SUBOPTIMAL_KHR: return "VK_SUBOPTIMAL_KHR";
+    case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
+    case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: return "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR";
+    case VK_ERROR_VALIDATION_FAILED_EXT: return "VK_ERROR_VALIDATION_FAILED_EXT";
+    case VK_ERROR_INVALID_SHADER_NV: return "VK_ERROR_INVALID_SHADER_NV";
+    case VK_ERROR_OUT_OF_POOL_MEMORY_KHR: return "VK_ERROR_OUT_OF_POOL_MEMORY_KHR";
+    default: fail_fast();
+    }
+}
+
+void vk::check(VkResult result)
+{
+    if(result != VK_SUCCESS)
+    {
+        throw std::system_error(std::error_code(result, vulkan_error::instance()), "VkResult");
+    }
+}
+
+///////////////////////////////
+// physical device selection //
+///////////////////////////////
+
+namespace vk
+{
+    static bool has_extension(const std::vector<VkExtensionProperties> & extensions, std::string_view name)
+    {
+        return std::find_if(begin(extensions), end(extensions), [name](const VkExtensionProperties & p) { return p.extensionName == name; }) != end(extensions);
+    }
+
+    static physical_device_selection select_physical_device(VkInstance instance, const std::vector<const char *> & required_extensions)
+    {
+        glfwDefaultWindowHints();
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_VISIBLE, 0);
+        GLFWwindow * example_window = glfwCreateWindow(256, 256, "", nullptr, nullptr);
+        VkSurfaceKHR example_surface = 0;
+        check(glfwCreateWindowSurface(instance, example_window, nullptr, &example_surface));
+
+        uint32_t device_count = 0;
+        check(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
+        std::vector<VkPhysicalDevice> physical_devices(device_count);
+        check(vkEnumeratePhysicalDevices(instance, &device_count, physical_devices.data()));
+        for(auto & d : physical_devices)
+        {
+            // Skip physical devices which do not support our desired extensions
+            uint32_t extension_count = 0;
+            check(vkEnumerateDeviceExtensionProperties(d, 0, &extension_count, nullptr));
+            std::vector<VkExtensionProperties> extensions(extension_count);
+            check(vkEnumerateDeviceExtensionProperties(d, 0, &extension_count, extensions.data()));
+            for(auto req : required_extensions) if(!has_extension(extensions, req)) continue;
+
+            // Skip physical devices who do not support at least one format and present mode for our example surface
+            VkSurfaceCapabilitiesKHR surface_caps;
+            check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(d, example_surface, &surface_caps));
+            uint32_t surface_format_count = 0, present_mode_count = 0;
+            check(vkGetPhysicalDeviceSurfaceFormatsKHR(d, example_surface, &surface_format_count, nullptr));
+            std::vector<VkSurfaceFormatKHR> surface_formats(surface_format_count);
+            check(vkGetPhysicalDeviceSurfaceFormatsKHR(d, example_surface, &surface_format_count, surface_formats.data()));
+            check(vkGetPhysicalDeviceSurfacePresentModesKHR(d, example_surface, &present_mode_count, nullptr));
+            std::vector<VkPresentModeKHR> surface_present_modes(present_mode_count);
+            check(vkGetPhysicalDeviceSurfacePresentModesKHR(d, example_surface, &present_mode_count, surface_present_modes.data()));
+            if(surface_formats.empty() || surface_present_modes.empty()) continue;
+        
+            // Select a format
+            VkSurfaceFormatKHR surface_format = surface_formats[0];
+            for(auto f : surface_formats) if(f.format==VK_FORMAT_R8G8B8A8_UNORM && f.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) surface_format = f;
+            if(surface_format.format == VK_FORMAT_UNDEFINED) surface_format = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+
+            // Select a presentation mode
+            VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
+            for(auto mode : surface_present_modes) if(mode == VK_PRESENT_MODE_MAILBOX_KHR) present_mode = mode;
+
+            // Look for a queue family that supports both graphics and presentation to our example surface
+            uint32_t queue_family_count = 0;
+            vkGetPhysicalDeviceQueueFamilyProperties(d, &queue_family_count, nullptr);
+            std::vector<VkQueueFamilyProperties> queue_family_props(queue_family_count);
+            vkGetPhysicalDeviceQueueFamilyProperties(d, &queue_family_count, queue_family_props.data());
+            for(uint32_t i=0; i<queue_family_props.size(); ++i)
+            {
+                VkBool32 present = VK_FALSE;
+                check(vkGetPhysicalDeviceSurfaceSupportKHR(d, i, example_surface, &present));
+                if((queue_family_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && present) 
+                {
+                    vkDestroySurfaceKHR(instance, example_surface, nullptr);
+                    glfwDestroyWindow(example_window);
+                    return {d, i, surface_format, present_mode, std::min(surface_caps.minImageCount+1, surface_caps.maxImageCount), surface_caps.currentTransform};
+                }
+            }
+        }
+        throw std::runtime_error("no suitable Vulkan device present");
+    }
+}
+
+////////////////
+// vk::device //
+////////////////
 
 vk::device::device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
 { 
@@ -814,4 +871,18 @@ std::tuple<rhi::window, GLFWwindow *> vk::device::create_window(const int2 & dim
     //win.swapchain_framebuffer = fb_handle;
 
     return {handle, win.glfw_window};
+}
+
+void vk::device::destroy_window(rhi::window window)
+{ 
+    auto & win = windows[window];
+    for(auto fb : win.swapchain_framebuffer.framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
+    vkDestroyRenderPass(dev, win.render_pass, nullptr);
+    vkDestroySemaphore(dev, win.render_finished, nullptr);
+    vkDestroySemaphore(dev, win.image_available, nullptr);
+    for(auto view : win.swapchain_image_views) vkDestroyImageView(dev, view, nullptr);
+    vkDestroySwapchainKHR(dev, win.swapchain, nullptr);
+    vkDestroySurfaceKHR(instance, win.surface, nullptr);
+    glfwDestroyWindow(win.glfw_window);
+    windows.destroy(window);
 }

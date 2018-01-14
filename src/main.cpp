@@ -136,26 +136,35 @@ struct common_assets
 
 class device_session
 {
-    rhi::device & dev;
+    std::shared_ptr<rhi::device> dev;
     rhi::device_info info;
     dynamic_buffer uniform_buffer;
     rhi::descriptor_pool desc_pool;
 
     rhi::descriptor_set_layout per_scene_view_layout, per_object_layout;
-    rhi::pipeline_layout pipe_layout;    
+    rhi::pipeline_layout pipe_layout;
+    rhi::input_layout mesh_layout;
+    rhi::shader vs, fs, fs_unlit;
     rhi::pipeline wire_pipe, solid_pipe;
     rhi::buffer_range basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer;
     
     rhi::window rwindow;
     std::unique_ptr<glfw::window> gwindow;
 public:
-    device_session(const common_assets & assets, rhi::device & dev, const int2 & window_pos) : 
-        dev{dev}, info{dev.get_info()}, 
+    device_session(const common_assets & assets, std::shared_ptr<rhi::device> dev, const int2 & window_pos) : 
+        dev{dev}, info{dev->get_info()}, 
         uniform_buffer{dev, rhi::buffer_usage::uniform, 16*1024} 
     {
-        desc_pool = dev.create_descriptor_pool();
+        desc_pool = dev->create_descriptor_pool();
 
-        auto mesh_layout = dev.create_input_layout({
+        per_scene_view_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::uniform_buffer, 1},
+            {1, rhi::descriptor_type::uniform_buffer, 1}
+        });
+        per_object_layout = dev->create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
+        pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
+
+        mesh_layout = dev->create_input_layout({
             {0, sizeof(mesh_vertex), {
                 {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
                 {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
@@ -163,34 +172,46 @@ public:
             }}
         });
 
-        auto vs = dev.create_shader(assets.vs);
-        auto fs = dev.create_shader(assets.fs);
-        auto fs_unlit = dev.create_shader(assets.fs_unlit);
-
-        per_scene_view_layout = dev.create_descriptor_set_layout({
-            {0, rhi::descriptor_type::uniform_buffer, 1},
-            {1, rhi::descriptor_type::uniform_buffer, 1}
-        });
-        per_object_layout = dev.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
-        pipe_layout = dev.create_pipeline_layout({per_scene_view_layout, per_object_layout});
+        vs = dev->create_shader(assets.vs);
+        fs = dev->create_shader(assets.fs);
+        fs_unlit = dev->create_shader(assets.fs_unlit);
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
         GLFWwindow * w;
-        std::tie(rwindow, w) = dev.create_window({512,512}, ss.str());
+        std::tie(rwindow, w) = dev->create_window({512,512}, ss.str());
         gwindow = std::make_unique<glfw::window>(w);
         gwindow->set_pos(window_pos);
 
-        wire_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
-        solid_pipe = dev.create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+        wire_pipe = dev->create_pipeline({pipe_layout, mesh_layout, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
+        solid_pipe = dev->create_pipeline({pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
-        basis_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
-        ground_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
-        box_vertex_buffer = make_static_buffer(dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices);
+        basis_vertex_buffer = make_static_buffer(*dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices);
+        ground_vertex_buffer = make_static_buffer(*dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices);
+        box_vertex_buffer = make_static_buffer(*dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices);
 
-        ground_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.ground_mesh.triangles);
-        box_index_buffer = make_static_buffer(dev, rhi::buffer_usage::index, assets.box_mesh.triangles);
+        ground_index_buffer = make_static_buffer(*dev, rhi::buffer_usage::index, assets.ground_mesh.triangles);
+        box_index_buffer = make_static_buffer(*dev, rhi::buffer_usage::index, assets.box_mesh.triangles);
+    }
 
-
+    ~device_session()
+    {
+        gwindow.reset();
+        dev->destroy_buffer(box_index_buffer.buffer);
+        dev->destroy_buffer(ground_index_buffer.buffer);
+        dev->destroy_buffer(box_vertex_buffer.buffer);
+        dev->destroy_buffer(ground_vertex_buffer.buffer);
+        dev->destroy_buffer(basis_vertex_buffer.buffer);
+        dev->destroy_pipeline(solid_pipe);
+        dev->destroy_pipeline(wire_pipe);
+        dev->destroy_window(rwindow);
+        dev->destroy_shader(fs_unlit);
+        dev->destroy_shader(fs);
+        dev->destroy_shader(vs);
+        dev->destroy_input_layout(mesh_layout);        
+        dev->destroy_pipeline_layout(pipe_layout);
+        dev->destroy_descriptor_set_layout(per_object_layout);
+        dev->destroy_descriptor_set_layout(per_scene_view_layout);
+        dev->destroy_descriptor_pool(desc_pool);
     }
 
     glfw::window & get_window() { return *gwindow; }
@@ -202,49 +223,49 @@ public:
         const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
         uniform_buffer.reset();
 
-        dev.reset_descriptor_pool(desc_pool);
-        auto per_scene_view_set = dev.alloc_descriptor_set(desc_pool, per_scene_view_layout);
-        dev.write_descriptor(per_scene_view_set, 0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f));
-        dev.write_descriptor(per_scene_view_set, 1, uniform_buffer.write(view_proj_matrix));
+        dev->reset_descriptor_pool(desc_pool);
+        auto per_scene_view_set = dev->alloc_descriptor_set(desc_pool, per_scene_view_layout);
+        dev->write_descriptor(per_scene_view_set, 0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f));
+        dev->write_descriptor(per_scene_view_set, 1, uniform_buffer.write(view_proj_matrix));
 
-        dev.begin_render_pass(rwindow);
+        dev->begin_render_pass(rwindow);
         {
-            auto set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
-            dev.write_descriptor(set, 0, uniform_buffer.write(float4x4{linalg::identity}));
+            auto set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
+            dev->write_descriptor(set, 0, uniform_buffer.write(float4x4{linalg::identity}));
 
-            dev.bind_pipeline(wire_pipe);
-            dev.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
-            dev.bind_descriptor_set(pipe_layout, 1, set);
-            dev.bind_vertex_buffer(0, basis_vertex_buffer);
-            dev.draw(0, 6);
+            dev->bind_pipeline(wire_pipe);
+            dev->bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
+            dev->bind_descriptor_set(pipe_layout, 1, set);
+            dev->bind_vertex_buffer(0, basis_vertex_buffer);
+            dev->draw(0, 6);
 
             // Draw the gorund
-            dev.bind_pipeline(solid_pipe);
-            set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
-            dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*0.3f)));
-            dev.bind_descriptor_set(pipe_layout, 1, set);
-            dev.bind_vertex_buffer(0, ground_vertex_buffer);
-            dev.bind_index_buffer(ground_index_buffer);
-            dev.draw_indexed(0, 6);
+            dev->bind_pipeline(solid_pipe);
+            set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
+            dev->write_descriptor(set, 0, uniform_buffer.write(translation_matrix(cam.coords(coord_axis::down)*0.3f)));
+            dev->bind_descriptor_set(pipe_layout, 1, set);
+            dev->bind_vertex_buffer(0, ground_vertex_buffer);
+            dev->bind_index_buffer(ground_index_buffer);
+            dev->draw_indexed(0, 6);
 
             // Draw a bunch of boxes
-            dev.bind_vertex_buffer(0, box_vertex_buffer);
-            dev.bind_index_buffer(box_index_buffer);
+            dev->bind_vertex_buffer(0, box_vertex_buffer);
+            dev->bind_index_buffer(box_index_buffer);
             for(int i=0; i<6; ++i)
             {
                 for(int j=0; j<6; ++j)
                 {
                     const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
-                    const auto set = dev.alloc_descriptor_set(desc_pool, per_object_layout);
-                    dev.write_descriptor(set, 0, uniform_buffer.write(translation_matrix(position)));
-                    dev.bind_descriptor_set(pipe_layout, 1, set);
-                    dev.draw_indexed(0, 36);
+                    const auto set = dev->alloc_descriptor_set(desc_pool, per_object_layout);
+                    dev->write_descriptor(set, 0, uniform_buffer.write(translation_matrix(position)));
+                    dev->bind_descriptor_set(pipe_layout, 1, set);
+                    dev->draw_indexed(0, 36);
                 }
             }            
         }
-        dev.end_render_pass();
+        dev->end_render_pass();
 
-        dev.present(rwindow);
+        dev->present(rwindow);
     }
 };
 
@@ -267,14 +288,10 @@ int main(int argc, const char * argv[]) try
     
     // Create the devices
     glfw::context context;
-    auto dev = create_opengl_device([](const char * message) { std::cerr << message << std::endl; });
-    device_session session {assets, *dev, {100,100}};
-
-    auto dev2 = create_d3d11_device([](const char * message) { std::cerr << message << std::endl; });
-    device_session session2 {assets, *dev2, {700,100}};
-
-    auto dev3 = create_vulkan_device([](const char * message) { std::cerr << message << std::endl; });
-    device_session session3 {assets, *dev3, {1300,100}};
+    auto debug = [](const char * message) { std::cerr << message << std::endl; };
+    device_session session {assets, create_opengl_device(debug), {100,100}};
+    device_session session2 {assets, create_d3d11_device(debug), {700,100}};
+    device_session session3 {assets, create_vulkan_device(debug), {1300,100}};
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();

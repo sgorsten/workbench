@@ -18,13 +18,19 @@ inline rhi::buffer_range make_static_buffer(rhi::device & dev, rhi::buffer_usage
 
 class dynamic_buffer
 {
+    std::shared_ptr<rhi::device> dev;
     rhi::buffer buffer;
     char * mapped;
     size_t used;
 public:
-    dynamic_buffer(rhi::device & dev, rhi::buffer_usage usage, size_t size)
+    dynamic_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : dev{dev}
     {
-        std::tie(buffer, mapped) = dev.create_buffer({size, usage, true}, nullptr);
+        std::tie(buffer, mapped) = dev->create_buffer({size, usage, true}, nullptr);
+    }
+
+    ~dynamic_buffer()
+    {
+        dev->destroy_buffer(buffer);
     }
 
     void reset()
