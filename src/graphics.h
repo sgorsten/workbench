@@ -18,7 +18,7 @@ namespace gfx
         rhi::buffer buffer;
         size_t size;
     public:
-        static_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, binary_view contents) : dev{dev}, buffer{std::get<rhi::buffer>(dev->create_buffer({contents.size, usage, false}, contents.data))}, size(contents.size) {}
+        static_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, binary_view contents) : dev{dev}, buffer{dev->create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
         ~static_buffer() { dev->destroy_buffer(buffer); }
 
         operator rhi::buffer_range() const { return {buffer, 0, size}; }
@@ -31,7 +31,7 @@ namespace gfx
         char * mapped;
         size_t size, used;
     public:
-        dynamic_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : dev{dev}, size{size} { std::tie(buffer, mapped) = dev->create_buffer({size, usage, true}, nullptr); }
+        dynamic_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : dev{dev}, buffer{dev->create_buffer({size, usage, true}, nullptr)}, mapped{dev->get_mapped_memory(buffer)}, size{size} {}
         ~dynamic_buffer() { dev->destroy_buffer(buffer); }
 
         void reset() { used = 0; }

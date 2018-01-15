@@ -27,7 +27,6 @@ namespace rhi
     struct gl_image
     {
         GLuint texture_object;
-        GLuint render_buffer_object;
     };
 
     struct gl_render_pass
@@ -205,6 +204,25 @@ namespace rhi
         }
         void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
 
+        framebuffer create_framebuffer(const framebuffer_desc & desc) override
+        {
+            auto [handle, fb] = objects.create<framebuffer>();
+            fb.context = hidden_window;
+            fb.dims = desc.dimensions;
+            std::vector<GLenum> draw_buffers;
+            glfwMakeContextCurrent(hidden_window); // Framebuffers are not shared between GL contexts, so create them all in the hidden window's context
+            glCreateFramebuffers(1, &fb.framebuffer_object);
+            for(size_t i=0; i<desc.color_attachments.size(); ++i) 
+            {
+                glNamedFramebufferTexture(fb.framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), objects[desc.color_attachments[i]].texture_object, 0);
+                draw_buffers.push_back(exactly(GL_COLOR_ATTACHMENT0+i));
+            }
+            if(desc.depth_attachment) glNamedFramebufferTexture(fb.framebuffer_object, GL_DEPTH_ATTACHMENT, objects[*desc.depth_attachment].texture_object, 0);
+            glNamedFramebufferDrawBuffers(fb.framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
+            return handle;
+        }
+        void destroy_framebuffer(framebuffer framebuffer) override { objects.destroy(framebuffer); }
+
         descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
         descriptor_pool create_descriptor_pool() override { return desc_emulator.create_descriptor_pool(); }
         void reset_descriptor_pool(descriptor_pool pool) override { desc_emulator.reset_descriptor_pool(pool); }
@@ -310,7 +328,7 @@ namespace rhi
             return handle;
         }
 
-        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override
+        buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
             auto [handle, buf] = objects.create<buffer>();
             glCreateBuffers(1, &buf.buffer_object);
@@ -318,10 +336,11 @@ namespace rhi
             if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
             glNamedBufferStorage(buf.buffer_object, desc.size, initial_data, flags);
             if(desc.dynamic) buf.mapped = reinterpret_cast<char *>(glMapNamedBuffer(buf.buffer_object, GL_WRITE_ONLY));
-            return {handle, buf.mapped};
+            return handle;
         }
-
+        char * get_mapped_memory(buffer buffer) override { return objects[buffer].mapped; }
         void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
+
         void destroy_descriptor_pool(descriptor_pool pool) override { desc_emulator.destroy(pool); }
         void destroy_descriptor_set_layout(descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
         void destroy_pipeline_layout(pipeline_layout layout) override { desc_emulator.destroy(layout); }

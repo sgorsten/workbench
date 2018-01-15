@@ -143,7 +143,7 @@ namespace rhi
 
         device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
 
-        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override
+        buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
             D3D11_BUFFER_DESC buffer_desc {};
             buffer_desc.ByteWidth = exactly(desc.size);
@@ -173,8 +173,9 @@ namespace rhi
                 buf.mapped = reinterpret_cast<char *>(sub.pData);
             }
 
-            return {handle, buf.mapped};
+            return handle;
         }
+        char * get_mapped_memory(buffer buffer) override { return objects[buffer].mapped; }
         void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
@@ -245,6 +246,16 @@ namespace rhi
             return handle;
         }
         void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
+
+        framebuffer create_framebuffer(const framebuffer_desc & desc) override
+        {
+            auto [handle, fb] = objects.create<framebuffer>();
+            fb.dims = desc.dimensions;
+            for(auto attachment : desc.color_attachments) fb.render_target_views.push_back(objects[attachment].render_target_view);
+            if(desc.depth_attachment) fb.depth_stencil_view = objects[*desc.depth_attachment].depth_stencil_view;
+            return handle;
+        }
+        void destroy_framebuffer(framebuffer framebuffer) override { objects.destroy(framebuffer); }
 
         window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
         {

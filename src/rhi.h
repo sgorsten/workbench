@@ -81,6 +81,15 @@ namespace rhi
         std::optional<attachment_desc> depth_attachment;
     };
 
+    // Framebuffer creation info
+    struct framebuffer_desc
+    {
+        int2 dimensions;
+        render_pass pass;
+        std::vector<image> color_attachments;
+        std::optional<image> depth_attachment;
+    };
+
     // Descriptor set layout creation info
     enum class descriptor_type { combined_image_sampler, uniform_buffer };
     struct descriptor_binding { int index; descriptor_type type; int count; };
@@ -124,27 +133,28 @@ namespace rhi
         // resources //
         ///////////////
 
-        virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
+        virtual buffer create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
+        virtual char * get_mapped_memory(buffer buffer) = 0;
         virtual void destroy_buffer(buffer buffer) = 0;
 
-        virtual auto create_image(const image_desc & desc, std::vector<const void *> initial_data) -> image = 0;
+        virtual image create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0;
         virtual void destroy_image(image image) = 0;
 
-        virtual auto create_sampler(const sampler_desc & desc) -> sampler = 0;
+        virtual sampler create_sampler(const sampler_desc & desc) = 0;
         virtual void destroy_sampler(sampler sampler) = 0;
 
         /////////////////
         // descriptors //
         /////////////////
 
-        virtual auto create_descriptor_pool() -> descriptor_pool = 0;
+        virtual descriptor_pool create_descriptor_pool() = 0;
         virtual void destroy_descriptor_pool(descriptor_pool pool) = 0;
 
-        virtual auto create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) -> descriptor_set_layout = 0;
+        virtual descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
         virtual void destroy_descriptor_set_layout(descriptor_set_layout layout) = 0;
 
         virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
-        virtual auto alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) -> descriptor_set = 0;
+        virtual descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) = 0;
 
@@ -152,36 +162,39 @@ namespace rhi
         // framebuffers //
         //////////////////
 
-        virtual auto create_render_pass(const render_pass_desc & desc) -> render_pass = 0;
+        virtual render_pass create_render_pass(const render_pass_desc & desc) = 0;
         virtual void destroy_render_pass(render_pass pass) = 0;
+
+        virtual framebuffer create_framebuffer(const framebuffer_desc & desc) = 0;
+        virtual void destroy_framebuffer(framebuffer framebuffer) = 0;
 
         ///////////////
         // pipelines //
         ///////////////
 
-        virtual auto create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) -> pipeline_layout = 0;
+        virtual pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) = 0;
         virtual void destroy_pipeline_layout(pipeline_layout layout) = 0;
 
-        virtual auto create_shader(const shader_module & module) -> shader = 0;
+        virtual shader create_shader(const shader_module & module) = 0;
         virtual void destroy_shader(shader shader) = 0;
 
-        virtual auto create_pipeline(const pipeline_desc & desc) -> pipeline = 0;
+        virtual pipeline create_pipeline(const pipeline_desc & desc) = 0;
         virtual void destroy_pipeline(pipeline pipeline) = 0;
 
         /////////////
         // windows //
         /////////////
 
-        virtual auto create_window(render_pass pass, const int2 & dimensions, std::string_view title) -> window = 0;
-        virtual auto get_glfw_window(window window) -> GLFWwindow * = 0;
-        virtual auto get_swapchain_framebuffer(window window) -> framebuffer = 0;
+        virtual window create_window(render_pass pass, const int2 & dimensions, std::string_view title) = 0;
+        virtual GLFWwindow * get_glfw_window(window window) = 0;
+        virtual framebuffer get_swapchain_framebuffer(window window) = 0;
         virtual void destroy_window(window window) = 0;
 
         ///////////////
         // rendering //
         ///////////////
 
-        virtual auto start_command_buffer() -> command_buffer = 0;
+        virtual command_buffer start_command_buffer() = 0;
 
         virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) = 0;
         virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;

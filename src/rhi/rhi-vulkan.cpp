@@ -122,8 +122,9 @@ namespace rhi
         // info
         device_info get_info() const override { return {"Vulkan 1.0", {coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
 
-        // buffers
-        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override;
+        // resources
+        buffer create_buffer(const buffer_desc & desc, const void * initial_data) override;
+        char * get_mapped_memory(buffer buffer) override { return objects[buffer].mapped; }
         void destroy_buffer(buffer buffer) override;
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override;
@@ -131,11 +132,6 @@ namespace rhi
 
         sampler create_sampler(const sampler_desc & desc) override;
         void destroy_sampler(sampler sampler) override;
-
-        void destroy_framebuffer(framebuffer framebuffer);
-
-        render_pass create_render_pass(const render_pass_desc & desc) override;
-        void destroy_render_pass(render_pass pass) override;
 
         // descriptors
         descriptor_pool create_descriptor_pool() override;
@@ -148,6 +144,13 @@ namespace rhi
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) override;
         void write_descriptor(descriptor_set set, int binding, buffer_range range) override;
         void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) override;
+
+        // framebuffers
+        render_pass create_render_pass(const render_pass_desc & desc) override;
+        void destroy_render_pass(render_pass pass) override;
+
+        framebuffer create_framebuffer(const framebuffer_desc & desc) override;
+        void destroy_framebuffer(framebuffer framebuffer) override;
 
         // pipelines
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override;
@@ -395,7 +398,7 @@ void vk_device::end_transient(VkCommandBuffer command_buffer)
 // vk_device buffers //
 ////////////////////////
 
-std::tuple<buffer, char *> vk_device::create_buffer(const buffer_desc & desc, const void * initial_data)
+buffer vk_device::create_buffer(const buffer_desc & desc, const void * initial_data)
 {
     auto [handle, b] = objects.create<buffer>();
 
@@ -435,7 +438,7 @@ std::tuple<buffer, char *> vk_device::create_buffer(const buffer_desc & desc, co
         check("vkMapMemory", vkMapMemory(dev, b.memory_object, 0, desc.size, 0, reinterpret_cast<void**>(&b.mapped)));
     }
 
-    return {handle, b.mapped};
+    return handle;
 }
 
 void vk_device::destroy_buffer(buffer buffer)
@@ -669,12 +672,6 @@ void vk_device::destroy_sampler(sampler sampler)
     objects.destroy(sampler);
 }
 
-void vk_device::destroy_framebuffer(framebuffer framebuffer)
-{
-    for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
-    objects.destroy(framebuffer);
-}
-
 static VkAttachmentDescription make_attachment_description(const rhi::attachment_desc & desc)
 {
     auto convert_layout = [](rhi::layout layout)
@@ -702,7 +699,6 @@ static VkAttachmentDescription make_attachment_description(const rhi::attachment
     ), desc.store_op);
     return attachment;
 }
-
 render_pass vk_device::create_render_pass(const render_pass_desc & desc) 
 {
     std::vector<VkAttachmentDescription> attachments;
@@ -739,6 +735,31 @@ void vk_device::destroy_render_pass(render_pass pass)
 { 
     vkDestroyRenderPass(dev, objects[pass], nullptr);
     objects.destroy(pass); 
+}
+
+framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
+{
+    auto [handle, fb] = objects.create<framebuffer>();
+    fb = {desc.dimensions, {VK_NULL_HANDLE}, 0};
+
+    std::vector<VkImageView> attachments;
+    for(auto attachment : desc.color_attachments) attachments.push_back(objects[attachment].image_view);
+    if(desc.depth_attachment) attachments.push_back(objects[*desc.depth_attachment].image_view);
+    
+    VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    framebuffer_info.renderPass = objects[desc.pass];
+    framebuffer_info.attachmentCount = exactly(attachments.size());
+    framebuffer_info.pAttachments = attachments.data();
+    framebuffer_info.width = exactly(desc.dimensions.x);
+    framebuffer_info.height = exactly(desc.dimensions.y);
+    framebuffer_info.layers = 1;
+    check("vkCreateFramebuffer", vkCreateFramebuffer(dev, &framebuffer_info, nullptr, &fb.framebuffers[0]));
+    return handle;
+}
+void vk_device::destroy_framebuffer(framebuffer framebuffer)
+{
+    for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
+    objects.destroy(framebuffer);
 }
 
 ////////////////////////////
