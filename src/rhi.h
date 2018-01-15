@@ -109,9 +109,9 @@ namespace rhi
 
         virtual auto get_info() const -> device_info = 0;
 
-        /////////////
-        // buffers //
-        /////////////
+        ///////////////
+        // resources //
+        ///////////////
 
         virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
         virtual void destroy_buffer(buffer buffer) = 0;
@@ -121,9 +121,6 @@ namespace rhi
 
         virtual auto create_sampler(const sampler_desc & desc) -> sampler = 0;
         virtual void destroy_sampler(sampler sampler) = 0;
-
-        virtual auto create_render_pass(const render_pass_desc & desc) -> render_pass = 0;
-        virtual void destroy_render_pass(render_pass pass) = 0;
 
         /////////////////
         // descriptors //
@@ -139,6 +136,13 @@ namespace rhi
         virtual auto alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) -> descriptor_set = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) = 0;
+
+        //////////////////
+        // framebuffers //
+        //////////////////
+
+        virtual auto create_render_pass(const render_pass_desc & desc) -> render_pass = 0;
+        virtual void destroy_render_pass(render_pass pass) = 0;
 
         ///////////////
         // pipelines //

@@ -516,11 +516,8 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
         break;
     default: throw std::logic_error("bad gfx::image_shape");
     }
-    switch(desc.format)
-    {
-    case image_format::r8g8b8a8_unorm: image_info.format = VK_FORMAT_R8G8B8A8_UNORM; break;
-    default: throw std::logic_error("bad gfx::image_format");
-    }
+
+    image_info.format = static_cast<VkFormat>(get_format_info(desc.format).vk_format);
     image_info.extent = {static_cast<uint32_t>(desc.dimensions.x), static_cast<uint32_t>(desc.dimensions.y), static_cast<uint32_t>(desc.dimensions.z)};
     image_info.mipLevels = desc.mip_levels;        
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;

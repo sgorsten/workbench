@@ -1,6 +1,14 @@
 #pragma once
 #include "../rhi.h"
 
+struct image_format_info { rhi::image_format format; size_t pixel_size; int vk_format, gl_format, dxgi_format; };
+
+constexpr image_format_info image_formats[]
+{
+    {rhi::image_format::r8g8b8a8_unorm, 4, /*VK_FORMAT_R8G8B8A8_UNORM*/37, /*GL_RGBA8*/0x8058, /*DXGI_FORMAT_R8G8B8A8_UNORM*/28}
+};
+inline const image_format_info & get_format_info(rhi::image_format format) { for(auto & info : image_formats) if(info.format == format) return info; fail_fast(); }
+
 namespace rhi
 {
     template<class Handle, class Type> class object_set

@@ -166,8 +166,9 @@ namespace rhi
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
+            const auto & info = get_format_info(desc.format);
             if(desc.shape != rhi::image_shape::_2d) throw std::logic_error("shape not supported");
-            D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1,0}, D3D11_USAGE_DEFAULT};
+            D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), 1, static_cast<DXGI_FORMAT>(info.dxgi_format), {1,0}, D3D11_USAGE_DEFAULT};
             if(desc.flags & rhi::image_flag::sampled_image_bit) tex_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
             if(desc.flags & rhi::image_flag::color_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
             if(desc.flags & rhi::image_flag::depth_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_DEPTH_STENCIL;
@@ -180,7 +181,7 @@ namespace rhi
             if(initial_data.empty()) check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, nullptr, &tex));
             else
             {              
-                const D3D11_SUBRESOURCE_DATA data {initial_data[0], desc.dimensions.x * 4};
+                const D3D11_SUBRESOURCE_DATA data {initial_data[0], info.pixel_size*desc.dimensions.x};
                 check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, &data, &tex));
             }
 
