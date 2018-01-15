@@ -27,6 +27,14 @@ struct mesh_vertex
 {
     float3 position, color, normal;
     float2 texcoord;
+    static rhi::vertex_binding_desc get_binding(int index)
+    {
+        return {index, sizeof(mesh_vertex), {
+            {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
+            {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
+            {2, rhi::attribute_format::float3, offsetof(mesh_vertex, normal)},
+        }};
+    }
 };
 
 struct mesh
@@ -144,7 +152,6 @@ class device_session
 
     rhi::descriptor_set_layout per_scene_view_layout, per_object_layout;
     rhi::pipeline_layout pipe_layout;
-    rhi::input_layout mesh_layout;
 
     rhi::render_pass pass;
     rhi::shader vs, fs, fs_unlit;
@@ -168,21 +175,13 @@ public:
         per_object_layout = dev->create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
 
-        mesh_layout = dev->create_input_layout({
-            {0, sizeof(mesh_vertex), {
-                {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
-                {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
-                {2, rhi::attribute_format::float3, offsetof(mesh_vertex, normal)},
-            }}
-        });
-
         pass = dev->create_render_pass({});
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
         fs_unlit = dev->create_shader(assets.fs_unlit);
 
-        wire_pipe = dev->create_pipeline({pass, pipe_layout, mesh_layout, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
-        solid_pipe = dev->create_pipeline({pass, pipe_layout, mesh_layout, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+        wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
+        solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
         rwindow = dev->create_window(pass, {512,512}, ss.str());
@@ -199,8 +198,7 @@ public:
         dev->destroy_render_pass(pass);
         dev->destroy_shader(fs_unlit);
         dev->destroy_shader(fs);
-        dev->destroy_shader(vs);
-        dev->destroy_input_layout(mesh_layout);        
+        dev->destroy_shader(vs);       
         dev->destroy_pipeline_layout(pipe_layout);
         dev->destroy_descriptor_set_layout(per_object_layout);
         dev->destroy_descriptor_set_layout(per_scene_view_layout);

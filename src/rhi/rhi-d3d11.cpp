@@ -50,13 +50,7 @@ namespace rhi
     {
         std::vector<rhi::descriptor_binding> bindings;
     };
-
-    struct d3d_input_layout
-    {
-        std::vector<rhi::vertex_binding_desc> bindings;
-        std::vector<D3D11_INPUT_ELEMENT_DESC> input_descs;        
-    };
-
+    
     struct d3d_pipeline
     {
         rhi::pipeline_desc desc;
@@ -88,11 +82,10 @@ namespace rhi
         template<> struct traits<buffer> { using type = d3d_buffer; };
         template<> struct traits<render_pass> { using type = d3d_render_pass; };
         template<> struct traits<framebuffer> { using type = d3d_framebuffer; };
-        template<> struct traits<input_layout> { using type = d3d_input_layout; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = d3d_pipeline; };
         template<> struct traits<window> { using type = d3d_window; };
-        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, input_layout, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -221,28 +214,6 @@ namespace rhi
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
         void write_descriptor(descriptor_set set, int binding, buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
 
-        input_layout create_input_layout(const std::vector<vertex_binding_desc> & bindings) override
-        {
-            auto [handle, input_layout] = objects.create<input_layout>();
-
-            input_layout.bindings = bindings;
-            for(auto & buf : bindings)
-            {
-                for(auto & attrib : buf.attributes)
-                {
-                    switch(attrib.type)
-                    {
-                    case attribute_format::float1: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case attribute_format::float2: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case attribute_format::float3: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case attribute_format::float4: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    default: throw std::logic_error("invalid attribute_format");
-                    }
-                }
-            }
-            return handle;
-        }
-
         shader create_shader(const shader_module & module) override
         {
             auto [handle, shader] = objects.create<shader>();
@@ -252,9 +223,8 @@ namespace rhi
 
         pipeline create_pipeline(const pipeline_desc & desc) override
         {
-            const auto & input_descs = objects[desc.input].input_descs;
-            auto [handle, pipeline] = objects.create<pipeline>();
-            pipeline.desc = desc;
+            auto [handle, pipe] = objects.create<pipeline>();
+            pipe.desc = desc;
             for(auto & s : desc.stages)
             {
                 auto & shader = objects[s];
@@ -276,23 +246,35 @@ namespace rhi
                 //debug_callback(hlsl.c_str());
 
                 // Compile HLSL and create shader stages and input layout
-                HRESULT hr;
                 ID3DBlob * shader_blob, * error_blob;
                 switch(shader.stage)
                 {
-                case shader_stage::vertex: 
-                    hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &shader_blob, &error_blob);
-                    if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
-                    dev->CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipeline.vs);
-                    hr = dev->CreateInputLayout(input_descs.data(), exactly(input_descs.size()), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), &pipeline.layout);
-                    if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateInputLayout(...) failed");
-                    break;
-                case shader_stage::fragment:
-                    hr = D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &shader_blob, &error_blob);
-                    if(FAILED(hr)) throw std::runtime_error("D3DCompile(...) failed");
-                    dev->CreatePixelShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipeline.ps);
-                    break;
+                    
                 default: throw std::logic_error("invalid shader_stage");
+                case shader_stage::fragment:
+                    check("D3DCompile", D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &shader_blob, &error_blob));
+                    check("ID3D11Device::CreatePixelShader", dev->CreatePixelShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipe.ps));
+                    break;
+                case shader_stage::vertex: 
+                    check("D3DCompile", D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &shader_blob, &error_blob));
+                    check("ID3D11Device::CreateVertexShader", dev->CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &pipe.vs));           
+                    std::vector<D3D11_INPUT_ELEMENT_DESC> input_descs;  
+                    for(auto & buf : desc.input)
+                    {
+                        for(auto & attrib : buf.attributes)
+                        {
+                            switch(attrib.type)
+                            {
+                            case attribute_format::float1: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                            case attribute_format::float2: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                            case attribute_format::float3: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                            case attribute_format::float4: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                            default: throw std::logic_error("invalid attribute_format");
+                            }
+                        }
+                    }
+                    check("ID3D11Device::CreateInputLayout", dev->CreateInputLayout(input_descs.data(), exactly(input_descs.size()), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), &pipe.layout));
+                    break;
                 }
             }
             return handle;
@@ -301,8 +283,7 @@ namespace rhi
         void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
         void destroy_descriptor_pool(descriptor_pool pool) override { desc_emulator.destroy(pool); }
         void destroy_descriptor_set_layout(descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
-        void destroy_pipeline_layout(pipeline_layout layout) override { desc_emulator.destroy(layout); }        
-        void destroy_input_layout(input_layout layout) override { objects.destroy(layout); }
+        void destroy_pipeline_layout(pipeline_layout layout) override { desc_emulator.destroy(layout); }
         void destroy_shader(shader shader) override { objects.destroy(shader); }
         void destroy_pipeline(pipeline pipeline)  override { objects.destroy(pipeline); }        
         void destroy_window(window window) override { objects.destroy(window); }
@@ -349,7 +330,7 @@ namespace rhi
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {
-                    for(auto & buf : objects[current_pipeline->desc.input].bindings)
+                    for(auto & buf : current_pipeline->desc.input)
                     {
                         if(buf.index == c.index)
                         {

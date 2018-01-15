@@ -25,19 +25,20 @@ namespace rhi
         int2 dims;
     };
 
-    struct gl_input_layout
+    struct gl_pipeline
     {
-        std::vector<vertex_binding_desc> bindings;
+        pipeline_desc desc;
+        GLuint program_object;
         mutable std::unordered_map<GLFWwindow *, GLuint> vertex_array_objects; // vertex array objects cannot be shared between OpenGL contexts, so we must cache them per-context
     
-        void bind_vertex_array() const
+        void bind_vertex_array(GLFWwindow * context) const
         {
-            auto & vertex_array = vertex_array_objects[glfwGetCurrentContext()];
+            auto & vertex_array = vertex_array_objects[context];
             if(!vertex_array)
             {
                 // If vertex array object was not yet created in this context, go ahead and generate it
                 glCreateVertexArrays(1, &vertex_array);
-                for(auto & buf : bindings)
+                for(auto & buf : desc.input)
                 {
                     for(auto & attrib : buf.attributes)
                     {
@@ -55,12 +56,6 @@ namespace rhi
             }
             glBindVertexArray(vertex_array);
         }
-    };
-    
-    struct gl_pipeline
-    {
-        pipeline_desc desc;
-        GLuint program_object;
     };
 
     struct gl_window
@@ -80,11 +75,10 @@ namespace rhi
         template<> struct traits<buffer> { using type = gl_buffer; };
         template<> struct traits<render_pass> { using type = gl_render_pass; };
         template<> struct traits<framebuffer> { using type = gl_framebuffer; };
-        template<> struct traits<input_layout> { using type = gl_input_layout; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = gl_pipeline; };
         template<> struct traits<window> { using type = gl_window; };
-        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, input_layout, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -143,16 +137,16 @@ namespace rhi
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
             glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
-            auto [handle, window] = objects.create<window>();
-            window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
-            if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
-            enable_debug_callback(window.w);
+            auto [handle, win] = objects.create<window>();
+            win.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, hidden_window);
+            if(!win.w) throw std::runtime_error("glfwCreateWindow(...) failed");
+            enable_debug_callback(win.w);
 
             auto [fb_handle, fb] = objects.create<framebuffer>();
-            fb.context = window.w;
+            fb.context = win.w;
             fb.framebuffer_object = 0;
             fb.dims = dimensions;
-            window.fb = fb_handle;
+            win.fb = fb_handle;
             return {handle};
         }
         GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }
@@ -165,17 +159,10 @@ namespace rhi
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
         void write_descriptor(descriptor_set set, int binding, buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
 
-        input_layout create_input_layout(const std::vector<vertex_binding_desc> & bindings) override
-        {
-            auto [handle, layout] = objects.create<input_layout>();
-            layout.bindings = bindings;
-            return handle;
-        }
-
         shader create_shader(const shader_module & module) override
         {
-            auto [handle, shader] = objects.create<shader>();
-            shader = module;
+            auto [handle, s] = objects.create<shader>();
+            s = module;
             return handle;
         }
 
@@ -236,48 +223,49 @@ namespace rhi
                 throw std::runtime_error(buffer.data());
             }
 
-            auto [handle, pipeline] = objects.create<pipeline>();
-            pipeline.desc = desc;
-            pipeline.program_object = program;
+            auto [handle, pipe] = objects.create<pipeline>();
+            pipe.desc = desc;
+            pipe.program_object = program;
             return handle;
         }
 
         std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
-            auto [handle, buffer] = objects.create<buffer>();
-            glCreateBuffers(1, &buffer.buffer_object);
+            auto [handle, buf] = objects.create<buffer>();
+            glCreateBuffers(1, &buf.buffer_object);
             GLbitfield flags = 0;
             if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
-            glNamedBufferStorage(buffer.buffer_object, desc.size, initial_data, flags);
-            if(desc.dynamic) buffer.mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer.buffer_object, GL_WRITE_ONLY));
-            return {handle, buffer.mapped};
+            glNamedBufferStorage(buf.buffer_object, desc.size, initial_data, flags);
+            if(desc.dynamic) buf.mapped = reinterpret_cast<char *>(glMapNamedBuffer(buf.buffer_object, GL_WRITE_ONLY));
+            return {handle, buf.mapped};
         }
 
         void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
         void destroy_descriptor_pool(descriptor_pool pool) override { desc_emulator.destroy(pool); }
         void destroy_descriptor_set_layout(descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
         void destroy_pipeline_layout(pipeline_layout layout) override { desc_emulator.destroy(layout); }
-        void destroy_input_layout(input_layout layout) override { objects.destroy(layout); }
         void destroy_shader(shader shader) override { objects.destroy(shader); }
         void destroy_pipeline(pipeline pipeline)  override { objects.destroy(pipeline); }       
         void destroy_window(window window) override { objects.destroy(window); }
 
         void submit_command_buffer(command_buffer cmd)
         {
+            GLFWwindow * context = hidden_window;
             cmd_emulator.execute(cmd, overload(
-                [this](const begin_render_pass_command & c)
+                [this, &context](const begin_render_pass_command & c)
                 {
                     auto & fb = objects[c.framebuffer];
+                    context = fb.context;
                     glfwMakeContextCurrent(fb.context);
                     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
                     glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
                     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 },
-                [this](const bind_pipeline_command & c)
+                [this, context](const bind_pipeline_command & c)
                 {
                     auto & p = objects[c.pipe];
                     glUseProgram(p.program_object);
-                    objects[p.desc.input].bind_vertex_array();
+                    p.bind_vertex_array(context);
                     (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
                     if(p.desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*p.desc.depth_test));
                     glEnable(GL_CULL_FACE);
@@ -293,7 +281,7 @@ namespace rhi
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {
-                    for(auto & buf : objects[current_pipeline->desc.input].bindings)
+                    for(auto & buf : current_pipeline->desc.input)
                     {
                         if(buf.index == c.index)
                         {

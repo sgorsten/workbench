@@ -32,11 +32,6 @@ namespace rhi
         VkImageView image_view;        
     };
 
-    struct vk_input_layout
-    {
-        std::vector<vertex_binding_desc> bindings;
-    };
-
     struct vk_shader
     {
         VkShaderModule module;
@@ -97,14 +92,13 @@ namespace rhi
         template<> struct traits<descriptor_set_layout> { using type = VkDescriptorSetLayout; };
         template<> struct traits<descriptor_set> { using type = VkDescriptorSet; };
         template<> struct traits<pipeline_layout> { using type = VkPipelineLayout; };
-        template<> struct traits<input_layout> { using type = vk_input_layout; };
         template<> struct traits<shader> { using type = vk_shader; }; 
         template<> struct traits<pipeline> { using type = vk_pipeline; };
         template<> struct traits<window> { using type = vk_window; };
         template<> struct traits<command_buffer> { using type = VkCommandBuffer; };
         heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer,
             descriptor_pool, descriptor_set_layout, descriptor_set,
-            pipeline_layout, input_layout, shader, pipeline, 
+            pipeline_layout, shader, pipeline, 
             window, command_buffer> objects;
 
         vk_device(std::function<void(const char *)> debug_callback);
@@ -143,10 +137,7 @@ namespace rhi
         // pipelines
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override;
         void destroy_pipeline_layout(pipeline_layout layout) override;
-
-        input_layout create_input_layout(const std::vector<vertex_binding_desc> & bindings) override;
-        void destroy_input_layout(input_layout layout) override;
-
+        
         shader create_shader(const shader_module & module) override;
         void destroy_shader(shader shader) override;
 
@@ -626,17 +617,6 @@ void vk_device::destroy_pipeline_layout(pipeline_layout layout)
     objects.destroy(layout); 
 }
 
-input_layout vk_device::create_input_layout(const std::vector<vertex_binding_desc> & bindings)
-{
-    auto [handle, layout] = objects.create<input_layout>();
-    layout.bindings = bindings;
-    return handle;
-}
-void vk_device::destroy_input_layout(input_layout layout)
-{
-    objects.destroy(layout); 
-}
-
 shader vk_device::create_shader(const shader_module & module)
 {
     VkShaderModuleCreateInfo create_info {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -737,7 +717,7 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
             
     std::vector<VkVertexInputBindingDescription> bindings;
     std::vector<VkVertexInputAttributeDescription> attributes;
-    for(auto & b : objects[desc.input].bindings)
+    for(auto & b : desc.input)
     {
         bindings.push_back({(uint32_t)b.index, (uint32_t)b.stride, VK_VERTEX_INPUT_RATE_VERTEX});
         for(auto & a : b.attributes)
