@@ -1,9 +1,20 @@
 #pragma once
 #include "rhi.h"
-#include <type_traits>
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 namespace gfx
 {
+    struct context
+    {
+        context();
+        ~context();
+
+        const std::vector<rhi::backend_info> & get_backends();
+        void poll_events();
+    };
+
     struct binary_view 
     { 
         size_t size; const void * data; 
@@ -81,5 +92,44 @@ namespace gfx
         void draw(int first_vertex, int vertex_count) { dev.draw(cmd, first_vertex, vertex_count); }
         void draw_indexed(int first_index, int index_count)  { dev.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass() { dev.end_render_pass(cmd); }
+    };
+
+    class window
+    {
+        struct ignore { template<class... T> operator std::function<void(T...)>() const { return [](T...) {}; } };
+        std::shared_ptr<rhi::device> dev;
+        rhi::window rhi_window;
+        GLFWwindow * glfw_window;
+    public:
+        window(std::shared_ptr<rhi::device> dev, rhi::render_pass pass, const int2 & dimensions, const std::string & title);
+        ~window();
+
+        // Observers
+        bool should_close() const { return !!glfwWindowShouldClose(glfw_window); }
+        bool get_key(int key) const { return glfwGetKey(glfw_window, key) != GLFW_RELEASE; }
+        bool get_mouse_button(int button) const { return glfwGetMouseButton(glfw_window, button) != GLFW_RELEASE; }
+        double2 get_cursor_pos() const { double2 pos; glfwGetCursorPos(glfw_window, &pos.x, &pos.y); return pos; }
+        int2 get_window_size() const { int2 size; glfwGetWindowSize(glfw_window, &size.x, &size.y); return size; }
+        int2 get_framebuffer_size() const { int2 size; glfwGetFramebufferSize(glfw_window, &size.x, &size.y); return size; }
+        float get_aspect() const { auto size = get_window_size(); return (float)size.x/size.y; }
+
+        // Mutators
+        void set_pos(const int2 & pos) { glfwSetWindowPos(glfw_window, pos.x, pos.y); }
+        rhi::window get_rhi_window() { return rhi_window; }
+
+        // Event handling callbacks
+        std::function<void(int2 pos)> on_window_pos = ignore{};
+        std::function<void(int2 size)> on_window_size = ignore{};
+        std::function<void()> on_window_close = ignore{};
+        std::function<void()> on_window_refresh = ignore{};
+        std::function<void(bool focused)> on_window_focus = ignore{};
+        std::function<void(bool iconified)> on_window_iconify = ignore{};
+        std::function<void(int2 size)> on_framebuffer_size = ignore{};
+        std::function<void(int button, int action, int mods)> on_mouse_button = ignore{};
+        std::function<void(double2 pos)> on_cursor_pos = ignore{};
+        std::function<void(bool entered)> on_cursor_enter = ignore{};
+        std::function<void(double2 offset)> on_scroll = ignore{};
+        std::function<void(int key, int scancode, int action, int mods)> on_key = ignore{};
+        std::function<void(unsigned int codepoint, int mods)> on_char = ignore{};
     };
 }

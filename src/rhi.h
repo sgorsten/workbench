@@ -208,5 +208,4 @@ namespace rhi
         std::string name;
         std::function<std::shared_ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
     };
-    const std::vector<backend_info> & all_backends();
 }

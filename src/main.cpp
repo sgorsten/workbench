@@ -166,8 +166,7 @@ class device_session
     rhi::sampler nearest;
     rhi::image checkerboard;
 
-    rhi::window rwindow;
-    std::unique_ptr<glfw::window> gwindow;
+    std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
     device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) : 
@@ -205,8 +204,7 @@ public:
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
-        rwindow = dev->create_window(pass, {512,512}, ss.str());
-        gwindow = std::make_unique<glfw::window>(dev->get_glfw_window(rwindow));
+        gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
         gwindow->set_pos(window_pos);
     }
 
@@ -215,7 +213,6 @@ public:
         gwindow.reset();
         dev->destroy_pipeline(solid_pipe);
         dev->destroy_pipeline(wire_pipe);
-        dev->destroy_window(rwindow);
         dev->destroy_render_pass(pass);
         dev->destroy_shader(fs_unlit);
         dev->destroy_shader(fs);
@@ -262,7 +259,7 @@ public:
 
         // Draw objects to our framebuffer
         gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
-        cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(rwindow));
+        cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()));
         cmd.bind_pipeline(wire_pipe);
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
         cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, float4x4{linalg::identity})
@@ -292,7 +289,7 @@ public:
             }
         }
         cmd.end_render_pass();
-        dev->present(cmd.cmd, rwindow);
+        dev->present(cmd.cmd, gwindow->get_rhi_window());
     }
 };
 
@@ -314,12 +311,12 @@ int main(int argc, const char * argv[]) try
     cam.move(coord_axis::back, 10.0f);
     
     // Create the devices
-    glfw::context context;
+    gfx::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
 
     int2 pos{100,100};
     std::vector<std::unique_ptr<device_session>> sessions;
-    for(auto & backend : rhi::all_backends())
+    for(auto & backend : context.get_backends())
     {
         std::cout << "Initializing " << backend.name << " backend:\n";
         sessions.push_back(std::make_unique<device_session>(assets, backend.name, backend.create_device(debug), pos));

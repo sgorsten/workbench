@@ -2,7 +2,6 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="..\..\src\main.cpp" />
-    <ClCompile Include="..\..\src\io.cpp" />
     <ClCompile Include="..\..\src\geometry.cpp" />
     <ClCompile Include="..\..\src\shader.cpp" />
     <ClCompile Include="..\..\dep\glad\src\glad.c">
@@ -21,9 +20,9 @@
       <Filter>rhi</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\core.cpp" />
+    <ClCompile Include="..\..\src\graphics.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\src\io.h" />
     <ClInclude Include="..\..\src\geometry.h" />
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\shader.h" />

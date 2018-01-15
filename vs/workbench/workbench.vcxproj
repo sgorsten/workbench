@@ -167,7 +167,7 @@
     <ClCompile Include="..\..\dep\glad\src\glad.c" />
     <ClCompile Include="..\..\src\core.cpp" />
     <ClCompile Include="..\..\src\geometry.cpp" />
-    <ClCompile Include="..\..\src\io.cpp" />
+    <ClCompile Include="..\..\src\graphics.cpp" />
     <ClCompile Include="..\..\src\main.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-d3d11.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-internal.cpp" />
@@ -179,7 +179,6 @@
     <ClInclude Include="..\..\src\core.h" />
     <ClInclude Include="..\..\src\geometry.h" />
     <ClInclude Include="..\..\src\graphics.h" />
-    <ClInclude Include="..\..\src\io.h" />
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\rhi\rhi-internal.h" />
     <ClInclude Include="..\..\src\shader.h" />
