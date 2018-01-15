@@ -1,4 +1,5 @@
 #include "rhi-internal.h"
+using namespace rhi;
 
 size_t descriptor_emulator::get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const
 {

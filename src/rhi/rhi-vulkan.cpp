@@ -6,7 +6,7 @@
 #include <GLFW/glfw3.h>
 #pragma comment(lib, "vulkan-1.lib")
 
-namespace vk
+namespace rhi
 {
     struct physical_device_selection
     {
@@ -18,45 +18,45 @@ namespace vk
         VkSurfaceTransformFlagBitsKHR surface_transform;
     };
 
-    struct buffer
+    struct vk_buffer
     {
         VkDeviceMemory memory_object;
         VkBuffer buffer_object;        
         char * mapped = 0;
     };
 
-    struct image
+    struct vk_image
     {
         VkDeviceMemory device_memory;
         VkImage image_object;
         VkImageView image_view;        
     };
 
-    struct input_layout
+    struct vk_input_layout
     {
-        std::vector<rhi::vertex_binding_desc> bindings;
+        std::vector<vertex_binding_desc> bindings;
     };
 
-    struct shader
+    struct vk_shader
     {
         VkShaderModule module;
         shader_stage stage;
     };
 
-    struct pipeline
+    struct vk_pipeline
     {
-        rhi::pipeline_desc desc;
+        pipeline_desc desc;
         VkPipeline pipeline_object;
     };
 
-    struct framebuffer
+    struct vk_framebuffer
     {
         int2 dims;
         std::vector<VkFramebuffer> framebuffers; // If this framebuffer targets a swapchain, the framebuffers for each swapchain image
         uint32_t current_index; // If this framebuffer targets a swapchain, the index of the current backbuffer
     };
 
-    struct window
+    struct vk_window
     {
         GLFWwindow * glfw_window {};
         VkSurfaceKHR surface {};
@@ -65,11 +65,11 @@ namespace vk
         std::vector<VkImageView> swapchain_image_views;
         VkSemaphore image_available {}, render_finished {};
         uint2 dims;
-        rhi::image depth_image;
-        rhi::framebuffer swapchain_framebuffer;
+        image depth_image;
+        framebuffer swapchain_framebuffer;
     };
 
-    struct device : rhi::device
+    struct vk_device : device
     {
         // Core Vulkan objects
         std::function<void(const char *)> debug_callback;
@@ -89,26 +89,26 @@ namespace vk
                 
         // Objects
         template<class T> struct traits;
-        template<> struct traits<rhi::buffer> { using type = buffer; };
-        template<> struct traits<rhi::image> { using type = image; };
-        template<> struct traits<rhi::render_pass> { using type = VkRenderPass; };
-        template<> struct traits<rhi::framebuffer> { using type = framebuffer; };
-        template<> struct traits<rhi::descriptor_pool> { using type = VkDescriptorPool; };
-        template<> struct traits<rhi::descriptor_set_layout> { using type = VkDescriptorSetLayout; };
-        template<> struct traits<rhi::descriptor_set> { using type = VkDescriptorSet; };
-        template<> struct traits<rhi::pipeline_layout> { using type = VkPipelineLayout; };
-        template<> struct traits<rhi::input_layout> { using type = input_layout; };
-        template<> struct traits<rhi::shader> { using type = shader; }; 
-        template<> struct traits<rhi::pipeline> { using type = pipeline; };
-        template<> struct traits<rhi::window> { using type = window; };
-        template<> struct traits<rhi::command_buffer> { using type = VkCommandBuffer; };
-        heterogeneous_object_set<traits, rhi::buffer, rhi::image, rhi::render_pass, rhi::framebuffer,
-            rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set,
-            rhi::pipeline_layout, rhi::input_layout, rhi::shader, rhi::pipeline, 
-            rhi::window, rhi::command_buffer> objects;
+        template<> struct traits<buffer> { using type = vk_buffer; };
+        template<> struct traits<image> { using type = vk_image; };
+        template<> struct traits<render_pass> { using type = VkRenderPass; };
+        template<> struct traits<framebuffer> { using type = vk_framebuffer; };
+        template<> struct traits<descriptor_pool> { using type = VkDescriptorPool; };
+        template<> struct traits<descriptor_set_layout> { using type = VkDescriptorSetLayout; };
+        template<> struct traits<descriptor_set> { using type = VkDescriptorSet; };
+        template<> struct traits<pipeline_layout> { using type = VkPipelineLayout; };
+        template<> struct traits<input_layout> { using type = vk_input_layout; };
+        template<> struct traits<shader> { using type = vk_shader; }; 
+        template<> struct traits<pipeline> { using type = vk_pipeline; };
+        template<> struct traits<window> { using type = vk_window; };
+        template<> struct traits<command_buffer> { using type = VkCommandBuffer; };
+        heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer,
+            descriptor_pool, descriptor_set_layout, descriptor_set,
+            pipeline_layout, input_layout, shader, pipeline, 
+            window, command_buffer> objects;
 
-        device(std::function<void(const char *)> debug_callback);
-        ~device();
+        vk_device(std::function<void(const char *)> debug_callback);
+        ~vk_device();
 
         // Core helper functions
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
@@ -116,95 +116,87 @@ namespace vk
         void end_transient(VkCommandBuffer command_buffer);
 
         // info
-        rhi::device_info get_info() const override { return {"Vulkan 1.0", {coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
+        device_info get_info() const override { return {"Vulkan 1.0", {coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
 
         // buffers
-        std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override;
-        void destroy_buffer(rhi::buffer buffer) override;
+        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override;
+        void destroy_buffer(buffer buffer) override;
 
-        rhi::image make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect);
-        void destroy_image(rhi::image image);
-        void destroy_framebuffer(rhi::framebuffer framebuffer);
+        image make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect);
+        void destroy_image(image image);
+        void destroy_framebuffer(framebuffer framebuffer);
 
-        rhi::render_pass create_render_pass(const rhi::render_pass_desc & desc) override;
-        void destroy_render_pass(rhi::render_pass pass) override;
+        render_pass create_render_pass(const render_pass_desc & desc) override;
+        void destroy_render_pass(render_pass pass) override;
 
         // descriptors
-        rhi::descriptor_pool create_descriptor_pool() override;
-        void destroy_descriptor_pool(rhi::descriptor_pool pool) override;
+        descriptor_pool create_descriptor_pool() override;
+        void destroy_descriptor_pool(descriptor_pool pool) override;
 
-        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override;
-        void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override;
+        descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override;
+        void destroy_descriptor_set_layout(descriptor_set_layout layout) override;
 
-        void reset_descriptor_pool(rhi::descriptor_pool pool) override;
-        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) override;
-        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) override;
+        void reset_descriptor_pool(descriptor_pool pool) override;
+        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) override;
+        void write_descriptor(descriptor_set set, int binding, buffer_range range) override;
 
         // pipelines
-        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override;
-        void destroy_pipeline_layout(rhi::pipeline_layout layout) override;
+        pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override;
+        void destroy_pipeline_layout(pipeline_layout layout) override;
 
-        rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override;
-        void destroy_input_layout(rhi::input_layout layout) override;
+        input_layout create_input_layout(const std::vector<vertex_binding_desc> & bindings) override;
+        void destroy_input_layout(input_layout layout) override;
 
-        rhi::shader create_shader(const shader_module & module) override;
-        void destroy_shader(rhi::shader shader) override;
+        shader create_shader(const shader_module & module) override;
+        void destroy_shader(shader shader) override;
 
-        rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override;
-        void destroy_pipeline(rhi::pipeline pipeline) override;
+        pipeline create_pipeline(const pipeline_desc & desc) override;
+        void destroy_pipeline(pipeline pipeline) override;
 
         // windows
-        rhi::window create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) override;
-        GLFWwindow * get_glfw_window(rhi::window window) override { return objects[window].glfw_window; }
-        rhi::framebuffer get_swapchain_framebuffer(rhi::window window) override { return objects[window].swapchain_framebuffer; }
-        void destroy_window(rhi::window window) override;
+        window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override;
+        GLFWwindow * get_glfw_window(window window) override { return objects[window].glfw_window; }
+        framebuffer get_swapchain_framebuffer(window window) override { return objects[window].swapchain_framebuffer; }
+        void destroy_window(window window) override;
 
         // rendering
-        rhi::command_buffer start_command_buffer() override;
-        void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) override;
-        void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) override;
-        void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override;
-        void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) override;
-        void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) override;
-        void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) override;
-        void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) override;
-        void end_render_pass(rhi::command_buffer cmd) override;
+        command_buffer start_command_buffer() override;
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override;
+        void bind_pipeline(command_buffer cmd, pipeline pipe) override;
+        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override;
+        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override;
+        void bind_index_buffer(command_buffer cmd, buffer_range range) override;
+        void draw(command_buffer cmd, int first_vertex, int vertex_count) override;
+        void draw_indexed(command_buffer cmd, int first_index, int index_count) override;
+        void end_render_pass(command_buffer cmd) override;
 
-        void present(rhi::command_buffer submit, rhi::window window) override;
+        void present(command_buffer submit, window window) override;
         void wait_idle() override;
     };
 }
 
 std::shared_ptr<rhi::device> create_vulkan_device(std::function<void(const char *)> debug_callback)
 {
-    return std::make_shared<vk::device>(debug_callback);
+    return std::make_shared<rhi::vk_device>(debug_callback);
 }
 
-////////////////////
-// error handling //
-////////////////////
-
-struct vulkan_error : public std::error_category
+namespace rhi
 {
-    const char * name() const noexcept override { return "VkResult"; }
-    std::string message(int value) const override { return std::to_string(value); }
-    static const std::error_category & instance() { static vulkan_error inst; return inst; }
-};
-static void check(const char * func, VkResult result)
-{
-    if(result != VK_SUCCESS)
+    struct vulkan_error : public std::error_category
     {
-        std::ostringstream ss; ss << func << "(...) failed";
-        throw std::system_error(std::error_code(exactly(static_cast<std::underlying_type_t<VkResult>>(result)), vulkan_error::instance()), ss.str());
+        const char * name() const noexcept override { return "VkResult"; }
+        std::string message(int value) const override { return std::to_string(value); }
+        static const std::error_category & instance() { static vulkan_error inst; return inst; }
+    };
+    static void check(const char * func, VkResult result)
+    {
+        if(result != VK_SUCCESS)
+        {
+            std::ostringstream ss; ss << func << "(...) failed";
+            throw std::system_error(std::error_code(exactly(static_cast<std::underlying_type_t<VkResult>>(result)), vulkan_error::instance()), ss.str());
+        }
     }
-}
 
-///////////////////////////////
-// physical device selection //
-///////////////////////////////
-
-namespace vk
-{
     static bool has_extension(const std::vector<VkExtensionProperties> & extensions, std::string_view name)
     {
         return std::find_if(begin(extensions), end(extensions), [name](const VkExtensionProperties & p) { return p.extensionName == name; }) != end(extensions);
@@ -275,10 +267,12 @@ namespace vk
 }
 
 ////////////////
-// vk::device //
+// vk_device //
 ////////////////
 
-vk::device::device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
+using namespace rhi;
+
+vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
 { 
     uint32_t extension_count = 0;
     auto ext = glfwGetRequiredInstanceExtensions(&extension_count);
@@ -295,7 +289,7 @@ vk::device::device(std::function<void(const char *)> debug_callback) : debug_cal
     const VkDebugReportCallbackCreateInfoEXT callback_info {VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT, nullptr, VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT, 
         [](VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT object_type, uint64_t object, size_t location, int32_t message_code, const char * layer_prefix, const char * message, void * user_data) -> VkBool32
         {
-            auto & ctx = *reinterpret_cast<device *>(user_data);
+            auto & ctx = *reinterpret_cast<vk_device *>(user_data);
             if(ctx.debug_callback) ctx.debug_callback(message);
             return VK_FALSE;
         }, this};
@@ -330,7 +324,7 @@ vk::device::device(std::function<void(const char *)> debug_callback) : debug_cal
     check("vkCreateCommandPool", vkCreateCommandPool(dev, &command_pool_info, nullptr, &staging_pool));
 }
 
-vk::device::~device()
+vk_device::~vk_device()
 {
     // NOTE: We expect the higher level software layer to ensure that all API objects have been destroyed by this point
     vkDestroyCommandPool(dev, staging_pool, nullptr);
@@ -343,7 +337,7 @@ vk::device::~device()
     vkDestroyInstance(instance, nullptr);
 }
 
-VkDeviceMemory vk::device::allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props)
+VkDeviceMemory vk_device::allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props)
 {
     for(uint32_t i=0; i<mem_props.memoryTypeCount; ++i)
     {
@@ -362,7 +356,7 @@ VkDeviceMemory vk::device::allocate(const VkMemoryRequirements & reqs, VkMemoryP
     throw std::runtime_error("no suitable memory type");
 }
 
-VkCommandBuffer vk::device::begin_transient() 
+VkCommandBuffer vk_device::begin_transient() 
 {
     VkCommandBufferAllocateInfo alloc_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -380,7 +374,7 @@ VkCommandBuffer vk::device::begin_transient()
     return command_buffer;
 }
 
-void vk::device::end_transient(VkCommandBuffer command_buffer) 
+void vk_device::end_transient(VkCommandBuffer command_buffer) 
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(command_buffer));
     VkSubmitInfo submitInfo {VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -392,20 +386,20 @@ void vk::device::end_transient(VkCommandBuffer command_buffer)
 }
 
 ////////////////////////
-// vk::device buffers //
+// vk_device buffers //
 ////////////////////////
 
-std::tuple<rhi::buffer, char *> vk::device::create_buffer(const rhi::buffer_desc & desc, const void * initial_data)
+std::tuple<buffer, char *> vk_device::create_buffer(const buffer_desc & desc, const void * initial_data)
 {
-    auto [handle, b] = objects.create<rhi::buffer>();
+    auto [handle, b] = objects.create<buffer>();
 
     // Create buffer with appropriate usage flags
     VkBufferCreateInfo buffer_info {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     buffer_info.size = desc.size;
-    if(desc.usage == rhi::buffer_usage::vertex) buffer_info.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    if(desc.usage == rhi::buffer_usage::index) buffer_info.usage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if(desc.usage == rhi::buffer_usage::uniform) buffer_info.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    if(desc.usage == rhi::buffer_usage::storage) buffer_info.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if(desc.usage == buffer_usage::vertex) buffer_info.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    if(desc.usage == buffer_usage::index) buffer_info.usage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    if(desc.usage == buffer_usage::uniform) buffer_info.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    if(desc.usage == buffer_usage::storage) buffer_info.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     if(initial_data) buffer_info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     check("vkCreateBuffer", vkCreateBuffer(dev, &buffer_info, nullptr, &b.buffer_object));
@@ -438,7 +432,7 @@ std::tuple<rhi::buffer, char *> vk::device::create_buffer(const rhi::buffer_desc
     return {handle, b.mapped};
 }
 
-void vk::device::destroy_buffer(rhi::buffer buffer)
+void vk_device::destroy_buffer(buffer buffer)
 {
     vkDestroyBuffer(dev, objects[buffer].buffer_object, nullptr);
     if(objects[buffer].mapped) vkUnmapMemory(dev, objects[buffer].memory_object);
@@ -446,9 +440,9 @@ void vk::device::destroy_buffer(rhi::buffer buffer)
     objects.destroy(buffer); 
 }
 
-rhi::image vk::device::make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect)
+image vk_device::make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect)
 {
-    auto [handle, rt] = objects.create<rhi::image>();
+    auto [handle, rt] = objects.create<image>();
 
     VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     image_info.imageType = VK_IMAGE_TYPE_2D;
@@ -482,7 +476,7 @@ rhi::image vk::device::make_render_target(int2 dims, VkFormat format, VkImageUsa
     return handle;
 }
 
-void vk::device::destroy_image(rhi::image image)
+void vk_device::destroy_image(image image)
 {
     vkDestroyImageView(dev, objects[image].image_view, nullptr);
     vkDestroyImage(dev, objects[image].image_object, nullptr);
@@ -490,7 +484,7 @@ void vk::device::destroy_image(rhi::image image)
     objects.destroy(image); 
 }
 
-void vk::device::destroy_framebuffer(rhi::framebuffer framebuffer)
+void vk_device::destroy_framebuffer(framebuffer framebuffer)
 {
     for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
     objects.destroy(framebuffer);
@@ -501,7 +495,7 @@ static VkAttachmentDescription make_attachment_description(VkFormat format, VkSa
     return {0, format, samples, load_op, store_op, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, initial_layout, final_layout};
 }
 
-rhi::render_pass vk::device::create_render_pass(const rhi::render_pass_desc & desc) 
+render_pass vk_device::create_render_pass(const render_pass_desc & desc) 
 {
     const VkAttachmentDescription attachments[]
     {
@@ -523,23 +517,23 @@ rhi::render_pass vk::device::create_render_pass(const rhi::render_pass_desc & de
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass_desc;
 
-    auto [handle, pass] = objects.create<rhi::render_pass>();
+    auto [handle, pass] = objects.create<render_pass>();
     check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass));
     return handle;
 }
-void vk::device::destroy_render_pass(rhi::render_pass pass)
+void vk_device::destroy_render_pass(render_pass pass)
 { 
     vkDestroyRenderPass(dev, objects[pass], nullptr);
     objects.destroy(pass); 
 }
 
 ////////////////////////////
-// vk::device descriptors //
+// vk_device descriptors //
 ////////////////////////////
 
-rhi::descriptor_pool vk::device::create_descriptor_pool() 
+descriptor_pool vk_device::create_descriptor_pool() 
 { 
-    auto [handle, pool] = objects.create<rhi::descriptor_pool>();
+    auto [handle, pool] = objects.create<descriptor_pool>();
     const VkDescriptorPoolSize pool_sizes[] {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1024}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1024}};
     VkDescriptorPoolCreateInfo descriptor_pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     descriptor_pool_info.poolSizeCount = 2;
@@ -549,13 +543,13 @@ rhi::descriptor_pool vk::device::create_descriptor_pool()
     check("vkCreateDescriptorPool", vkCreateDescriptorPool(dev, &descriptor_pool_info, nullptr, &pool));
     return handle;
 }
-void vk::device::destroy_descriptor_pool(rhi::descriptor_pool pool)
+void vk_device::destroy_descriptor_pool(descriptor_pool pool)
 {
     vkDestroyDescriptorPool(dev, objects[pool], nullptr);
     objects.destroy(pool); 
 }
 
-rhi::descriptor_set_layout vk::device::create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) 
+descriptor_set_layout vk_device::create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) 
 { 
     std::vector<VkDescriptorSetLayoutBinding> set_bindings(bindings.size());
     for(size_t i=0; i<bindings.size(); ++i)
@@ -563,8 +557,8 @@ rhi::descriptor_set_layout vk::device::create_descriptor_set_layout(const std::v
         set_bindings[i].binding = bindings[i].index;
         switch(bindings[i].type)
         {
-        case rhi::descriptor_type::combined_image_sampler: set_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; break;
-        case rhi::descriptor_type::uniform_buffer: set_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; break;
+        case descriptor_type::combined_image_sampler: set_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; break;
+        case descriptor_type::uniform_buffer: set_bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; break;
         }
         set_bindings[i].descriptorCount = bindings[i].count;
         set_bindings[i].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
@@ -574,21 +568,21 @@ rhi::descriptor_set_layout vk::device::create_descriptor_set_layout(const std::v
     create_info.bindingCount = exactly(set_bindings.size());
     create_info.pBindings = set_bindings.data();
 
-    auto [handle, layout] = objects.create<rhi::descriptor_set_layout>();
+    auto [handle, layout] = objects.create<descriptor_set_layout>();
     check("vkCreateDescriptorSetLayout", vkCreateDescriptorSetLayout(dev, &create_info, nullptr, &layout));
     return handle;
 }
-void vk::device::destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) 
+void vk_device::destroy_descriptor_set_layout(descriptor_set_layout layout) 
 { 
     vkDestroyDescriptorSetLayout(dev, objects[layout], nullptr);
     objects.destroy(layout); 
 }
 
-void vk::device::reset_descriptor_pool(rhi::descriptor_pool pool) 
+void vk_device::reset_descriptor_pool(descriptor_pool pool) 
 {
     vkResetDescriptorPool(dev, objects[pool], 0);
 }
-rhi::descriptor_set vk::device::alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) 
+descriptor_set vk_device::alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) 
 { 
     auto & p = objects[pool];
 
@@ -597,12 +591,12 @@ rhi::descriptor_set vk::device::alloc_descriptor_set(rhi::descriptor_pool pool, 
     alloc_info.descriptorSetCount = 1;
     alloc_info.pSetLayouts = &objects[layout];
 
-    auto [handle, set] = objects.create<rhi::descriptor_set>();
+    auto [handle, set] = objects.create<descriptor_set>();
     check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(dev, &alloc_info, &set));
     //p.descriptor_sets.push_back(descriptor_set);
     return handle;
 }
-void vk::device::write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) 
+void vk_device::write_descriptor(descriptor_set set, int binding, buffer_range range) 
 {
     VkDescriptorBufferInfo buffer_info { objects[range.buffer].buffer_object, range.offset, range.size };
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
@@ -610,10 +604,10 @@ void vk::device::write_descriptor(rhi::descriptor_set set, int binding, rhi::buf
 }
 
 //////////////////////////
-// vk::device pipelines //
+// vk_device pipelines //
 //////////////////////////
 
-rhi::pipeline_layout vk::device::create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) 
+pipeline_layout vk_device::create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) 
 { 
     std::vector<VkDescriptorSetLayout> set_layouts;
     for(auto s : sets) set_layouts.push_back(objects[s]);
@@ -622,54 +616,51 @@ rhi::pipeline_layout vk::device::create_pipeline_layout(const std::vector<rhi::d
     create_info.setLayoutCount = exactly(set_layouts.size());
     create_info.pSetLayouts = set_layouts.data();
 
-    auto [handle, layout] = objects.create<rhi::pipeline_layout>();
+    auto [handle, layout] = objects.create<pipeline_layout>();
     check("vkCreatePipelineLayout", vkCreatePipelineLayout(dev, &create_info, nullptr, &layout));
     return handle;
 }
-void vk::device::destroy_pipeline_layout(rhi::pipeline_layout layout)
+void vk_device::destroy_pipeline_layout(pipeline_layout layout)
 {
     vkDestroyPipelineLayout(dev, objects[layout], nullptr);
     objects.destroy(layout); 
 }
 
-rhi::input_layout vk::device::create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings)
+input_layout vk_device::create_input_layout(const std::vector<vertex_binding_desc> & bindings)
 {
-    auto [handle, layout] = objects.create<rhi::input_layout>();
+    auto [handle, layout] = objects.create<input_layout>();
     layout.bindings = bindings;
     return handle;
 }
-void vk::device::destroy_input_layout(rhi::input_layout layout)
+void vk_device::destroy_input_layout(input_layout layout)
 {
     objects.destroy(layout); 
 }
 
-rhi::shader vk::device::create_shader(const shader_module & module)
+shader vk_device::create_shader(const shader_module & module)
 {
     VkShaderModuleCreateInfo create_info {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     create_info.codeSize = module.spirv.size() * sizeof(uint32_t);
     create_info.pCode = module.spirv.data();
-    auto [handle, shader] = objects.create<rhi::shader>();
-    check("vkCreateShaderModule", vkCreateShaderModule(dev, &create_info, nullptr, &shader.module));
-    shader.stage = module.stage;
+    auto [handle, s] = objects.create<shader>();
+    check("vkCreateShaderModule", vkCreateShaderModule(dev, &create_info, nullptr, &s.module));
+    s.stage = module.stage;
     return handle;
 }
-void vk::device::destroy_shader(rhi::shader shader)
+void vk_device::destroy_shader(shader shader)
 {
     vkDestroyShaderModule(dev, objects[shader].module, nullptr);
     objects.destroy(shader); 
 }
 
-rhi::pipeline vk::device::create_pipeline(const rhi::pipeline_desc & desc)
+pipeline vk_device::create_pipeline(const pipeline_desc & desc)
 {
-    auto [handle, pipeline] = objects.create<rhi::pipeline>();
-    pipeline.desc = desc;
-
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     switch(desc.topology)
     {
-    case rhi::primitive_topology::points: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
-    case rhi::primitive_topology::lines: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
-    case rhi::primitive_topology::triangles: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
+    case primitive_topology::points: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
+    case primitive_topology::lines: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
+    case primitive_topology::triangles: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
     }
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
@@ -753,10 +744,10 @@ rhi::pipeline vk::device::create_pipeline(const rhi::pipeline_desc & desc)
         {
             switch(a.type)
             {
-            case rhi::attribute_format::float1: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32_SFLOAT, (uint32_t)a.offset}); break;
-            case rhi::attribute_format::float2: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32_SFLOAT, (uint32_t)a.offset}); break;
-            case rhi::attribute_format::float3: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32_SFLOAT, (uint32_t)a.offset}); break;
-            case rhi::attribute_format::float4: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32A32_SFLOAT, (uint32_t)a.offset}); break;
+            case attribute_format::float1: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32_SFLOAT, (uint32_t)a.offset}); break;
+            case attribute_format::float2: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32_SFLOAT, (uint32_t)a.offset}); break;
+            case attribute_format::float3: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32_SFLOAT, (uint32_t)a.offset}); break;
+            case attribute_format::float4: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32A32_SFLOAT, (uint32_t)a.offset}); break;
             }
         }
     }
@@ -774,28 +765,30 @@ rhi::pipeline vk::device::create_pipeline(const rhi::pipeline_desc & desc)
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = objects[desc.layout];
-    pipelineInfo.renderPass = objects[rhi::render_pass{1}];
+    pipelineInfo.renderPass = objects[desc.pass];
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
     pipelineInfo.basePipelineIndex = -1; // Optional
 
-    check("vkCreateGraphicsPipelines", vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline.pipeline_object));
+    auto [handle, pipe] = objects.create<pipeline>();
+    pipe.desc = desc;
+    check("vkCreateGraphicsPipelines", vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipe.pipeline_object));
     return handle;
 }
-void vk::device::destroy_pipeline(rhi::pipeline pipeline)
+void vk_device::destroy_pipeline(pipeline pipeline)
 {
     vkDestroyPipeline(dev, objects[pipeline].pipeline_object, nullptr);
     objects.destroy(pipeline); 
 }
 
 ////////////////////////
-// vk::device windows //
+// vk_device windows //
 ////////////////////////
 
-rhi::window vk::device::create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) 
+window vk_device::create_window(render_pass pass, const int2 & dimensions, std::string_view title) 
 {
     const std::string buffer {begin(title), end(title)};
-    auto [handle, win] = objects.create<rhi::window>();
+    auto [handle, win] = objects.create<window>();
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -855,7 +848,7 @@ rhi::window vk::device::create_window(rhi::render_pass pass, const int2 & dimens
     check("vkCreateSemaphore", vkCreateSemaphore(dev, &semaphore_info, nullptr, &win.render_finished));
     
     // Create swapchain framebuffer
-    auto [fb_handle, fb] = objects.create<rhi::framebuffer>();
+    auto [fb_handle, fb] = objects.create<framebuffer>();
     fb.dims = dimensions;
     fb.framebuffers.resize(win.swapchain_image_views.size());
     win.depth_image = make_render_target(dimensions, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -878,7 +871,7 @@ rhi::window vk::device::create_window(rhi::render_pass pass, const int2 & dimens
     return handle;
 }
 
-void vk::device::destroy_window(rhi::window window)
+void vk_device::destroy_window(window window)
 { 
     auto & win = objects[window];
     destroy_framebuffer(win.swapchain_framebuffer);
@@ -893,17 +886,17 @@ void vk::device::destroy_window(rhi::window window)
 }
 
 //////////////////////////
-// vk::device rendering //
+// vk_device rendering //
 //////////////////////////
 
-rhi::command_buffer vk::device::start_command_buffer()
+command_buffer vk_device::start_command_buffer()
 {
-    auto [handle, cmd] = objects.create<rhi::command_buffer>();
+    auto [handle, cmd] = objects.create<command_buffer>();
     cmd = begin_transient();
     return handle;
 }
 
-void vk::device::begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer)
+void vk_device::begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer)
 {
     auto & fb = objects[framebuffer];
 
@@ -921,43 +914,43 @@ void vk::device::begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pas
     vkCmdSetScissor(objects[cmd], 0, 1, &pass_begin_info.renderArea);    
 }
 
-void vk::device::bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe)
+void vk_device::bind_pipeline(command_buffer cmd, pipeline pipe)
 {
     vkCmdBindPipeline(objects[cmd], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[pipe].pipeline_object);
 }
 
-void vk::device::bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set)
+void vk_device::bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set)
 {
     vkCmdBindDescriptorSets(objects[cmd], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[layout], set_index, 1, &objects[set], 0, nullptr);
 }
 
-void vk::device::bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range)
+void vk_device::bind_vertex_buffer(command_buffer cmd, int index, buffer_range range)
 {
     VkDeviceSize offset = range.offset;
     vkCmdBindVertexBuffers(objects[cmd], index, 1, &objects[range.buffer].buffer_object, &offset);
 }
 
-void vk::device::bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range)
+void vk_device::bind_index_buffer(command_buffer cmd, buffer_range range)
 {
     vkCmdBindIndexBuffer(objects[cmd], objects[range.buffer].buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
 }
 
-void vk::device::draw(rhi::command_buffer cmd, int first_vertex, int vertex_count)
+void vk_device::draw(command_buffer cmd, int first_vertex, int vertex_count)
 {
     vkCmdDraw(objects[cmd], vertex_count, 1, first_vertex, 0);
 }
 
-void vk::device::draw_indexed(rhi::command_buffer cmd, int first_index, int index_count)
+void vk_device::draw_indexed(command_buffer cmd, int first_index, int index_count)
 {
     vkCmdDrawIndexed(objects[cmd], index_count, 1, first_index, 0, 0);
 }
 
-void vk::device::end_render_pass(rhi::command_buffer cmd)
+void vk_device::end_render_pass(command_buffer cmd)
 {
     vkCmdEndRenderPass(objects[cmd]);
 }
 
-void vk::device::present(rhi::command_buffer submit, rhi::window window)
+void vk_device::present(command_buffer submit, window window)
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(objects[submit])); 
 
@@ -989,7 +982,7 @@ void vk::device::present(rhi::command_buffer submit, rhi::window window)
     check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
 }
 
-void vk::device::wait_idle() 
+void vk_device::wait_idle() 
 {
     check("vkdeviceWaitIdle", vkDeviceWaitIdle(dev));
 }

@@ -11,53 +11,53 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-namespace d3d
+namespace rhi
 {
-    struct error : public std::error_category
+    struct d3d_error : public std::error_category
     {
         const char * name() const noexcept override { return "HRESULT"; }
         std::string message(int value) const override { return std::to_string(value); }
-        static const std::error_category & instance() { static error inst; return inst; }
+        static const std::error_category & instance() { static d3d_error inst; return inst; }
     };
     void check(const char * func, HRESULT result)
     {
         if(FAILED(result))
         {
             std::ostringstream ss; ss << func << "(...) failed";
-            throw std::system_error(std::error_code(exactly(result), error::instance()), ss.str());
+            throw std::system_error(std::error_code(exactly(result), d3d_error::instance()), ss.str());
         }
     }
 
-    struct buffer
+    struct d3d_buffer
     {
         ID3D11Buffer * buffer_object;
         char * mapped = 0;
     };
 
-    struct render_pass
+    struct d3d_render_pass
     {
         rhi::render_pass_desc desc;
     };
 
-    struct framebuffer
+    struct d3d_framebuffer
     {
         int2 dims;
         ID3D11RenderTargetView * render_target_view;
         ID3D11DepthStencilView * depth_stencil_view;
     };
 
-    struct descriptor_set_layout
+    struct d3d_descriptor_set_layout
     {
         std::vector<rhi::descriptor_binding> bindings;
     };
 
-    struct input_layout
+    struct d3d_input_layout
     {
         std::vector<rhi::vertex_binding_desc> bindings;
         std::vector<D3D11_INPUT_ELEMENT_DESC> input_descs;        
     };
 
-    struct pipeline
+    struct d3d_pipeline
     {
         rhi::pipeline_desc desc;
         ID3D11InputLayout * layout;
@@ -67,7 +67,7 @@ namespace d3d
         void set_shader(ID3D11PixelShader * s) { ps = s; }
     };
 
-    struct window
+    struct d3d_window
     {
         GLFWwindow * w;
         IDXGISwapChain * swap_chain;
@@ -75,7 +75,7 @@ namespace d3d
         rhi::framebuffer fb;
     };
 
-    struct device : rhi::device
+    struct d3d_device : device
     {
         std::function<void(const char *)> debug_callback;    
 
@@ -85,20 +85,20 @@ namespace d3d
         ID3D11RasterizerState * rasterizer_state;
 
         template<class T> struct traits;
-        template<> struct traits<rhi::buffer> { using type = buffer; };
-        template<> struct traits<rhi::render_pass> { using type = render_pass; };
-        template<> struct traits<rhi::framebuffer> { using type = framebuffer; };
-        template<> struct traits<rhi::input_layout> { using type = input_layout; };
-        template<> struct traits<rhi::shader> { using type = shader_module; }; 
-        template<> struct traits<rhi::pipeline> { using type = pipeline; };
-        template<> struct traits<rhi::window> { using type = window; };
-        heterogeneous_object_set<traits, rhi::buffer, rhi::render_pass, rhi::framebuffer, rhi::input_layout, rhi::shader, rhi::pipeline, rhi::window> objects;
+        template<> struct traits<buffer> { using type = d3d_buffer; };
+        template<> struct traits<render_pass> { using type = d3d_render_pass; };
+        template<> struct traits<framebuffer> { using type = d3d_framebuffer; };
+        template<> struct traits<input_layout> { using type = d3d_input_layout; };
+        template<> struct traits<shader> { using type = shader_module; }; 
+        template<> struct traits<pipeline> { using type = d3d_pipeline; };
+        template<> struct traits<window> { using type = d3d_window; };
+        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, input_layout, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
-        pipeline * current_pipeline;   
+        d3d_pipeline * current_pipeline;   
 
-        device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
+        d3d_device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
         {
             const D3D_FEATURE_LEVEL feature_levels[] {D3D_FEATURE_LEVEL_11_1};
             ID3D11Device * dev11;
@@ -120,20 +120,20 @@ namespace d3d
             check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rdesc, &rasterizer_state));
         }
 
-        rhi::device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
+        device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
 
-        rhi::render_pass create_render_pass(const rhi::render_pass_desc & desc) override 
+        render_pass create_render_pass(const render_pass_desc & desc) override 
         {
-            auto [handle, pass] = objects.create<rhi::render_pass>();
+            auto [handle, pass] = objects.create<render_pass>();
             pass.desc = desc;
             return handle;
         }
-        void destroy_render_pass(rhi::render_pass pass) override { objects.destroy(pass); }
+        void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
 
-        rhi::window create_window(rhi::render_pass pass, const int2 & dimensions, std::string_view title) override
+        window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
         {
-            auto [fb_handle, fb] = objects.create<rhi::framebuffer>();
-            auto [handle, window] = objects.create<rhi::window>();
+            auto [fb_handle, fb] = objects.create<framebuffer>();
+            auto [handle, window] = objects.create<window>();
             fb.dims = dimensions;
             window.fb = fb_handle;
 
@@ -177,12 +177,12 @@ namespace d3d
 
             return {handle};
         }
-        GLFWwindow * get_glfw_window(rhi::window window) override { return objects[window].w; }
-        rhi::framebuffer get_swapchain_framebuffer(rhi::window window) override { return objects[window].fb; }
+        GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }
+        framebuffer get_swapchain_framebuffer(window window) override { return objects[window].fb; }
 
-        std::tuple<rhi::buffer, char *> create_buffer(const rhi::buffer_desc & desc, const void * initial_data) override
+        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
-            auto [handle, buffer] = objects.create<rhi::buffer>();
+            auto [handle, buffer] = objects.create<buffer>();
 
             D3D11_BUFFER_DESC buffer_desc {};
             buffer_desc.ByteWidth = exactly(desc.size);
@@ -190,10 +190,10 @@ namespace d3d
             buffer_desc.BindFlags = 0;
             switch(desc.usage)
             {
-            case rhi::buffer_usage::vertex: buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER; break;
-            case rhi::buffer_usage::index: buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER; break;
-            case rhi::buffer_usage::uniform: buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER; break;
-            case rhi::buffer_usage::storage: buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE; break;
+            case buffer_usage::vertex: buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER; break;
+            case buffer_usage::index: buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER; break;
+            case buffer_usage::uniform: buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER; break;
+            case buffer_usage::storage: buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE; break;
             }
             buffer_desc.CPUAccessFlags = desc.dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
 
@@ -214,16 +214,16 @@ namespace d3d
             return {handle, buffer.mapped};
         }
 
-        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
-        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
-        rhi::descriptor_pool create_descriptor_pool() { return desc_emulator.create_descriptor_pool(); }
-        void reset_descriptor_pool(rhi::descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
-        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
-        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
+        descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
+        pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
+        descriptor_pool create_descriptor_pool() { return desc_emulator.create_descriptor_pool(); }
+        void reset_descriptor_pool(descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
+        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
+        void write_descriptor(descriptor_set set, int binding, buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
 
-        rhi::input_layout create_input_layout(const std::vector<rhi::vertex_binding_desc> & bindings) override
+        input_layout create_input_layout(const std::vector<vertex_binding_desc> & bindings) override
         {
-            auto [handle, input_layout] = objects.create<rhi::input_layout>();
+            auto [handle, input_layout] = objects.create<input_layout>();
 
             input_layout.bindings = bindings;
             for(auto & buf : bindings)
@@ -232,28 +232,28 @@ namespace d3d
                 {
                     switch(attrib.type)
                     {
-                    case rhi::attribute_format::float1: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case rhi::attribute_format::float2: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case rhi::attribute_format::float3: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case rhi::attribute_format::float4: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    default: throw std::logic_error("invalid rhi::attribute_format");
+                    case attribute_format::float1: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case attribute_format::float2: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case attribute_format::float3: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    case attribute_format::float4: input_layout.input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
+                    default: throw std::logic_error("invalid attribute_format");
                     }
                 }
             }
             return handle;
         }
 
-        rhi::shader create_shader(const shader_module & module) override
+        shader create_shader(const shader_module & module) override
         {
-            auto [handle, shader] = objects.create<rhi::shader>();
+            auto [handle, shader] = objects.create<shader>();
             shader = module;
             return handle;
         }
 
-        rhi::pipeline create_pipeline(const rhi::pipeline_desc & desc) override
+        pipeline create_pipeline(const pipeline_desc & desc) override
         {
             const auto & input_descs = objects[desc.input].input_descs;
-            auto [handle, pipeline] = objects.create<rhi::pipeline>();
+            auto [handle, pipeline] = objects.create<pipeline>();
             pipeline.desc = desc;
             for(auto & s : desc.stages)
             {
@@ -298,16 +298,16 @@ namespace d3d
             return handle;
         }
 
-        void destroy_buffer(rhi::buffer buffer) override { objects.destroy(buffer); }
-        void destroy_descriptor_pool(rhi::descriptor_pool pool) override { desc_emulator.destroy(pool); }
-        void destroy_descriptor_set_layout(rhi::descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
-        void destroy_pipeline_layout(rhi::pipeline_layout layout) override { desc_emulator.destroy(layout); }        
-        void destroy_input_layout(rhi::input_layout layout) override { objects.destroy(layout); }
-        void destroy_shader(rhi::shader shader) override { objects.destroy(shader); }
-        void destroy_pipeline(rhi::pipeline pipeline)  override { objects.destroy(pipeline); }        
-        void destroy_window(rhi::window window) override { objects.destroy(window); }
+        void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
+        void destroy_descriptor_pool(descriptor_pool pool) override { desc_emulator.destroy(pool); }
+        void destroy_descriptor_set_layout(descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
+        void destroy_pipeline_layout(pipeline_layout layout) override { desc_emulator.destroy(layout); }        
+        void destroy_input_layout(input_layout layout) override { objects.destroy(layout); }
+        void destroy_shader(shader shader) override { objects.destroy(shader); }
+        void destroy_pipeline(pipeline pipeline)  override { objects.destroy(pipeline); }        
+        void destroy_window(window window) override { objects.destroy(window); }
         
-        void submit_command_buffer(rhi::command_buffer cmd)
+        void submit_command_buffer(command_buffer cmd)
         {
             cmd_emulator.execute(cmd, overload(
                 [this](const begin_render_pass_command & c)
@@ -333,14 +333,14 @@ namespace d3d
                     ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
                     switch(current_pipeline->desc.topology)
                     {
-                    case rhi::primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
-                    case rhi::primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
-                    case rhi::primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
+                    case primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
+                    case primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
+                    case primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
                     }
                 },
                 [this](const bind_descriptor_set_command & c)
                 {
-                    desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, [this](size_t index, rhi::buffer_range range) 
+                    desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, [this](size_t index, buffer_range range) 
                     { 
                         const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
                         ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
@@ -365,17 +365,17 @@ namespace d3d
             ));
         }
 
-        rhi::command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
-        void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
-        void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
-        void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
-        void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
-        void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
-        void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
-        void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
-        void end_render_pass(rhi::command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
+        command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
+        void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
+        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
+        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
+        void bind_index_buffer(command_buffer cmd, buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
+        void draw(command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
+        void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
+        void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void present(rhi::command_buffer submit, rhi::window window) override
+        void present(command_buffer submit, window window) override
         {
             submit_command_buffer(submit);
             objects[window].swap_chain->Present(1, 0);
@@ -388,5 +388,5 @@ namespace d3d
 
 std::shared_ptr<rhi::device> create_d3d11_device(std::function<void(const char *)> debug_callback)
 {
-    return std::make_shared<d3d::device>(debug_callback);
+    return std::make_shared<rhi::d3d_device>(debug_callback);
 }
