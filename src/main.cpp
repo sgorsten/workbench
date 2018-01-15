@@ -168,6 +168,7 @@ class device_session
 
     rhi::window rwindow;
     std::unique_ptr<glfw::window> gwindow;
+    double2 last_cursor;
 public:
     device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) : 
         dev{dev}, info{dev->get_info()}, desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 16*1024},
@@ -227,7 +228,24 @@ public:
         dev->destroy_sampler(nearest);
     }
 
-    glfw::window & get_window() { return *gwindow; }
+    bool update(camera & cam, float timestep)
+    {
+        const double2 cursor = gwindow->get_cursor_pos();
+        if(gwindow->get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
+        {
+            cam.yaw += static_cast<float>(cursor.x - last_cursor.x) * 0.01f;
+            cam.pitch = std::min(std::max(cam.pitch + static_cast<float>(cursor.y - last_cursor.y) * 0.01f, -1.5f), +1.5f);
+        }
+        last_cursor = cursor;
+
+        const float cam_speed = timestep * 10;
+        if(gwindow->get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
+        if(gwindow->get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
+        if(gwindow->get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
+        if(gwindow->get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
+
+        return !gwindow->should_close();
+    }
 
     void render_frame(const camera & cam)
     {
@@ -309,36 +327,23 @@ int main(int argc, const char * argv[]) try
         pos.x += 600;
     }
 
-    double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
     bool running = true;
     while(running)
     {
+        // Render frame
+        for(auto & s : sessions) s->render_frame(cam);
+
+        // Poll events
+        context.poll_events();
+
         // Compute timestep
         const auto t1 = std::chrono::high_resolution_clock::now();
         const auto timestep = std::chrono::duration<float>(t1-t0).count();
         t0 = t1;
 
         // Handle input
-        const double2 cursor = sessions[0]->get_window().get_cursor_pos();
-        if(sessions[0]->get_window().get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
-        {
-            cam.yaw += static_cast<float>(cursor.x - last_cursor.x) * 0.01f;
-            cam.pitch = std::min(std::max(cam.pitch + static_cast<float>(cursor.y - last_cursor.y) * 0.01f, -1.5f), +1.5f);
-        }
-        last_cursor = cursor;
-
-        const float cam_speed = timestep * 10;
-        if(sessions[0]->get_window().get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
-        if(sessions[0]->get_window().get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
-        if(sessions[0]->get_window().get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
-        if(sessions[0]->get_window().get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
-
-        for(auto & s : sessions) s->render_frame(cam);
-
-        // Poll events
-        context.poll_events();
-        for(auto & s : sessions) if(s->get_window().should_close()) running = false;
+        for(auto & s : sessions) if(!s->update(cam, timestep)) running = false;
     }
     return EXIT_SUCCESS;
 }
