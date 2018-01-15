@@ -9,7 +9,6 @@ namespace rhi
 
     enum attachment_type { color, depth_stencil };
     attachment_type get_attachment_type(image_format format);
-    size_t get_pixel_size(image_format format);
 
     template<class Handle, class Type> class object_set
     {

@@ -254,4 +254,6 @@ namespace rhi
         std::string name;
         std::function<std::shared_ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
     };
+
+    size_t get_pixel_size(image_format format);
 }

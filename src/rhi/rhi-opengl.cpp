@@ -7,11 +7,12 @@
 
 namespace rhi
 {
-    GLenum get_gl_format(image_format format)
+    struct gl_format { GLenum internal_format, format, type; };
+    gl_format get_gl_format(image_format format)
     {
         switch(format)
         {
-        #define X(FORMAT, SIZE, TYPE, VK, GL, DX) case FORMAT: return GL;
+        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return {GLI, GLF, GLT};
         #include "rhi-format.inl"
         #undef X
         default: fail_fast();
@@ -141,13 +142,14 @@ namespace rhi
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
+            auto glf = get_gl_format(desc.format);
             auto [handle, im] = objects.create<image>();
             switch(desc.shape)
             {
             case rhi::image_shape::_2d:
                 glCreateTextures(GL_TEXTURE_2D, 1, &im.texture_object);
-                glTextureStorage2D(im.texture_object, desc.mip_levels, get_gl_format(desc.format), desc.dimensions.x, desc.dimensions.y);
-                if(initial_data.size() == 1) glTextureSubImage2D(im.texture_object, 0, 0, 0, desc.dimensions.x, desc.dimensions.y, GL_RGBA, GL_UNSIGNED_BYTE, initial_data[0]);
+                glTextureStorage2D(im.texture_object, desc.mip_levels, glf.internal_format, desc.dimensions.x, desc.dimensions.y);
+                if(initial_data.size() == 1) glTextureSubImage2D(im.texture_object, 0, 0, 0, desc.dimensions.x, desc.dimensions.y, glf.format, glf.type, initial_data[0]);
                 break;
             }
             return handle;

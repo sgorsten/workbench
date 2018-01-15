@@ -12,7 +12,7 @@ namespace rhi
     {
         switch(format)
         {
-        #define X(FORMAT, SIZE, TYPE, VK, GL, DX) case FORMAT: return VK;
+        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return VK;
         #include "rhi-format.inl"
         #undef X
         default: fail_fast();
@@ -88,6 +88,7 @@ namespace rhi
         VkPhysicalDeviceMemoryProperties mem_props {};
 
         // Resources for staging memory
+        size_t staging_buffer_size {32*1024*1024};
         VkBuffer staging_buffer {};
         VkDeviceMemory staging_memory {};
         void * mapped_staging_memory {};
@@ -312,7 +313,7 @@ vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_c
 
     // Set up staging buffer
     VkBufferCreateInfo buffer_info {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    buffer_info.size = 16*1024*1024;
+    buffer_info.size = staging_buffer_size;
     buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     check("vkCreateBuffer", vkCreateBuffer(dev, &buffer_info, nullptr, &staging_buffer));
@@ -446,30 +447,6 @@ void vk_device::destroy_buffer(buffer buffer)
     objects.destroy(buffer); 
 }
 
-static size_t compute_image_size(int pixels, VkFormat format)
-{
-    if(format <= VK_FORMAT_UNDEFINED) throw std::logic_error("unknown format");
-    if(format <= VK_FORMAT_R4G4_UNORM_PACK8) return pixels*1;
-    if(format <= VK_FORMAT_A1R5G5B5_UNORM_PACK16) return pixels*2;
-    if(format <= VK_FORMAT_R8_SRGB) return pixels*1;
-    if(format <= VK_FORMAT_R8G8_SRGB) return pixels*2;
-    if(format <= VK_FORMAT_B8G8R8_SRGB) return pixels*3;
-    if(format <= VK_FORMAT_A2B10G10R10_SINT_PACK32) return pixels*4;
-    if(format <= VK_FORMAT_R16_SFLOAT) return pixels*2;
-    if(format <= VK_FORMAT_R16G16_SFLOAT) return pixels*4;
-    if(format <= VK_FORMAT_R16G16B16_SFLOAT) return pixels*6;
-    if(format <= VK_FORMAT_R16G16B16A16_SFLOAT) return pixels*8;
-    if(format <= VK_FORMAT_R32_SFLOAT) return pixels*4;
-    if(format <= VK_FORMAT_R32G32_SFLOAT) return pixels*8;
-    if(format <= VK_FORMAT_R32G32B32_SFLOAT) return pixels*12;
-    if(format <= VK_FORMAT_R32G32B32A32_SFLOAT) return pixels*16;
-    if(format <= VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) return pixels*4;
-    throw std::logic_error("unknown format");
-}
-
-static size_t compute_image_size(int2 dims, VkFormat format) { return compute_image_size(product(dims), format); }
-static size_t compute_image_size(int3 dims, VkFormat format) { return compute_image_size(product(dims), format); }
-
 static void transition_layout(VkCommandBuffer command_buffer, VkImage image, uint32_t mip_level, uint32_t array_layer, VkImageLayout old_layout, VkImageLayout new_layout)
 {
     VkPipelineStageFlags src_stage_mask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
@@ -552,7 +529,9 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
         for(size_t layer=0; layer<initial_data.size(); ++layer) 
         {
             // Write initial data for this layer into the staging area
-            memcpy(mapped_staging_memory, initial_data[layer], compute_image_size(desc.dimensions, image_info.format));
+            const size_t image_size = get_pixel_size(desc.format) * product(desc.dimensions);
+            if(image_size > staging_buffer_size) throw std::runtime_error("staging buffer exhausted");
+            memcpy(mapped_staging_memory, initial_data[layer], image_size);
 
             VkImageSubresourceLayers layers {};
             layers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;

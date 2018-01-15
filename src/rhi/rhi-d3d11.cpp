@@ -17,7 +17,7 @@ namespace rhi
     {
         switch(format)
         {
-        #define X(FORMAT, SIZE, TYPE, VK, GL, DX) case FORMAT: return DX;
+        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return DX;
         #include "rhi-format.inl"
         #undef X
         default: fail_fast();

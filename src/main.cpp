@@ -83,14 +83,36 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+struct image { int2 dimensions; rhi::image_format format; void * pixels; };
+image load_image(const std::string & filename)
+{
+    int width, height;
+    auto pixels = stbi_load(filename.c_str(), &width, &height, nullptr, 4);
+    if(!pixels) throw std::runtime_error("stbi_load(\""+filename+"\", ...) failed");
+    return {{width,height}, rhi::image_format::rgba_unorm8, pixels};
+}
+image load_image_hdr(const std::string & filename)
+{
+    int width, height;
+    auto pixels = stbi_loadf(filename.c_str(), &width, &height, nullptr, 4);
+    if(!pixels) throw std::runtime_error("stbi_loadf(\""+filename+"\", ...) failed");
+    return {{width,height}, rhi::image_format::rgba_float32, pixels};
+}
+
 struct common_assets
 {
     coord_system game_coords;
     mesh basis_mesh, ground_mesh, box_mesh;
     shader_module vs, fs, fs_unlit;
+    image env_spheremap;
 
     common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
+        env_spheremap = load_image_hdr("../../assets/monument-valley.hdr");
+
         shader_compiler compiler;
         vs = compiler.compile(shader_stage::vertex, R"(#version 450
             layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
@@ -163,8 +185,9 @@ class device_session
     rhi::shader vs, fs, fs_unlit;
     rhi::pipeline wire_pipe, solid_pipe;
 
-    rhi::sampler nearest;
+    rhi::sampler nearest, spheremap_sampler;
     rhi::image checkerboard;
+    rhi::image env_tex;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
@@ -199,9 +222,11 @@ public:
         solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+        spheremap_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::repeat, rhi::address_mode::clamp_to_edge});
 
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
+        env_tex = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
@@ -221,8 +246,10 @@ public:
         dev->destroy_descriptor_set_layout(per_object_layout);
         dev->destroy_descriptor_set_layout(per_scene_view_layout);
 
+        dev->destroy_image(env_tex);
         dev->destroy_image(checkerboard);
         dev->destroy_sampler(nearest);
+        dev->destroy_sampler(spheremap_sampler);
     }
 
     bool update(camera & cam, float timestep)
@@ -270,7 +297,7 @@ public:
         // Draw the ground
         cmd.bind_pipeline(solid_pipe);
         cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(cam.coords(coord_axis::down)*0.3f))
-                                                                                  .write(1, nearest, checkerboard));
+                                                                                  .write(1, spheremap_sampler, env_tex));
         cmd.bind_vertex_buffer(0, ground_vertex_buffer);
         cmd.bind_index_buffer(ground_index_buffer);
         cmd.draw_indexed(0, 6);
