@@ -169,7 +169,7 @@ class device_session
     rhi::window rwindow;
     std::unique_ptr<glfw::window> gwindow;
 public:
-    device_session(const common_assets & assets, std::shared_ptr<rhi::device> dev, const int2 & window_pos) : 
+    device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) : 
         dev{dev}, info{dev->get_info()}, desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 16*1024},
         basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
         ground_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
@@ -203,7 +203,7 @@ public:
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
 
-        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
+        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         rwindow = dev->create_window(pass, {512,512}, ss.str());
         gwindow = std::make_unique<glfw::window>(dev->get_glfw_window(rwindow));
         gwindow->set_pos(window_pos);
@@ -298,13 +298,21 @@ int main(int argc, const char * argv[]) try
     // Create the devices
     glfw::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    device_session session {assets, create_opengl_device(debug), {100,100}};
-    device_session session2 {assets, create_d3d11_device(debug), {700,100}};
-    device_session session3 {assets, create_vulkan_device(debug), {1300,100}};
+
+    int2 pos{100,100};
+    std::vector<std::unique_ptr<device_session>> sessions;
+    for(auto & backend : rhi::all_backends())
+    {
+        std::cout << "Initializing " << backend.name << " backend:\n";
+        sessions.push_back(std::make_unique<device_session>(assets, backend.name, backend.create_device(debug), pos));
+        std::cout << backend.name << " has been initialized." << std::endl;
+        pos.x += 600;
+    }
 
     double2 last_cursor;
     auto t0 = std::chrono::high_resolution_clock::now();
-    while(!session.get_window().should_close())
+    bool running = true;
+    while(running)
     {
         // Compute timestep
         const auto t1 = std::chrono::high_resolution_clock::now();
@@ -312,8 +320,8 @@ int main(int argc, const char * argv[]) try
         t0 = t1;
 
         // Handle input
-        const double2 cursor = session.get_window().get_cursor_pos();
-        if(session.get_window().get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
+        const double2 cursor = sessions[0]->get_window().get_cursor_pos();
+        if(sessions[0]->get_window().get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
         {
             cam.yaw += static_cast<float>(cursor.x - last_cursor.x) * 0.01f;
             cam.pitch = std::min(std::max(cam.pitch + static_cast<float>(cursor.y - last_cursor.y) * 0.01f, -1.5f), +1.5f);
@@ -321,17 +329,16 @@ int main(int argc, const char * argv[]) try
         last_cursor = cursor;
 
         const float cam_speed = timestep * 10;
-        if(session.get_window().get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
-        if(session.get_window().get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
-        if(session.get_window().get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
-        if(session.get_window().get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
+        if(sessions[0]->get_window().get_key(GLFW_KEY_W)) cam.move(coord_axis::forward, cam_speed);
+        if(sessions[0]->get_window().get_key(GLFW_KEY_A)) cam.move(coord_axis::left, cam_speed);
+        if(sessions[0]->get_window().get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
+        if(sessions[0]->get_window().get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
 
-        session.render_frame(cam);
-        session2.render_frame(cam);
-        session3.render_frame(cam);
+        for(auto & s : sessions) s->render_frame(cam);
 
         // Poll events
         context.poll_events();
+        for(auto & s : sessions) if(s->get_window().should_close()) running = false;
     }
     return EXIT_SUCCESS;
 }

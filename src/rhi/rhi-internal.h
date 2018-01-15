@@ -3,6 +3,10 @@
 
 namespace rhi
 {
+    std::vector<backend_info> & global_backend_list();
+    template<class Device> void register_backend(const char * name) { global_backend_list().push_back({name, [](std::function<void(const char *)> debug_callback) { return std::make_shared<Device>(debug_callback); }}); }
+    template<class Device> struct autoregister_backend { autoregister_backend(const char * name) { register_backend<Device>(name); } };
+
     enum attachment_type { color, depth_stencil };
     attachment_type get_attachment_type(image_format format);
     size_t get_pixel_size(image_format format);

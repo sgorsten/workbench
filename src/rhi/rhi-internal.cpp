@@ -1,6 +1,17 @@
 #include "rhi-internal.h"
 using namespace rhi;
 
+std::vector<backend_info> & rhi::global_backend_list()
+{
+    static std::vector<backend_info> backends;
+    return backends;
+}
+
+const std::vector<backend_info> & rhi::all_backends()
+{
+    return global_backend_list();
+}
+
 attachment_type rhi::get_attachment_type(image_format format)
 {
     switch(format)

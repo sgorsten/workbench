@@ -141,7 +141,7 @@ namespace rhi
             check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rdesc, &rasterizer_state));
         }
 
-        device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
+        device_info get_info() const override { return {{coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
 
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
@@ -488,9 +488,6 @@ namespace rhi
 
         void wait_idle() override { ctx->Flush(); }
     };
-}
 
-std::shared_ptr<rhi::device> create_d3d11_device(std::function<void(const char *)> debug_callback)
-{
-    return std::make_shared<rhi::d3d_device>(debug_callback);
+    autoregister_backend<d3d_device> autoregister_d3d_backend {"Direct3D 11.1"};
 }

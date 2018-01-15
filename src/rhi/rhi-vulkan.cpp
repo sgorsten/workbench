@@ -120,7 +120,7 @@ namespace rhi
         void end_transient(VkCommandBuffer command_buffer);
 
         // info
-        device_info get_info() const override { return {"Vulkan 1.0", {coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
+        device_info get_info() const override { return {{coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
 
         // resources
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override;
@@ -182,11 +182,8 @@ namespace rhi
         void present(command_buffer submit, window window) override;
         void wait_idle() override;
     };
-}
 
-std::shared_ptr<rhi::device> create_vulkan_device(std::function<void(const char *)> debug_callback)
-{
-    return std::make_shared<rhi::vk_device>(debug_callback);
+    autoregister_backend<vk_device> autoregister_vk_backend {"Vulkan 1.0"};
 }
 
 namespace rhi

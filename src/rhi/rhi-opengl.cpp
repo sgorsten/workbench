@@ -137,7 +137,7 @@ namespace rhi
             enable_debug_callback(hidden_window);
         }
         
-        device_info get_info() const override { return {"OpenGL 4.5 Core", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
+        device_info get_info() const override { return {{coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
@@ -453,9 +453,6 @@ namespace rhi
 
         void wait_idle() override { glFlush(); }
     };
-}
 
-std::shared_ptr<rhi::device> create_opengl_device(std::function<void(const char *)> debug_callback)
-{
-    return std::make_shared<rhi::gl_device>(debug_callback);
+    autoregister_backend<gl_device> autoregister_gl_backend {"OpenGL 4.5 Core"};
 }

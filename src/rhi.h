@@ -112,13 +112,7 @@ namespace rhi
         std::optional<compare_op> depth_test;
     };
 
-    struct device_info
-    {
-        std::string name;
-        coord_system ndc_coords;
-        linalg::z_range z_range;
-    };
-
+    struct device_info { coord_system ndc_coords; linalg::z_range z_range; };
     struct buffer_range { buffer buffer; size_t offset, size; };
 
     struct device
@@ -208,8 +202,11 @@ namespace rhi
         virtual void present(command_buffer submit, window window) = 0;
         virtual void wait_idle() = 0;
     };
-}
 
-std::shared_ptr<rhi::device> create_vulkan_device(std::function<void(const char *)> debug_callback);
-std::shared_ptr<rhi::device> create_opengl_device(std::function<void(const char *)> debug_callback);
-std::shared_ptr<rhi::device> create_d3d11_device(std::function<void(const char *)> debug_callback);
+    struct backend_info
+    {
+        std::string name;
+        std::function<std::shared_ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
+    };
+    const std::vector<backend_info> & all_backends();
+}
