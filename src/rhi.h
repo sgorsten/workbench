@@ -21,6 +21,7 @@ namespace rhi
     // Object types
     using buffer = handle<struct buffer_tag>;
     using image = handle<struct image_tag>;
+    using sampler = handle<struct sampler_tag>;
     using render_pass = handle<struct render_pass_tag>;
     using framebuffer = handle<struct framebuffer_tag>;
     using descriptor_pool = handle<struct descriptor_pool_tag>;
@@ -57,6 +58,16 @@ namespace rhi
         image_format format     = image_format::r8g8b8a8_unorm;
         image_flags  flags      = 0;
         // Not yet supported: multisampling, arrays
+    };
+
+    // Sampler creation info
+    enum class filter { nearest, linear };
+    enum class address_mode { repeat, mirrored_repeat, clamp_to_edge, mirror_clamp_to_edge, clamp_to_border };
+    struct sampler_desc
+    {
+        filter mag_filter, min_filter;
+        std::optional<filter> mip_filter;
+        address_mode wrap_s, wrap_t, wrap_r;
     };
 
     // Descriptor set layout creation info
@@ -108,6 +119,9 @@ namespace rhi
         virtual auto create_image(const image_desc & desc, std::vector<const void *> initial_data) -> image = 0;
         virtual void destroy_image(image image) = 0;
 
+        virtual auto create_sampler(const sampler_desc & desc) -> sampler = 0;
+        virtual void destroy_sampler(sampler sampler) = 0;
+
         virtual auto create_render_pass(const render_pass_desc & desc) -> render_pass = 0;
         virtual void destroy_render_pass(render_pass pass) = 0;
 
@@ -123,8 +137,8 @@ namespace rhi
 
         virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
         virtual auto alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) -> descriptor_set = 0;
-        virtual void write_descriptor(descriptor_set set, int binding, image image) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
+        virtual void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) = 0;
 
         ///////////////
         // pipelines //

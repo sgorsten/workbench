@@ -163,6 +163,7 @@ class device_session
     rhi::shader vs, fs, fs_unlit;
     rhi::pipeline wire_pipe, solid_pipe;
 
+    rhi::sampler nearest;
     rhi::image checkerboard;
 
     rhi::window rwindow;
@@ -194,6 +195,8 @@ public:
         wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
         solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
 
+        nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::r8g8b8a8_unorm, rhi::sampled_image_bit}, {grid});
 
@@ -216,6 +219,9 @@ public:
         dev->destroy_pipeline_layout(pipe_layout);
         dev->destroy_descriptor_set_layout(per_object_layout);
         dev->destroy_descriptor_set_layout(per_scene_view_layout);
+
+        dev->destroy_image(checkerboard);
+        dev->destroy_sampler(nearest);
     }
 
     glfw::window & get_window() { return *gwindow; }
@@ -239,14 +245,14 @@ public:
         cmd.bind_pipeline(wire_pipe);
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
         cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, float4x4{linalg::identity})
-                                                                                  .write(1, checkerboard));
+                                                                                  .write(1, nearest, checkerboard));
         cmd.bind_vertex_buffer(0, basis_vertex_buffer);
         cmd.draw(0, 6);
 
         // Draw the ground
         cmd.bind_pipeline(solid_pipe);
         cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(cam.coords(coord_axis::down)*0.3f))
-                                                                                  .write(1, checkerboard));
+                                                                                  .write(1, nearest, checkerboard));
         cmd.bind_vertex_buffer(0, ground_vertex_buffer);
         cmd.bind_index_buffer(ground_index_buffer);
         cmd.draw_indexed(0, 6);
@@ -260,7 +266,7 @@ public:
             {
                 const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
                 cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(position))
-                                                                                          .write(1, checkerboard));
+                                                                                          .write(1, nearest, checkerboard));
                 cmd.draw_indexed(0, 36);
             }
         }

@@ -164,6 +164,9 @@ namespace rhi
         }
         void destroy_image(image image) override { objects.destroy(image); }
 
+        sampler create_sampler(const sampler_desc & desc) override { return {}; }
+        void destroy_sampler(sampler sampler) override {}
+
         render_pass create_render_pass(const render_pass_desc & desc) override 
         {
             auto [handle, pass] = objects.create<render_pass>();
@@ -228,7 +231,7 @@ namespace rhi
         void reset_descriptor_pool(descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
         void write_descriptor(descriptor_set set, int binding, buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
-        void write_descriptor(descriptor_set set, int binding, image image) override { desc_emulator.write_descriptor(set, binding, image); }
+        void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) override { desc_emulator.write_descriptor(set, binding, sampler, image); }
 
         shader create_shader(const shader_module & module) override
         {
@@ -344,7 +347,7 @@ namespace rhi
                         const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
                         ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
                         ctx->PSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
-                    }, [this](size_t index, image image) {});
+                    }, [this](size_t index, sampler sampler, image image) {});
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {

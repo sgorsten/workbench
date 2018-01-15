@@ -80,12 +80,13 @@ namespace rhi
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = gl_buffer; };
         template<> struct traits<image> { using type = gl_image; };
+        template<> struct traits<sampler> { using type = GLuint; };
         template<> struct traits<render_pass> { using type = gl_render_pass; };
         template<> struct traits<framebuffer> { using type = gl_framebuffer; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = gl_pipeline; };
         template<> struct traits<window> { using type = gl_window; };
-        heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -143,6 +144,48 @@ namespace rhi
         }
         void destroy_image(image image) override { objects.destroy(image); }
 
+        sampler create_sampler(const sampler_desc & desc) override 
+        { 
+            auto convert_mode = [](rhi::address_mode mode)
+            {
+                switch(mode)
+                {
+                case rhi::address_mode::repeat: return GL_REPEAT;
+                case rhi::address_mode::mirrored_repeat: return GL_MIRRORED_REPEAT;
+                case rhi::address_mode::clamp_to_edge: return GL_CLAMP_TO_EDGE;
+                case rhi::address_mode::mirror_clamp_to_edge: return GL_MIRROR_CLAMP_TO_EDGE;
+                case rhi::address_mode::clamp_to_border: return GL_CLAMP_TO_BORDER;
+                default: fail_fast();
+                }
+            };
+            auto convert_filter = [](rhi::filter filter)
+            {
+                switch(filter)
+                {
+                case rhi::filter::nearest: return GL_NEAREST;
+                case rhi::filter::linear: return GL_LINEAR;
+                default: fail_fast();
+                }
+            };
+
+            auto [handle, samp] = objects.create<sampler>();
+            glCreateSamplers(1, &samp);
+            glSamplerParameteri(samp, GL_TEXTURE_WRAP_S, convert_mode(desc.wrap_s));
+            glSamplerParameteri(samp, GL_TEXTURE_WRAP_T, convert_mode(desc.wrap_t));
+            glSamplerParameteri(samp, GL_TEXTURE_WRAP_R, convert_mode(desc.wrap_r));
+            glSamplerParameteri(samp, GL_TEXTURE_MAG_FILTER, convert_filter(desc.mag_filter));
+            if(desc.mip_filter)
+            {
+                if(desc.min_filter == rhi::filter::nearest && *desc.mip_filter == rhi::filter::nearest) glSamplerParameteri(samp, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+                if(desc.min_filter == rhi::filter::linear && *desc.mip_filter == rhi::filter::nearest) glSamplerParameteri(samp, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+                if(desc.min_filter == rhi::filter::nearest && *desc.mip_filter == rhi::filter::linear) glSamplerParameteri(samp, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+                if(desc.min_filter == rhi::filter::linear && *desc.mip_filter == rhi::filter::linear) glSamplerParameteri(samp, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            }
+            else glSamplerParameteri(samp, GL_TEXTURE_MIN_FILTER, convert_filter(desc.min_filter));
+            return handle;        
+        }
+        void destroy_sampler(sampler sampler) override { objects.destroy(sampler); }
+
         render_pass create_render_pass(const render_pass_desc & desc) override 
         {
             auto [handle, pass] = objects.create<render_pass>();
@@ -156,7 +199,7 @@ namespace rhi
         void reset_descriptor_pool(descriptor_pool pool) override { desc_emulator.reset_descriptor_pool(pool); }
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) override { return desc_emulator.alloc_descriptor_set(pool, layout); }
         void write_descriptor(descriptor_set set, int binding, buffer_range range) override { desc_emulator.write_descriptor(set, binding, range); }
-        void write_descriptor(descriptor_set set, int binding, image image) override { desc_emulator.write_descriptor(set, binding, image); }
+        void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) override { desc_emulator.write_descriptor(set, binding, sampler, image); }
 
         window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
         {
@@ -181,9 +224,7 @@ namespace rhi
         GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }
         framebuffer get_swapchain_framebuffer(window window) override { return objects[window].fb; }
 
-
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
-
 
         shader create_shader(const shader_module & module) override
         {
@@ -305,7 +346,7 @@ namespace rhi
                 {
                     desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, 
                         [this](size_t index, buffer_range range) { glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), objects[range.buffer].buffer_object, range.offset, range.size); },
-                        [this](size_t index, image image) { glBindTextureUnit(exactly(index), objects[image].texture_object); });
+                        [this](size_t index, sampler sampler, image image) { glBindSampler(exactly(index), objects[sampler]); glBindTextureUnit(exactly(index), objects[image].texture_object); });
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {

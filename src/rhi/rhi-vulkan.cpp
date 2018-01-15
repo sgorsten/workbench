@@ -81,13 +81,12 @@ namespace rhi
         VkDeviceMemory staging_memory {};
         void * mapped_staging_memory {};
         VkCommandPool staging_pool {};
-                
-        VkSampler sampler;
 
         // Objects
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = vk_buffer; };
         template<> struct traits<image> { using type = vk_image; };
+        template<> struct traits<sampler> { using type = VkSampler; };
         template<> struct traits<render_pass> { using type = VkRenderPass; };
         template<> struct traits<framebuffer> { using type = vk_framebuffer; };
         template<> struct traits<descriptor_pool> { using type = VkDescriptorPool; };
@@ -98,10 +97,8 @@ namespace rhi
         template<> struct traits<pipeline> { using type = vk_pipeline; };
         template<> struct traits<window> { using type = vk_window; };
         template<> struct traits<command_buffer> { using type = VkCommandBuffer; };
-        heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer,
-            descriptor_pool, descriptor_set_layout, descriptor_set,
-            pipeline_layout, shader, pipeline, 
-            window, command_buffer> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, descriptor_pool, descriptor_set_layout, descriptor_set, 
+            pipeline_layout, shader, pipeline, window, command_buffer> objects;
 
         vk_device(std::function<void(const char *)> debug_callback);
         ~vk_device();
@@ -121,6 +118,9 @@ namespace rhi
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override;
         void destroy_image(image image) override;
 
+        sampler create_sampler(const sampler_desc & desc) override;
+        void destroy_sampler(sampler sampler) override;
+
         image make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect);
         void destroy_framebuffer(framebuffer framebuffer);
 
@@ -137,7 +137,7 @@ namespace rhi
         void reset_descriptor_pool(descriptor_pool pool) override;
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) override;
         void write_descriptor(descriptor_set set, int binding, buffer_range range) override;
-        void write_descriptor(descriptor_set set, int binding, image image) override;
+        void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) override;
 
         // pipelines
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override;
@@ -318,68 +318,6 @@ vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_c
     command_pool_info.queueFamilyIndex = selection.queue_family; // TODO: Could use an explicit transfer queue
     command_pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     check("vkCreateCommandPool", vkCreateCommandPool(dev, &command_pool_info, nullptr, &staging_pool));
-
-    VkSamplerCreateInfo sampler_info = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_info.magFilter = VK_FILTER_NEAREST;
-    sampler_info.minFilter = VK_FILTER_NEAREST;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sampler_info.minLod = 0;
-    sampler_info.maxLod = 0;
-    check("vkCreateSampler", vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
-
-    /*
-        VkSamplerAddressMode convert(gfx::address_mode f)
-    {
-        switch(f)
-        {
-        case gfx::address_mode::repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        case gfx::address_mode::mirrored_repeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
-        case gfx::address_mode::clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        case gfx::address_mode::mirror_clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
-        case gfx::address_mode::clamp_to_border: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        default: throw std::logic_error("bad gfx::address_mode");
-        }
-    }
-
-    VkFilter convert(gfx::filter f)
-    {
-        switch(f)
-        {
-        case gfx::filter::nearest: return VK_FILTER_NEAREST;
-        case gfx::filter::linear: return VK_FILTER_LINEAR;
-        default: throw std::logic_error("bad gfx::filter");
-        }
-    }
-
-    handle<sampler> vulkan_interface::create_sampler(const gfx::sampler_desc & desc)
-    {
-        VkSamplerCreateInfo sampler_info = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        sampler_info.addressModeU = convert(desc.wrap_s);
-        sampler_info.addressModeV = convert(desc.wrap_t);
-        sampler_info.addressModeW = convert(desc.wrap_r);
-        sampler_info.magFilter = convert(desc.mag_filter);
-        sampler_info.minFilter = convert(desc.min_filter);
-        if(desc.mip_filter)
-        {
-            sampler_info.maxLod = 1000;
-            switch(*desc.mip_filter)
-            {
-            case gfx::filter::nearest: sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; break;
-            case gfx::filter::linear: sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR; break;
-            default: throw std::logic_error("bad gfx::filter");
-            }
-        }
-        // TODO: Compare modes
-
-        auto [handle, sampler] = objects.create<gfx::sampler>();
-        check(vkCreateSampler(device, &sampler_info, nullptr, &sampler));
-        return handle;
-    }
-    
-    */
 }
 
 vk_device::~vk_device()
@@ -706,6 +644,60 @@ void vk_device::destroy_image(image image)
     objects.destroy(image); 
 }
 
+sampler vk_device::create_sampler(const sampler_desc & desc)
+{
+    auto convert_mode = [](rhi::address_mode mode)
+    {
+        switch(mode)
+        {
+        case rhi::address_mode::repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        case rhi::address_mode::mirrored_repeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        case rhi::address_mode::clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        case rhi::address_mode::mirror_clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+        case rhi::address_mode::clamp_to_border: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        default: fail_fast();
+        }
+    };
+    auto convert_filter = [](rhi::filter filter)
+    {
+        switch(filter)
+        {
+        case rhi::filter::nearest: return VK_FILTER_NEAREST;
+        case rhi::filter::linear: return VK_FILTER_LINEAR;
+        default: fail_fast();
+        }
+    };
+    auto convert_mipmap_mode = [](rhi::filter filter)
+    {
+        switch(filter)
+        {
+        case rhi::filter::nearest: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        case rhi::filter::linear: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        default: fail_fast();
+        }
+    };
+
+    VkSamplerCreateInfo sampler_info = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_info.addressModeU = convert_mode(desc.wrap_s);
+    sampler_info.addressModeV = convert_mode(desc.wrap_t);
+    sampler_info.addressModeW = convert_mode(desc.wrap_r);
+    sampler_info.magFilter = convert_filter(desc.mag_filter);
+    sampler_info.minFilter = convert_filter(desc.min_filter);
+    if(desc.mip_filter)
+    {
+        sampler_info.maxLod = 1000;
+        sampler_info.mipmapMode = convert_mipmap_mode(*desc.mip_filter);
+    }
+    auto [handle, samp] = objects.create<sampler>();
+    check("vkCreateSampler", vkCreateSampler(dev, &sampler_info, nullptr, &samp));
+    return handle;
+}
+void vk_device::destroy_sampler(sampler sampler)
+{
+    vkDestroySampler(dev, objects[sampler], nullptr);
+    objects.destroy(sampler);
+}
+
 void vk_device::destroy_framebuffer(framebuffer framebuffer)
 {
     for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
@@ -824,9 +816,9 @@ void vk_device::write_descriptor(descriptor_set set, int binding, buffer_range r
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
     vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
 }
-void vk_device::write_descriptor(descriptor_set set, int binding, image image) 
+void vk_device::write_descriptor(descriptor_set set, int binding, sampler sampler, image image) 
 {
-    VkDescriptorImageInfo image_info {sampler, objects[image].image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo image_info {objects[sampler], objects[image].image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image_info, nullptr, nullptr};
     vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
 }

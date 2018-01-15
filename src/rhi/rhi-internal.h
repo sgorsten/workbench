@@ -49,10 +49,12 @@ namespace rhi
 
     class descriptor_emulator
     {
+        struct sampled_image { rhi::sampler sampler; rhi::image image; };
+
         struct descriptor_pool
         {
             std::vector<rhi::buffer_range> buffer_bindings;
-            std::vector<rhi::image> image_bindings;
+            std::vector<sampled_image> image_bindings;
             std::vector<rhi::descriptor_set> sets;
             size_t used_sets=0;
         };
@@ -96,7 +98,7 @@ namespace rhi
         void reset_descriptor_pool(rhi::descriptor_pool pool);
         rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout);
         void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range);
-        void write_descriptor(rhi::descriptor_set set, int binding, rhi::image image);
+        void write_descriptor(rhi::descriptor_set set, int binding, rhi::sampler sampler, rhi::image image);
 
         template<class BindBufferFunction, class BindImageFunction>
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
@@ -108,7 +110,11 @@ namespace rhi
             const auto & descriptor_pool = objects[descriptor_set.pool];
             const auto & descriptor_set_layout = objects[descriptor_set.layout];
             for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.sets[set_index].buffer_offset + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
-            for(size_t i=0; i<descriptor_set_layout.num_images; ++i) bind_image(pipeline_layout.sets[set_index].image_offset + i, descriptor_pool.image_bindings[descriptor_set.image_offset + i]);
+            for(size_t i=0; i<descriptor_set_layout.num_images; ++i) 
+            {
+                auto & binding = descriptor_pool.image_bindings[descriptor_set.image_offset + i];
+                bind_image(pipeline_layout.sets[set_index].image_offset + i, binding.sampler, binding.image);
+            }
         }
 
         // TODO: Check for dependencies before wiping out
