@@ -52,6 +52,7 @@ namespace gfx
 
         descriptor_set write(int binding, rhi::buffer_range range) { dev.write_descriptor(set, binding, range); return *this; }
         descriptor_set write(int binding, dynamic_buffer & buffer, binary_view data) { return write(binding, buffer.write(data)); }
+        descriptor_set write(int binding, rhi::image image) { dev.write_descriptor(set, binding, image); return *this; }
     };
 
     struct descriptor_pool

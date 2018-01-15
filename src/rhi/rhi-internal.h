@@ -52,6 +52,7 @@ namespace rhi
         struct descriptor_pool
         {
             std::vector<rhi::buffer_range> buffer_bindings;
+            std::vector<rhi::image> image_bindings;
             std::vector<rhi::descriptor_set> sets;
             size_t used_sets=0;
         };
@@ -59,23 +60,23 @@ namespace rhi
         struct descriptor_set_layout
         {
             std::vector<rhi::descriptor_binding> bindings;
-            std::unordered_map<int, size_t> offsets;
-            size_t num_samplers=0, num_buffers=0;
+            std::unordered_map<int, size_t> buffer_offsets;
+            std::unordered_map<int, size_t> image_offsets;
+            size_t num_buffers=0, num_images=0;
         };
 
         struct descriptor_set
         {
             rhi::descriptor_pool pool;
             rhi::descriptor_set_layout layout;
-            size_t buffer_offset;
+            size_t buffer_offset, image_offset;
         };
 
         struct pipeline_layout
         {
-            std::vector<rhi::descriptor_set_layout> sets;
-            std::vector<size_t> sampler_offsets;
-            std::vector<size_t> buffer_offsets;
-            size_t num_samplers=0, num_buffers=0;
+            struct set { rhi::descriptor_set_layout layout; size_t buffer_offset, image_offset; };
+            std::vector<set> sets;
+            size_t num_buffers=0, num_images=0;
         };
 
         template<class T> struct traits;
@@ -86,6 +87,7 @@ namespace rhi
         heterogeneous_object_set<traits, rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set, rhi::pipeline_layout> objects;
     public:
         size_t get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const;
+        size_t get_flat_image_binding(rhi::pipeline_layout layout, int set, int binding) const;
 
         rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings);
         rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets);
@@ -94,18 +96,19 @@ namespace rhi
         void reset_descriptor_pool(rhi::descriptor_pool pool);
         rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout);
         void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range);
+        void write_descriptor(rhi::descriptor_set set, int binding, rhi::image image);
 
-        template<class BindBufferFunction>
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer) const
+        template<class BindBufferFunction, class BindImageFunction>
+        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
         {
             const auto & pipeline_layout = objects[layout];
             const auto & descriptor_set = objects[set];
-            if(descriptor_set.layout != pipeline_layout.sets[set_index]) throw std::logic_error("descriptor_set_layout mismatch");
+            if(descriptor_set.layout != pipeline_layout.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
 
             const auto & descriptor_pool = objects[descriptor_set.pool];
             const auto & descriptor_set_layout = objects[descriptor_set.layout];
-            // TODO: bind samplers
-            for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.buffer_offsets[set_index] + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
+            for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.sets[set_index].buffer_offset + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
+            for(size_t i=0; i<descriptor_set_layout.num_images; ++i) bind_image(pipeline_layout.sets[set_index].image_offset + i, descriptor_pool.image_bindings[descriptor_set.image_offset + i]);
         }
 
         // TODO: Check for dependencies before wiping out

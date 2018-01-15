@@ -33,6 +33,13 @@ namespace rhi
         ID3D11Buffer * buffer_object;
         char * mapped = 0;
     };
+    
+    struct d3d_image
+    {
+        ID3D11Resource * resource;
+        ID3D11ShaderResourceView * shader_resource_view;
+        ID3D11RenderTargetView * render_target_view;
+    };
 
     struct d3d_render_pass
     {
@@ -80,12 +87,13 @@ namespace rhi
 
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = d3d_buffer; };
+        template<> struct traits<image> { using type = d3d_image; };
         template<> struct traits<render_pass> { using type = d3d_render_pass; };
         template<> struct traits<framebuffer> { using type = d3d_framebuffer; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = d3d_pipeline; };
         template<> struct traits<window> { using type = d3d_window; };
-        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -114,6 +122,47 @@ namespace rhi
         }
 
         device_info get_info() const override { return {"Direct3D 11.1", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
+
+        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override
+        {
+            D3D11_BUFFER_DESC buffer_desc {};
+            buffer_desc.ByteWidth = exactly(desc.size);
+            buffer_desc.Usage = desc.dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
+            buffer_desc.BindFlags = 0;
+            switch(desc.usage)
+            {
+            case buffer_usage::vertex: buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER; break;
+            case buffer_usage::index: buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER; break;
+            case buffer_usage::uniform: buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER; break;
+            case buffer_usage::storage: buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE; break;
+            }
+            buffer_desc.CPUAccessFlags = desc.dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
+
+            D3D11_SUBRESOURCE_DATA data {};
+            data.pSysMem = initial_data;
+            
+            auto [handle, buf] = objects.create<buffer>();
+            auto hr = dev->CreateBuffer(&buffer_desc, initial_data ? &data : 0, &buf.buffer_object);
+            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateBuffer(...) failed");
+
+            if(desc.dynamic)
+            {
+                D3D11_MAPPED_SUBRESOURCE sub;
+                hr = ctx->Map(buf.buffer_object, 0, D3D11_MAP_WRITE_DISCARD, 0, &sub);
+                if(FAILED(hr)) throw std::runtime_error("ID3D11DeviceContext::Map(...) failed");
+                buf.mapped = reinterpret_cast<char *>(sub.pData);
+            }
+
+            return {handle, buf.mapped};
+        }
+        void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
+
+        image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
+        {
+            auto [handle, im] = objects.create<image>();
+            return handle;
+        }
+        void destroy_image(image image) override { objects.destroy(image); }
 
         render_pass create_render_pass(const render_pass_desc & desc) override 
         {
@@ -173,46 +222,13 @@ namespace rhi
         GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }
         framebuffer get_swapchain_framebuffer(window window) override { return objects[window].fb; }
 
-        std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override
-        {
-            auto [handle, buffer] = objects.create<buffer>();
-
-            D3D11_BUFFER_DESC buffer_desc {};
-            buffer_desc.ByteWidth = exactly(desc.size);
-            buffer_desc.Usage = desc.dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
-            buffer_desc.BindFlags = 0;
-            switch(desc.usage)
-            {
-            case buffer_usage::vertex: buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER; break;
-            case buffer_usage::index: buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER; break;
-            case buffer_usage::uniform: buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER; break;
-            case buffer_usage::storage: buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE; break;
-            }
-            buffer_desc.CPUAccessFlags = desc.dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
-
-            D3D11_SUBRESOURCE_DATA data {};
-            data.pSysMem = initial_data;
-
-            auto hr = dev->CreateBuffer(&buffer_desc, initial_data ? &data : 0, &buffer.buffer_object);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateBuffer(...) failed");
-
-            if(desc.dynamic)
-            {
-                D3D11_MAPPED_SUBRESOURCE sub;
-                hr = ctx->Map(buffer.buffer_object, 0, D3D11_MAP_WRITE_DISCARD, 0, &sub);
-                if(FAILED(hr)) throw std::runtime_error("ID3D11DeviceContext::Map(...) failed");
-                buffer.mapped = reinterpret_cast<char *>(sub.pData);
-            }
-
-            return {handle, buffer.mapped};
-        }
-
         descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
         descriptor_pool create_descriptor_pool() { return desc_emulator.create_descriptor_pool(); }
         void reset_descriptor_pool(descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
         void write_descriptor(descriptor_set set, int binding, buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
+        void write_descriptor(descriptor_set set, int binding, image image) override { desc_emulator.write_descriptor(set, binding, image); }
 
         shader create_shader(const shader_module & module) override
         {
@@ -234,10 +250,13 @@ namespace rhi
 	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	            for(auto & resource : resources.uniform_buffers)
 	            {
-		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
+                    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_buffer_binding(desc.layout, compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
 		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
-		            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_buffer_binding(desc.layout, set, binding)));
+	            }
+	            for(auto & resource : resources.sampled_images)
+	            {
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_image_binding(desc.layout, compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+                    compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	            }
                 spirv_cross::CompilerHLSL::Options options;
                 options.shader_model = 50;
@@ -280,7 +299,6 @@ namespace rhi
             return handle;
         }
 
-        void destroy_buffer(buffer buffer) override { objects.destroy(buffer); }
         void destroy_descriptor_pool(descriptor_pool pool) override { desc_emulator.destroy(pool); }
         void destroy_descriptor_set_layout(descriptor_set_layout layout) override { desc_emulator.destroy(layout); }
         void destroy_pipeline_layout(pipeline_layout layout) override { desc_emulator.destroy(layout); }
@@ -326,7 +344,7 @@ namespace rhi
                         const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
                         ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
                         ctx->PSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
-                    });
+                    }, [this](size_t index, image image) {});
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {

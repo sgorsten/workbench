@@ -34,6 +34,31 @@ namespace rhi
 
     struct render_pass_desc {};
 
+    // Buffer creation info
+    enum class buffer_usage { vertex, index, uniform, storage };
+    struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
+
+    // Image creation info
+    enum class image_format { r8g8b8a8_unorm };
+    enum class image_shape { _1d, _2d, _3d, cube };
+    enum image_flag
+    {
+        sampled_image_bit    = 1<<0, // Image can be bound to a sampler
+        color_attachment_bit = 1<<1, // Image can be bound to a framebuffer as a color attachment
+        depth_attachment_bit = 1<<2, // Image can be bound to a framebuffer as the depth/stencil attachment
+        generate_mips_bit    = 1<<3  // Data for mip levels greater than zero should be automatically generated
+    };
+    using image_flags = int;
+    struct image_desc
+    {
+        image_shape  shape      = image_shape::_2d;
+        int3         dimensions = {1,1,1};
+        int          mip_levels = 1;
+        image_format format     = image_format::r8g8b8a8_unorm;
+        image_flags  flags      = 0;
+        // Not yet supported: multisampling, arrays
+    };
+
     // Descriptor set layout creation info
     enum class descriptor_type { combined_image_sampler, uniform_buffer };
     struct descriptor_binding { int index; descriptor_type type; int count; };
@@ -55,10 +80,6 @@ namespace rhi
         primitive_topology topology;            // rasterizer state
         std::optional<compare_op> depth_test;
     };
-
-    // Buffer creation info
-    enum class buffer_usage { vertex, index, uniform, storage };
-    struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
 
     struct device_info
     {
@@ -84,6 +105,9 @@ namespace rhi
         virtual auto create_buffer(const buffer_desc & desc, const void * initial_data) -> std::tuple<buffer, char *> = 0;
         virtual void destroy_buffer(buffer buffer) = 0;
 
+        virtual auto create_image(const image_desc & desc, std::vector<const void *> initial_data) -> image = 0;
+        virtual void destroy_image(image image) = 0;
+
         virtual auto create_render_pass(const render_pass_desc & desc) -> render_pass = 0;
         virtual void destroy_render_pass(render_pass pass) = 0;
 
@@ -99,6 +123,7 @@ namespace rhi
 
         virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
         virtual auto alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) -> descriptor_set = 0;
+        virtual void write_descriptor(descriptor_set set, int binding, image image) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
 
         ///////////////

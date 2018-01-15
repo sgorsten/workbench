@@ -82,6 +82,8 @@ namespace rhi
         void * mapped_staging_memory {};
         VkCommandPool staging_pool {};
                 
+        VkSampler sampler;
+
         // Objects
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = vk_buffer; };
@@ -116,8 +118,10 @@ namespace rhi
         std::tuple<buffer, char *> create_buffer(const buffer_desc & desc, const void * initial_data) override;
         void destroy_buffer(buffer buffer) override;
 
+        image create_image(const image_desc & desc, std::vector<const void *> initial_data) override;
+        void destroy_image(image image) override;
+
         image make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect);
-        void destroy_image(image image);
         void destroy_framebuffer(framebuffer framebuffer);
 
         render_pass create_render_pass(const render_pass_desc & desc) override;
@@ -133,6 +137,7 @@ namespace rhi
         void reset_descriptor_pool(descriptor_pool pool) override;
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) override;
         void write_descriptor(descriptor_set set, int binding, buffer_range range) override;
+        void write_descriptor(descriptor_set set, int binding, image image) override;
 
         // pipelines
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override;
@@ -313,6 +318,68 @@ vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_c
     command_pool_info.queueFamilyIndex = selection.queue_family; // TODO: Could use an explicit transfer queue
     command_pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     check("vkCreateCommandPool", vkCreateCommandPool(dev, &command_pool_info, nullptr, &staging_pool));
+
+    VkSamplerCreateInfo sampler_info = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_info.magFilter = VK_FILTER_NEAREST;
+    sampler_info.minFilter = VK_FILTER_NEAREST;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_info.minLod = 0;
+    sampler_info.maxLod = 0;
+    check("vkCreateSampler", vkCreateSampler(dev, &sampler_info, nullptr, &sampler));
+
+    /*
+        VkSamplerAddressMode convert(gfx::address_mode f)
+    {
+        switch(f)
+        {
+        case gfx::address_mode::repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        case gfx::address_mode::mirrored_repeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        case gfx::address_mode::clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        case gfx::address_mode::mirror_clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+        case gfx::address_mode::clamp_to_border: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        default: throw std::logic_error("bad gfx::address_mode");
+        }
+    }
+
+    VkFilter convert(gfx::filter f)
+    {
+        switch(f)
+        {
+        case gfx::filter::nearest: return VK_FILTER_NEAREST;
+        case gfx::filter::linear: return VK_FILTER_LINEAR;
+        default: throw std::logic_error("bad gfx::filter");
+        }
+    }
+
+    handle<sampler> vulkan_interface::create_sampler(const gfx::sampler_desc & desc)
+    {
+        VkSamplerCreateInfo sampler_info = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sampler_info.addressModeU = convert(desc.wrap_s);
+        sampler_info.addressModeV = convert(desc.wrap_t);
+        sampler_info.addressModeW = convert(desc.wrap_r);
+        sampler_info.magFilter = convert(desc.mag_filter);
+        sampler_info.minFilter = convert(desc.min_filter);
+        if(desc.mip_filter)
+        {
+            sampler_info.maxLod = 1000;
+            switch(*desc.mip_filter)
+            {
+            case gfx::filter::nearest: sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; break;
+            case gfx::filter::linear: sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR; break;
+            default: throw std::logic_error("bad gfx::filter");
+            }
+        }
+        // TODO: Compare modes
+
+        auto [handle, sampler] = objects.create<gfx::sampler>();
+        check(vkCreateSampler(device, &sampler_info, nullptr, &sampler));
+        return handle;
+    }
+    
+    */
 }
 
 vk_device::~vk_device()
@@ -429,6 +496,170 @@ void vk_device::destroy_buffer(buffer buffer)
     if(objects[buffer].mapped) vkUnmapMemory(dev, objects[buffer].memory_object);
     vkFreeMemory(dev, objects[buffer].memory_object, nullptr);
     objects.destroy(buffer); 
+}
+
+static size_t compute_image_size(int pixels, VkFormat format)
+{
+    if(format <= VK_FORMAT_UNDEFINED) throw std::logic_error("unknown format");
+    if(format <= VK_FORMAT_R4G4_UNORM_PACK8) return pixels*1;
+    if(format <= VK_FORMAT_A1R5G5B5_UNORM_PACK16) return pixels*2;
+    if(format <= VK_FORMAT_R8_SRGB) return pixels*1;
+    if(format <= VK_FORMAT_R8G8_SRGB) return pixels*2;
+    if(format <= VK_FORMAT_B8G8R8_SRGB) return pixels*3;
+    if(format <= VK_FORMAT_A2B10G10R10_SINT_PACK32) return pixels*4;
+    if(format <= VK_FORMAT_R16_SFLOAT) return pixels*2;
+    if(format <= VK_FORMAT_R16G16_SFLOAT) return pixels*4;
+    if(format <= VK_FORMAT_R16G16B16_SFLOAT) return pixels*6;
+    if(format <= VK_FORMAT_R16G16B16A16_SFLOAT) return pixels*8;
+    if(format <= VK_FORMAT_R32_SFLOAT) return pixels*4;
+    if(format <= VK_FORMAT_R32G32_SFLOAT) return pixels*8;
+    if(format <= VK_FORMAT_R32G32B32_SFLOAT) return pixels*12;
+    if(format <= VK_FORMAT_R32G32B32A32_SFLOAT) return pixels*16;
+    if(format <= VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) return pixels*4;
+    throw std::logic_error("unknown format");
+}
+
+static size_t compute_image_size(int2 dims, VkFormat format) { return compute_image_size(product(dims), format); }
+static size_t compute_image_size(int3 dims, VkFormat format) { return compute_image_size(product(dims), format); }
+
+static void transition_layout(VkCommandBuffer command_buffer, VkImage image, uint32_t mip_level, uint32_t array_layer, VkImageLayout old_layout, VkImageLayout new_layout)
+{
+    VkPipelineStageFlags src_stage_mask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    VkPipelineStageFlags dst_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkImageMemoryBarrier barrier {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = mip_level;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = array_layer;
+    barrier.subresourceRange.layerCount = 1;
+    switch(old_layout)
+    {
+    case VK_IMAGE_LAYOUT_UNDEFINED: break; // No need to wait for anything, contents can be discarded
+    case VK_IMAGE_LAYOUT_PREINITIALIZED: barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT; break; // Wait for host writes to complete before changing layout    
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT; break; // Wait for transfer reads to complete before changing layout
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; break; // Wait for transfer writes to complete before changing layout
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; break; // Wait for color attachment writes to complete before changing layout
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT; break; // Wait for shader reads to complete before changing layout
+    default: throw std::logic_error("unsupported layout transition");
+    }
+    switch(new_layout)
+    {
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT; break; // Transfer reads should wait for layout change to complete
+    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; break; // Transfer writes should wait for layout change to complete
+    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; break; // Writes to color attachments should wait for layout change to complete
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT; break; // Shader reads should wait for layout change to complete
+    case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT; break; // Memory reads should wait for layout change to complete
+    default: throw std::logic_error("unsupported layout transition");
+    }
+    vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
+image vk_device::create_image(const image_desc & desc, std::vector<const void *> initial_data)
+{
+    auto [handle, im] = objects.create<image>();
+    VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    image_info.arrayLayers = 1;
+    VkImageViewType view_type;
+    switch(desc.shape)
+    {
+    case image_shape::_1d: image_info.imageType = VK_IMAGE_TYPE_1D; view_type = VK_IMAGE_VIEW_TYPE_1D; break;
+    case image_shape::_2d: image_info.imageType = VK_IMAGE_TYPE_2D; view_type = VK_IMAGE_VIEW_TYPE_2D;break;
+    case image_shape::_3d: image_info.imageType = VK_IMAGE_TYPE_3D; view_type = VK_IMAGE_VIEW_TYPE_3D;break;
+    case image_shape::cube: 
+        image_info.imageType = VK_IMAGE_TYPE_2D; 
+        view_type = VK_IMAGE_VIEW_TYPE_CUBE;
+        image_info.arrayLayers *= 6;
+        image_info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        break;
+    default: throw std::logic_error("bad gfx::image_shape");
+    }
+    switch(desc.format)
+    {
+    case image_format::r8g8b8a8_unorm: image_info.format = VK_FORMAT_R8G8B8A8_UNORM; break;
+    default: throw std::logic_error("bad gfx::image_format");
+    }
+    image_info.extent = {static_cast<uint32_t>(desc.dimensions.x), static_cast<uint32_t>(desc.dimensions.y), static_cast<uint32_t>(desc.dimensions.z)};
+    image_info.mipLevels = desc.mip_levels;        
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    if(initial_data.size()) image_info.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if(image_info.mipLevels > 1) image_info.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if(desc.flags & image_flag::sampled_image_bit) image_info.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    if(desc.flags & image_flag::color_attachment_bit) image_info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if(desc.flags & image_flag::depth_attachment_bit) image_info.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    check("vkCreateImage", vkCreateImage(dev, &image_info, nullptr, &im.image_object));
+
+    VkMemoryRequirements mem_reqs;
+    vkGetImageMemoryRequirements(dev, im.image_object, &mem_reqs);
+    im.device_memory = allocate(mem_reqs, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    check("vkBindImageMemory", vkBindImageMemory(dev, im.image_object, im.device_memory, 0));
+    
+    if(initial_data.size())
+    {
+        if(initial_data.size() != image_info.arrayLayers) throw std::logic_error("not enough initial_data pointers");
+        for(size_t layer=0; layer<initial_data.size(); ++layer) 
+        {
+            // Write initial data for this layer into the staging area
+            memcpy(mapped_staging_memory, initial_data[layer], compute_image_size(desc.dimensions, image_info.format));
+
+            VkImageSubresourceLayers layers {};
+            layers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            layers.baseArrayLayer = exactly(layer);
+            layers.layerCount = 1;
+
+            // Copy image contents from staging buffer into mip level zero
+            auto cmd = begin_transient();
+            transition_layout(cmd, im.image_object, 0, exactly(layer), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            VkBufferImageCopy copy_region {};
+            copy_region.imageSubresource = layers;
+            copy_region.imageExtent = image_info.extent;
+            vkCmdCopyBufferToImage(cmd, staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+
+            // Generate mip levels using blits
+            VkOffset3D dims {desc.dimensions.x, desc.dimensions.y, desc.dimensions.z};
+            for(uint32_t i=1; i<image_info.mipLevels; ++i)
+            {
+                VkImageBlit blit {};
+                blit.srcSubresource = layers;
+                blit.srcSubresource.mipLevel = i-1;
+                blit.srcOffsets[1] = dims;
+
+                dims.x = std::max(dims.x/2,1);
+                dims.y = std::max(dims.y/2,1);
+                dims.z = std::max(dims.z/2,1);
+                blit.dstSubresource = layers;
+                blit.dstSubresource.mipLevel = i;
+                blit.dstOffsets[1] = dims;
+
+                transition_layout(cmd, im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                transition_layout(cmd, im.image_object, i, exactly(layer), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                vkCmdBlitImage(cmd, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+                transition_layout(cmd, im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            }
+            transition_layout(cmd, im.image_object, image_info.mipLevels-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            end_transient(cmd);
+        }
+    }
+
+    VkImageViewCreateInfo image_view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    image_view_info.image = im.image_object;
+    image_view_info.viewType = view_type;
+    image_view_info.format = image_info.format;
+    if(desc.flags & image_flag::depth_attachment_bit) image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    else image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_view_info.subresourceRange.baseMipLevel = 0;
+    image_view_info.subresourceRange.levelCount = image_info.mipLevels;
+    image_view_info.subresourceRange.baseArrayLayer = 0;
+    image_view_info.subresourceRange.layerCount = image_info.arrayLayers;
+    check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &im.image_view));
+    return handle;
 }
 
 image vk_device::make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect)
@@ -591,6 +822,12 @@ void vk_device::write_descriptor(descriptor_set set, int binding, buffer_range r
 {
     VkDescriptorBufferInfo buffer_info { objects[range.buffer].buffer_object, range.offset, range.size };
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
+    vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
+}
+void vk_device::write_descriptor(descriptor_set set, int binding, image image) 
+{
+    VkDescriptorImageInfo image_info {sampler, objects[image].image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image_info, nullptr, nullptr};
     vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
 }
 

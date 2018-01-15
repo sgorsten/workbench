@@ -13,6 +13,12 @@ namespace rhi
         char * mapped = 0;
     };
 
+    struct gl_image
+    {
+        GLuint texture_object;
+        GLuint render_buffer_object;
+    };
+
     struct gl_render_pass
     {
         render_pass_desc desc;
@@ -73,12 +79,13 @@ namespace rhi
 
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = gl_buffer; };
+        template<> struct traits<image> { using type = gl_image; };
         template<> struct traits<render_pass> { using type = gl_render_pass; };
         template<> struct traits<framebuffer> { using type = gl_framebuffer; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = gl_pipeline; };
         template<> struct traits<window> { using type = gl_window; };
-        heterogeneous_object_set<traits, buffer, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -121,6 +128,21 @@ namespace rhi
         
         device_info get_info() const override { return {"OpenGL 4.5 Core", {coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
 
+        image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
+        {
+            auto [handle, im] = objects.create<image>();
+            switch(desc.shape)
+            {
+            case rhi::image_shape::_2d:
+                glCreateTextures(GL_TEXTURE_2D, 1, &im.texture_object);
+                glTextureStorage2D(im.texture_object, desc.mip_levels, GL_RGBA8, desc.dimensions.x, desc.dimensions.y);
+                if(initial_data.size() == 1) glTextureSubImage2D(im.texture_object, 0, 0, 0, desc.dimensions.x, desc.dimensions.y, GL_RGBA, GL_UNSIGNED_BYTE, initial_data[0]);
+                break;
+            }
+            return handle;
+        }
+        void destroy_image(image image) override { objects.destroy(image); }
+
         render_pass create_render_pass(const render_pass_desc & desc) override 
         {
             auto [handle, pass] = objects.create<render_pass>();
@@ -128,6 +150,13 @@ namespace rhi
             return handle;
         }
         void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
+
+        descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
+        descriptor_pool create_descriptor_pool() override { return desc_emulator.create_descriptor_pool(); }
+        void reset_descriptor_pool(descriptor_pool pool) override { desc_emulator.reset_descriptor_pool(pool); }
+        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) override { return desc_emulator.alloc_descriptor_set(pool, layout); }
+        void write_descriptor(descriptor_set set, int binding, buffer_range range) override { desc_emulator.write_descriptor(set, binding, range); }
+        void write_descriptor(descriptor_set set, int binding, image image) override { desc_emulator.write_descriptor(set, binding, image); }
 
         window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
         {
@@ -152,12 +181,9 @@ namespace rhi
         GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }
         framebuffer get_swapchain_framebuffer(window window) override { return objects[window].fb; }
 
-        descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }
+
         pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) override { return desc_emulator.create_pipeline_layout(sets); }
-        descriptor_pool create_descriptor_pool() { return desc_emulator.create_descriptor_pool(); }
-        void reset_descriptor_pool(descriptor_pool pool) { desc_emulator.reset_descriptor_pool(pool); }
-        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) { return desc_emulator.alloc_descriptor_set(pool, layout); }
-        void write_descriptor(descriptor_set set, int binding, buffer_range range) { desc_emulator.write_descriptor(set, binding, range); }
+
 
         shader create_shader(const shader_module & module) override
         {
@@ -176,10 +202,13 @@ namespace rhi
 	            spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	            for(auto & resource : resources.uniform_buffers)
 	            {
-		            const unsigned set = compiler.get_decoration(resource.id, spv::DecorationDescriptorSet);
-		            const unsigned binding = compiler.get_decoration(resource.id, spv::DecorationBinding);
+                    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_buffer_binding(desc.layout, compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
 		            compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
-		            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_buffer_binding(desc.layout, set, binding)));
+	            }
+	            for(auto & resource : resources.sampled_images)
+	            {
+		            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(desc_emulator.get_flat_image_binding(desc.layout, compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+                    compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	            }
 
                 const auto glsl = compiler.compile();
@@ -274,10 +303,9 @@ namespace rhi
                 },
                 [this](const bind_descriptor_set_command & c)
                 {
-                    desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, [this](size_t index, buffer_range range)
-                    {
-                        glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), objects[range.buffer].buffer_object, range.offset, range.size);
-                    });
+                    desc_emulator.bind_descriptor_set(c.layout, c.set_index, c.set, 
+                        [this](size_t index, buffer_range range) { glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), objects[range.buffer].buffer_object, range.offset, range.size); },
+                        [this](size_t index, image image) { glBindTextureUnit(exactly(index), objects[image].texture_object); });
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {

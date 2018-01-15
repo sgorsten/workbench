@@ -33,6 +33,7 @@ struct mesh_vertex
             {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
             {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
             {2, rhi::attribute_format::float3, offsetof(mesh_vertex, normal)},
+            {3, rhi::attribute_format::float2, offsetof(mesh_vertex, texcoord)},
         }};
     }
 };
@@ -98,28 +99,33 @@ struct common_assets
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
             layout(location=2) in vec3 v_normal;
+            layout(location=3) in vec2 v_texcoord;
             layout(location=0) out vec3 position;
             layout(location=1) out vec3 color;
             layout(location=2) out vec3 normal;
+            layout(location=3) out vec2 texcoord;
             void main()
             {
                 position = (per_object.model_matrix * vec4(v_position,1)).xyz;
                 color = v_color;
                 normal = (per_object.model_matrix * vec4(v_normal,0)).xyz;
+                texcoord = v_texcoord;
                 gl_Position = (per_view.view_proj_matrix * per_object.model_matrix) * vec4(v_position,1);
             }
         )");
         fs = compiler.compile(shader_stage::fragment, R"(#version 450
             layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
+            layout(set=1,binding=1) uniform sampler2D albedo_tex;
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 color;
             layout(location=2) in vec3 normal;
+            layout(location=3) in vec2 texcoord;
             layout(location=0) out vec4 f_color;
             void main() 
             { 
                 vec3 light_vec = normalize(per_scene.light_pos - position);
                 vec3 normal_vec = normalize(normal);
-                f_color = vec4(color*max(dot(light_vec, normal_vec),0),1); 
+                f_color = vec4(color*texture(albedo_tex, texcoord).rgb*max(dot(light_vec, normal_vec),0),1); 
             }
         )");
         fs_unlit = compiler.compile(shader_stage::fragment, R"(#version 450
@@ -157,6 +163,8 @@ class device_session
     rhi::shader vs, fs, fs_unlit;
     rhi::pipeline wire_pipe, solid_pipe;
 
+    rhi::image checkerboard;
+
     rhi::window rwindow;
     std::unique_ptr<glfw::window> gwindow;
 public:
@@ -172,7 +180,10 @@ public:
             {0, rhi::descriptor_type::uniform_buffer, 1},
             {1, rhi::descriptor_type::uniform_buffer, 1}
         });
-        per_object_layout = dev->create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
+        per_object_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::uniform_buffer, 1},
+            {1, rhi::descriptor_type::combined_image_sampler, 1}
+        });
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
 
         pass = dev->create_render_pass({});
@@ -182,6 +193,9 @@ public:
 
         wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
         solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+
+        const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
+        checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::r8g8b8a8_unorm, rhi::sampled_image_bit}, {grid});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
         rwindow = dev->create_window(pass, {512,512}, ss.str());
@@ -224,13 +238,15 @@ public:
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(rwindow));
         cmd.bind_pipeline(wire_pipe);
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
-        cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, float4x4{linalg::identity}));
+        cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, float4x4{linalg::identity})
+                                                                                  .write(1, checkerboard));
         cmd.bind_vertex_buffer(0, basis_vertex_buffer);
         cmd.draw(0, 6);
 
         // Draw the ground
         cmd.bind_pipeline(solid_pipe);
-        cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(cam.coords(coord_axis::down)*0.3f)));
+        cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(cam.coords(coord_axis::down)*0.3f))
+                                                                                  .write(1, checkerboard));
         cmd.bind_vertex_buffer(0, ground_vertex_buffer);
         cmd.bind_index_buffer(ground_index_buffer);
         cmd.draw_indexed(0, 6);
@@ -243,7 +259,8 @@ public:
             for(int j=0; j<6; ++j)
             {
                 const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
-                cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(position)));
+                cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(position))
+                                                                                          .write(1, checkerboard));
                 cmd.draw_indexed(0, 36);
             }
         }

@@ -4,11 +4,21 @@ using namespace rhi;
 size_t descriptor_emulator::get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const
 {
     const auto & pipe_layout = objects[layout];
-    const auto & set_layout = objects[pipe_layout.sets[set]];
-    auto it = set_layout.offsets.find(binding);
-    if(it == set_layout.offsets.end()) throw std::logic_error("invalid binding");
-    return pipe_layout.buffer_offsets[set] + it->second;
+    const auto & set_layout = objects[pipe_layout.sets[set].layout];
+    auto it = set_layout.buffer_offsets.find(binding);
+    if(it == set_layout.buffer_offsets.end()) throw std::logic_error("invalid binding");
+    return pipe_layout.sets[set].buffer_offset + it->second;
 }
+
+size_t descriptor_emulator::get_flat_image_binding(rhi::pipeline_layout layout, int set, int binding) const
+{
+    const auto & pipe_layout = objects[layout];
+    const auto & set_layout = objects[pipe_layout.sets[set].layout];
+    auto it = set_layout.image_offsets.find(binding);
+    if(it == set_layout.image_offsets.end()) throw std::logic_error("invalid binding");
+    return pipe_layout.sets[set].image_offset + it->second;
+}
+
 
 rhi::descriptor_set_layout descriptor_emulator::create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings)
 {
@@ -19,11 +29,11 @@ rhi::descriptor_set_layout descriptor_emulator::create_descriptor_set_layout(con
         switch(b.type)
         {
         case rhi::descriptor_type::combined_image_sampler:
-            layout.offsets[b.index] = layout.num_samplers;
-            layout.num_samplers += b.count;
+            layout.image_offsets[b.index] = layout.num_images;
+            layout.num_images += b.count;
             break;
         case rhi::descriptor_type::uniform_buffer:
-            layout.offsets[b.index] = layout.num_buffers;
+            layout.buffer_offsets[b.index] = layout.num_buffers;
             layout.num_buffers += b.count;
             break;
         }
@@ -34,13 +44,11 @@ rhi::descriptor_set_layout descriptor_emulator::create_descriptor_set_layout(con
 rhi::pipeline_layout descriptor_emulator::create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets)
 {
     auto [handle, layout] = objects.create<rhi::pipeline_layout>();
-    layout.sets = sets;
     for(auto & s : sets)
     {
-        layout.sampler_offsets.push_back(layout.num_samplers);
-        layout.buffer_offsets.push_back(layout.num_buffers);
-        layout.num_samplers += objects[s].num_samplers;
+        layout.sets.push_back({s, layout.num_buffers, layout.num_images});
         layout.num_buffers += objects[s].num_buffers;
+        layout.num_images += objects[s].num_images;
     }
     return handle;
 }
@@ -71,7 +79,9 @@ rhi::descriptor_set descriptor_emulator::alloc_descriptor_set(rhi::descriptor_po
     const auto & dlayout = objects[layout];
     dset.layout = layout;
     dset.buffer_offset = dpool.buffer_bindings.size();
+    dset.image_offset = dpool.image_bindings.size();
     dpool.buffer_bindings.resize(dset.buffer_offset + dlayout.num_buffers);
+    dpool.image_bindings.resize(dset.image_offset + dlayout.num_images);
     return handle;
 }
 
@@ -80,8 +90,17 @@ void descriptor_emulator::write_descriptor(rhi::descriptor_set set, int binding,
     auto & dset = objects[set];
     auto & dpool = objects[dset.pool];
     const auto & dlayout = objects[dset.layout];
-    // TODO: Check that this is actually a buffer binding
-    auto it = dlayout.offsets.find(binding);
-    if(it == dlayout.offsets.end()) throw std::logic_error("invalid binding");
+    auto it = dlayout.buffer_offsets.find(binding);
+    if(it == dlayout.buffer_offsets.end()) throw std::logic_error("invalid binding");
     dpool.buffer_bindings[dset.buffer_offset + it->second] = range;
+}
+
+void descriptor_emulator::write_descriptor(rhi::descriptor_set set, int binding, rhi::image image)
+{
+    auto & dset = objects[set];
+    auto & dpool = objects[dset.pool];
+    const auto & dlayout = objects[dset.layout];
+    auto it = dlayout.image_offsets.find(binding);
+    if(it == dlayout.image_offsets.end()) throw std::logic_error("invalid binding");
+    dpool.image_bindings[dset.image_offset + it->second] = image;
 }
