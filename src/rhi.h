@@ -38,7 +38,53 @@ namespace rhi
     struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
 
     // Image creation info
-    enum class image_format { rgba_unorm8, rgba_float16, rgba_float32, depth_unorm16, depth_float32 };
+    enum class image_format 
+    {
+        rgba_unorm8,
+        rgba_srgb8,
+        rgba_norm8,
+        rgba_uint8,
+        rgba_int8,
+        rgba_unorm16,
+        rgba_norm16, 
+        rgba_uint16,
+        rgba_int16,  
+        rgba_float16,
+        rgba_uint32,
+        rgba_int32,  
+        rgba_float32,
+        rgb_uint32, 
+        rgb_int32,
+        rgb_float32,
+        rg_unorm8,
+        rg_norm8,
+        rg_uint8,
+        rg_int8,
+        rg_unorm16,
+        rg_norm16,
+        rg_uint16,
+        rg_int16,
+        rg_float16,
+        rg_uint32,
+        rg_int32,
+        rg_float32,
+        r_unorm8,
+        r_norm8,
+        r_uint8,
+        r_int8,
+        r_unorm16,
+        r_norm16,
+        r_uint16,
+        r_int16,
+        r_float16,
+        r_uint32,    
+        r_int32,
+        r_float32,
+        depth_unorm16,
+        depth_unorm24_stencil8,
+        depth_float32,
+        depth_float32_stencil8,
+    };
     enum class image_shape { _1d, _2d, _3d, cube };
     enum image_flag
     {

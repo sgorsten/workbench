@@ -18,4 +18,9 @@ The contents of the `dep/` directory are taken from other open source projects a
 * `dep/glslang/`: [glslang](http://github.com/KhronosGroup/glslang) is licensed under the BSD license
 * `dep/SPIRV-Cross/`: [SPIRV-Cross](http://github.com/KhronosGroup/SPIRV-Cross) is licensed under the Apache License 2.0
 * `dep/include/doctest.h`: [doctest](http://github.com/onqtam/doctest) is licensed under the MIT license
+* `dep/include/stb_image.h`: [stb](https://github.com/nothings/stb) is in the public domain
 * `dep/include/linalg.h`: [linalg](http://github.com/sgorsten/linalg) is unlicensed
+
+The contents of the `assets/` directory are taken from royalty-free sources and may have been reduced in resolution to minimize repository bloat. Please visit the author's website to obtain the original, full resolution files:
+
+* `assets/monument-valley.hdr`: The [sIBL Archive](http://www.hdrlabs.com/sibl/archive.html) is licensed under the Creative Commons Attribution-Noncommercial-Share Alike 3.0 License
