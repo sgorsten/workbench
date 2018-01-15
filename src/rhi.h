@@ -148,6 +148,7 @@ namespace rhi
     // Pipeline creation info
     enum class primitive_topology { points, lines, triangles };
     enum class compare_op { never, less, equal, less_or_equal, greater, not_equal, greater_or_equal, always };
+    enum class front_face { counter_clockwise, clockwise };
     struct pipeline_desc
     {
         render_pass pass;
@@ -155,7 +156,9 @@ namespace rhi
         std::vector<vertex_binding_desc> input; // input state
         std::vector<shader> stages;             // programmable stages
         primitive_topology topology;            // rasterizer state
-        std::optional<compare_op> depth_test;
+        front_face front_face;                  
+        std::optional<compare_op> depth_test;   // depth state
+        bool depth_write;
     };
 
     struct device_info { coord_system ndc_coords; linalg::z_range z_range; };

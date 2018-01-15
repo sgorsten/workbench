@@ -884,7 +884,11 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    switch(desc.front_face)
+    {
+    case rhi::front_face::counter_clockwise: rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; break;
+    case rhi::front_face::clockwise: rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; break;
+    }
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.depthBiasConstantFactor = 0.0f; // Optional
     rasterizer.depthBiasClamp = 0.0f; // Optional
@@ -927,7 +931,7 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
     dynamicState.pDynamicStates = dynamic_states;
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil_state {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    depth_stencil_state.depthWriteEnable = VK_TRUE;
+    depth_stencil_state.depthWriteEnable = desc.depth_write ? VK_TRUE : VK_FALSE;
     if(desc.depth_test)
     {
         depth_stencil_state.depthTestEnable = VK_TRUE;

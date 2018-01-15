@@ -48,3 +48,13 @@ DOCTEST_TEST_CASE("check handedness of all coordinate systems")
     DOCTEST_CHECK(left == 24);
     DOCTEST_CHECK(right == 24);
 }
+
+DOCTEST_TEST_CASE("compute_sphere_texcoords(...) semantics")
+{
+    DOCTEST_CHECK( compute_sphere_texcoords({-1,  0, 0}).x == doctest::Approx(0.25f) );
+    DOCTEST_CHECK( compute_sphere_texcoords({ 0,  0, 1}).x == doctest::Approx(0.50f) );
+    DOCTEST_CHECK( compute_sphere_texcoords({+1,  0, 0}).x == doctest::Approx(0.75f) );
+    DOCTEST_CHECK( compute_sphere_texcoords({ 0, -1, 0}).y == doctest::Approx(0.00f) );
+    DOCTEST_CHECK( compute_sphere_texcoords({ 0,  0, 1}).y == doctest::Approx(0.50f) );
+    DOCTEST_CHECK( compute_sphere_texcoords({ 0, +1, 0}).y == doctest::Approx(1.00f) );
+}

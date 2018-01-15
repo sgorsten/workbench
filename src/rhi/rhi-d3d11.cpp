@@ -81,8 +81,8 @@ namespace rhi
         ID3D11InputLayout * layout;
         ID3D11VertexShader * vs;
         ID3D11PixelShader * ps;
-        void set_shader(ID3D11VertexShader * s) { vs = s; }
-        void set_shader(ID3D11PixelShader * s) { ps = s; }
+        ID3D11RasterizerState * rasterizer_state;
+        ID3D11DepthStencilState * depth_stencil_state;
     };
 
     struct d3d_window
@@ -101,7 +101,6 @@ namespace rhi
         ID3D11Device1 * dev;
         ID3D11DeviceContext1 * ctx;
         IDXGIFactory * factory;
-        ID3D11RasterizerState * rasterizer_state;
 
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = d3d_buffer; };
@@ -132,13 +131,6 @@ namespace rhi
             IDXGIAdapter * adapter = nullptr;
             check("IDXGIDevice::GetAdapter", dxgi_dev->GetAdapter(&adapter));
             check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory));
-
-            D3D11_RASTERIZER_DESC rdesc {};
-            rdesc.FillMode = D3D11_FILL_SOLID;
-            rdesc.CullMode = D3D11_CULL_BACK;
-            rdesc.FrontCounterClockwise = TRUE;
-            rdesc.DepthClipEnable = TRUE;
-            check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rdesc, &rasterizer_state));
         }
 
         device_info get_info() const override { return {{coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
@@ -376,6 +368,23 @@ namespace rhi
                     break;
                 }
             }
+
+            D3D11_RASTERIZER_DESC rasterizer_desc {};
+            rasterizer_desc.FillMode = D3D11_FILL_SOLID;
+            rasterizer_desc.CullMode = D3D11_CULL_BACK;
+            rasterizer_desc.FrontCounterClockwise = desc.front_face == rhi::front_face::counter_clockwise;
+            rasterizer_desc.DepthClipEnable = TRUE;
+            check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rasterizer_desc, &pipe.rasterizer_state));
+
+            D3D11_DEPTH_STENCIL_DESC depth_stencil_desc {};
+            if(desc.depth_test)
+            {
+                depth_stencil_desc.DepthEnable = TRUE;
+                depth_stencil_desc.DepthFunc = static_cast<D3D11_COMPARISON_FUNC>(static_cast<int>(*desc.depth_test)+1);
+            }
+            depth_stencil_desc.DepthWriteMask = desc.depth_write ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
+            check("ID3D11Device::CreateDepthStencilState", dev->CreateDepthStencilState(&depth_stencil_desc, &pipe.depth_stencil_state));
+
             return handle;
         }
 
@@ -389,7 +398,6 @@ namespace rhi
         void submit_command_buffer(command_buffer cmd)
         {
             ctx->ClearState();
-            ctx->RSSetState(rasterizer_state);
             cmd_emulator.execute(cmd, overload(
                 [this](const begin_render_pass_command & c)
                 {
@@ -423,7 +431,9 @@ namespace rhi
                     current_pipeline = &objects[c.pipe];
                     ctx->IASetInputLayout(current_pipeline->layout);
                     ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
+                    ctx->RSSetState(current_pipeline->rasterizer_state);
                     ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
+                    ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, 0);
                     switch(current_pipeline->desc.topology)
                     {
                     case primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;

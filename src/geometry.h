@@ -30,3 +30,6 @@ struct rigid_transform
 };
 inline rigid_transform slerp(const rigid_transform & a, const rigid_transform & b, float t) { return {slerp(a.rotation, b.rotation, t), lerp(a.translation, b.translation, t)}; }
 inline rigid_transform nlerp(const rigid_transform & a, const rigid_transform & b, float t) { return {nlerp(a.rotation, b.rotation, t), lerp(a.translation, b.translation, t)}; }
+
+// Convert from a normalized right-down-forward direction vector to right-down texcoords, with the forward vector centered at 0.5,0.5
+inline float2 compute_sphere_texcoords(float3 direction) { return float2{std::atan2(direction.x, direction.z)*0.1591549f, std::asin(direction.y)*0.3183099f}+0.5f; }

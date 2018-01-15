@@ -28,5 +28,19 @@ gfx::window::window(std::shared_ptr<rhi::device> dev, rhi::render_pass pass, con
 
 gfx::window::~window() 
 {
+    glfwSetWindowUserPointer(glfw_window, this);
+    glfwSetWindowPosCallback(glfw_window, nullptr);
+    glfwSetWindowSizeCallback(glfw_window, nullptr);
+    glfwSetWindowCloseCallback(glfw_window, nullptr);
+    glfwSetWindowRefreshCallback(glfw_window, nullptr);
+    glfwSetWindowFocusCallback(glfw_window, nullptr);
+    glfwSetWindowIconifyCallback(glfw_window, nullptr);
+    glfwSetFramebufferSizeCallback(glfw_window, nullptr);
+    glfwSetMouseButtonCallback(glfw_window, nullptr);
+    glfwSetCursorPosCallback(glfw_window, nullptr);
+    glfwSetCursorEnterCallback(glfw_window, nullptr);
+    glfwSetScrollCallback(glfw_window, nullptr);
+    glfwSetKeyCallback(glfw_window, nullptr);
+    glfwSetCharModsCallback(glfw_window, nullptr);
     dev->destroy_window(rhi_window);
 }

@@ -129,10 +129,10 @@ namespace rhi
             if(debug_callback)
             {
                 std::ostringstream ss;
-                ss << "GL_VERSION = " << glGetString(GL_VERSION) << std::endl;
-                ss << "GL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
-                ss << "GL_VENDOR = " << glGetString(GL_VENDOR) << std::endl;
-                ss << "GL_RENDERER = " << glGetString(GL_RENDERER) << std::endl;
+                ss << "GL_VERSION = " << glGetString(GL_VERSION);
+                ss << "\nGL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION);
+                ss << "\nGL_VENDOR = " << glGetString(GL_VENDOR);
+                ss << "\nGL_RENDERER = " << glGetString(GL_RENDERER);
                 debug_callback(ss.str().c_str());
             }
             enable_debug_callback(hidden_window);
@@ -386,10 +386,21 @@ namespace rhi
                     auto & p = objects[c.pipe];
                     glUseProgram(p.program_object);
                     p.bind_vertex_array(context);
-                    (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
-                    if(p.desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*p.desc.depth_test));
+
+                    // Rasterizer state
+                    switch(p.desc.front_face)
+                    {
+                    case rhi::front_face::counter_clockwise: glFrontFace(GL_CCW); break;
+                    case rhi::front_face::clockwise: glFrontFace(GL_CW); break;
+                    }
                     glEnable(GL_CULL_FACE);
                     glCullFace(GL_BACK);
+
+                    // Depth stencil state
+                    (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
+                    if(p.desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*p.desc.depth_test));
+                    glDepthMask(p.desc.depth_write ? GL_TRUE : GL_FALSE);
+
                     current_pipeline = &p;
                 },
                 [this](const bind_descriptor_set_command & c)

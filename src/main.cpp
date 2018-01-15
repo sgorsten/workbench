@@ -17,8 +17,7 @@ struct camera
 
     rigid_transform get_pose() const { return {get_orientation(), position}; }
     float4x4 get_view_matrix() const { return get_pose().inverse().matrix(); }
-    float4x4 get_proj_matrix(float aspect) const { return linalg::perspective_matrix(1.0f, aspect, 0.5f, 100.0f); }
-    float4x4 get_view_proj_matrix(float aspect, const coord_system & ndc_coords) const { return mul(get_proj_matrix(aspect), make_transform_4x4(coords, ndc_coords), get_view_matrix()); }
+    float4x4 get_skybox_view_matrix() const { return rotation_matrix(qconj(get_orientation())); }
 
     void move(coord_axis direction, float distance) { position += get_direction(direction) * distance; }
 };
@@ -107,16 +106,17 @@ struct common_assets
     coord_system game_coords;
     mesh basis_mesh, ground_mesh, box_mesh;
     shader_module vs, fs, fs_unlit;
+    shader_module skybox_vs, skybox_fs_spheremap;
     image env_spheremap;
 
-    common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
+    common_assets() : game_coords {coord_axis::right, coord_axis::down, coord_axis::forward} //{coord_axis::right, coord_axis::forward, coord_axis::up}
     {
         env_spheremap = load_image_hdr("../../assets/monument-valley.hdr");
 
         shader_compiler compiler;
         vs = compiler.compile(shader_stage::vertex, R"(#version 450
             layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
-            layout(set=0,binding=1) uniform PerView { mat4 view_proj_matrix; } per_view;
+            layout(set=0,binding=1) uniform PerView { mat4 view_proj_matrix, skybox_view_proj_matrix; } per_view;
             layout(set=1,binding=0) uniform PerObject { mat4 model_matrix; } per_object;
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
@@ -132,7 +132,7 @@ struct common_assets
                 color = v_color;
                 normal = (per_object.model_matrix * vec4(v_normal,0)).xyz;
                 texcoord = v_texcoord;
-                gl_Position = (per_view.view_proj_matrix * per_object.model_matrix) * vec4(v_position,1);
+                gl_Position = per_view.view_proj_matrix * vec4(position,1);
             }
         )");
         fs = compiler.compile(shader_stage::fragment, R"(#version 450
@@ -160,9 +160,37 @@ struct common_assets
             }
         )");
 
-        for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
-        for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
-        for(auto & v : vs.outputs) { std::cout << "layout(location=" << v.location << ") out " << v.name << " : " << v.type << std::endl; }
+        skybox_vs = compiler.compile(shader_stage::vertex, R"(#version 450
+            layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
+            layout(set=0,binding=1) uniform PerView { mat4 view_proj_matrix, skybox_view_proj_matrix; } per_view;
+            layout(location=0) in vec3 v_position;
+            layout(location=1) in vec3 v_color;
+            layout(location=2) in vec3 v_normal;
+            layout(location=3) in vec2 v_texcoord;
+            layout(location=0) out vec3 direction;
+            void main()
+            {
+                direction = v_position;
+                gl_Position = per_view.skybox_view_proj_matrix * vec4(v_position,1);
+            }
+        )");
+        skybox_fs_spheremap = compiler.compile(shader_stage::fragment, R"(#version 450
+            layout(set=1,binding=0) uniform sampler2D u_texture;
+            layout(location=0) in vec3 direction;
+            layout(location=0) out vec4 f_color;
+            vec2 compute_spherical_texcoords(vec3 direction)
+            {
+                return vec2(atan(direction.x, direction.z)*0.1591549, asin(direction.y)*0.3183099)+0.5;
+            }
+            void main()
+            {
+                f_color = texture(u_texture, compute_spherical_texcoords(normalize(direction)));
+            }
+        )");
+
+        //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
+        //for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
+        //for(auto & v : vs.outputs) { std::cout << "layout(location=" << v.location << ") out " << v.name << " : " << v.type << std::endl; }
 
         basis_mesh = make_basis_mesh();
         ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
@@ -178,12 +206,12 @@ class device_session
     gfx::dynamic_buffer uniform_buffer;
     gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer;
 
-    rhi::descriptor_set_layout per_scene_view_layout, per_object_layout;
-    rhi::pipeline_layout pipe_layout;
+    rhi::descriptor_set_layout per_scene_view_layout, per_object_layout, skybox_per_object_layout;
+    rhi::pipeline_layout pipe_layout, skybox_pipe_layout;
 
     rhi::render_pass pass;
-    rhi::shader vs, fs, fs_unlit;
-    rhi::pipeline wire_pipe, solid_pipe;
+    rhi::shader vs, fs, fs_unlit, skybox_vs, skybox_fs_spheremap;
+    rhi::pipeline wire_pipe, solid_pipe, skybox_pipe;
 
     rhi::sampler nearest, spheremap_sampler;
     rhi::image checkerboard;
@@ -208,7 +236,11 @@ public:
             {0, rhi::descriptor_type::uniform_buffer, 1},
             {1, rhi::descriptor_type::combined_image_sampler, 1}
         });
+        skybox_per_object_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::combined_image_sampler, 1}
+        });
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
+        skybox_pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, skybox_per_object_layout});
 
         rhi::render_pass_desc pass_desc;
         pass_desc.color_attachments.push_back({rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::present_src}});
@@ -217,9 +249,12 @@ public:
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
         fs_unlit = dev->create_shader(assets.fs_unlit);
+        skybox_vs = dev->create_shader(assets.skybox_vs);
+        skybox_fs_spheremap = dev->create_shader(assets.skybox_fs_spheremap);
 
-        wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::compare_op::less});
-        solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::compare_op::less});
+        wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::compare_op::less, true});
+        solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::compare_op::less, true});
+        skybox_pipe = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_spheremap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::compare_op::always, false});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
         spheremap_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::repeat, rhi::address_mode::clamp_to_edge});
@@ -236,16 +271,11 @@ public:
     ~device_session()
     {
         gwindow.reset();
-        dev->destroy_pipeline(solid_pipe);
-        dev->destroy_pipeline(wire_pipe);
+        for(auto pipeline : {skybox_pipe, solid_pipe, wire_pipe}) dev->destroy_pipeline(pipeline);
+        for(auto shader : {skybox_vs, vs, skybox_fs_spheremap, fs, fs_unlit}) dev->destroy_shader(shader);
+        for(auto layout : {pipe_layout, skybox_pipe_layout}) dev->destroy_pipeline_layout(layout);
+        for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
         dev->destroy_render_pass(pass);
-        dev->destroy_shader(fs_unlit);
-        dev->destroy_shader(fs);
-        dev->destroy_shader(vs);       
-        dev->destroy_pipeline_layout(pipe_layout);
-        dev->destroy_descriptor_set_layout(per_object_layout);
-        dev->destroy_descriptor_set_layout(per_scene_view_layout);
-
         dev->destroy_image(env_tex);
         dev->destroy_image(checkerboard);
         dev->destroy_sampler(nearest);
@@ -273,22 +303,34 @@ public:
 
     void render_frame(const camera & cam)
     {
+        const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range);
+        struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; } per_view_uniforms;
+        per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
+        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_skybox_view_matrix());
+
         // Reset resources
         desc_pool.reset();
         uniform_buffer.reset();        
 
         // Set up per scene and per view uniforms
-        const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.5f, 100.0f, linalg::pos_z, info.z_range);
-        const auto view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
         auto per_scene_view_set = desc_pool.alloc(per_scene_view_layout)
             .write(0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f))
-            .write(1, uniform_buffer.write(view_proj_matrix));
+            .write(1, uniform_buffer.write(per_view_uniforms));
 
         // Draw objects to our framebuffer
         gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()));
-        cmd.bind_pipeline(wire_pipe);
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
+
+        // Draw skybax
+        cmd.bind_pipeline(skybox_pipe);
+        cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_tex));
+        cmd.bind_vertex_buffer(0, box_vertex_buffer);
+        cmd.bind_index_buffer(box_index_buffer);
+        cmd.draw_indexed(0, 36);
+
+        // Draw basis
+        cmd.bind_pipeline(wire_pipe);
         cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, float4x4{linalg::identity})
                                                                                   .write(1, nearest, checkerboard));
         cmd.bind_vertex_buffer(0, basis_vertex_buffer);
@@ -297,7 +339,7 @@ public:
         // Draw the ground
         cmd.bind_pipeline(solid_pipe);
         cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(cam.coords(coord_axis::down)*0.3f))
-                                                                                  .write(1, spheremap_sampler, env_tex));
+                                                                                  .write(1, nearest, checkerboard));
         cmd.bind_vertex_buffer(0, ground_vertex_buffer);
         cmd.bind_index_buffer(ground_index_buffer);
         cmd.draw_indexed(0, 6);
