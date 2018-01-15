@@ -187,7 +187,10 @@ public:
         });
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
 
-        pass = dev->create_render_pass({});
+        rhi::render_pass_desc pass_desc;
+        pass_desc.color_attachments.push_back({rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::present_src}});
+        pass_desc.depth_attachment = {rhi::image_format::depth_float32, rhi::clear{}, rhi::dont_care{}};
+        pass = dev->create_render_pass(pass_desc);
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
         fs_unlit = dev->create_shader(assets.fs_unlit);

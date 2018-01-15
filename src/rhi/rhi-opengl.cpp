@@ -335,12 +335,30 @@ namespace rhi
             cmd_emulator.execute(cmd, overload(
                 [this, &context](const begin_render_pass_command & c)
                 {
+                    auto & pass = objects[c.pass];
                     auto & fb = objects[c.framebuffer];
                     context = fb.context;
                     glfwMakeContextCurrent(fb.context);
                     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
                     glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
-                    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                    // Clear render targets if specified by render pass
+                    for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
+                    {
+                        if(std::holds_alternative<clear>(pass.desc.color_attachments[i].load_op))
+                        {
+                            glClearColor(0,0,0,1);
+                            glClear(GL_COLOR_BUFFER_BIT); // TODO: Use glClearTexImage(...) when we use multiple color attachments                            
+                        }
+                    }
+                    if(pass.desc.depth_attachment)
+                    {
+                        if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
+                        {
+                            glClearDepthf(1.0f);
+                            glClear(GL_DEPTH_BUFFER_BIT);
+                        }
+                    }
                 },
                 [this, context](const bind_pipeline_command & c)
                 {

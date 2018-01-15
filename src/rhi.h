@@ -32,9 +32,7 @@ namespace rhi
     using pipeline = handle<struct pipeline_tag>;
     using window = handle<struct window_tag>;
     using command_buffer = handle<struct command_buffer_tag>;
-
-    struct render_pass_desc {};
-
+    
     // Buffer creation info
     enum class buffer_usage { vertex, index, uniform, storage };
     struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
@@ -68,6 +66,19 @@ namespace rhi
         filter mag_filter, min_filter;
         std::optional<filter> mip_filter;
         address_mode wrap_s, wrap_t, wrap_r;
+    };
+
+    // Render pass creation info
+    enum class layout { color_attachment_optimal, depth_stencil_attachment_optimal, shader_read_only_optimal, transfer_src_optimal, transfer_dst_optimal, present_src };
+    struct dont_care {};
+    struct clear {};
+    struct load { layout initial_layout; };
+    struct store { layout final_layout; };
+    struct attachment_desc { image_format format; std::variant<dont_care, clear, load> load_op; std::variant<dont_care, store> store_op; };
+    struct render_pass_desc 
+    {
+        std::vector<attachment_desc> color_attachments;
+        std::optional<attachment_desc> depth_attachment;
     };
 
     // Descriptor set layout creation info

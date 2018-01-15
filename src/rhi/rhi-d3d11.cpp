@@ -66,7 +66,7 @@ namespace rhi
     struct d3d_framebuffer
     {
         int2 dims;
-        ID3D11RenderTargetView * render_target_view; // non-owning
+        std::vector<ID3D11RenderTargetView *> render_target_views; // non-owning
         ID3D11DepthStencilView * depth_stencil_view; // non-owning
     };
 
@@ -89,6 +89,7 @@ namespace rhi
     {
         GLFWwindow * w;
         IDXGISwapChain * swap_chain;
+        ID3D11RenderTargetView * swap_chain_view;
         image depth_image;
         framebuffer fb;
     };
@@ -136,6 +137,7 @@ namespace rhi
             rdesc.FillMode = D3D11_FILL_SOLID;
             rdesc.CullMode = D3D11_CULL_BACK;
             rdesc.FrontCounterClockwise = TRUE;
+            rdesc.DepthClipEnable = TRUE;
             check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rdesc, &rasterizer_state));
         }
 
@@ -246,36 +248,44 @@ namespace rhi
 
         window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
         {
-            auto [fb_handle, fb] = objects.create<framebuffer>();
-            auto [handle, win] = objects.create<window>();
-            fb.dims = dimensions;
-            win.fb = fb_handle;
+            // Validate render pass description
+            auto & pass_desc = objects[pass].desc;
+            if(pass_desc.color_attachments.size() != 1) throw std::logic_error("window render pass must have exactly one color attachment");
 
+            // Create the window
+            auto [handle, win] = objects.create<window>();
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
             glfwWindowHint(GLFW_OPENGL_API, GLFW_NO_API);
             win.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
             if(!win.w) throw std::runtime_error("glfwCreateWindow(...) failed");
-            
+
+            // Create swapchain and render target view for this window
             DXGI_SWAP_CHAIN_DESC scd {};
-            scd.BufferCount = 1;                                    // one back buffer
-            scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;     // use 32-bit color
-            scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;      // how swap chain is to be used
-            scd.OutputWindow = glfwGetWin32Window(win.w);        // the window to be used
+            scd.BufferCount = 3;
+            scd.BufferDesc.Format = get_dx_format(pass_desc.color_attachments[0].format);
+            scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            scd.OutputWindow = glfwGetWin32Window(win.w);
             scd.SampleDesc.Count = 1;
-            scd.Windowed = TRUE;                                    // windowed/full-screen mode
-            auto hr = factory->CreateSwapChain(dev, &scd, &win.swap_chain);
-            if(FAILED(hr)) throw std::runtime_error("IDXGIFactory::CreateSwapChain(...) failed");
-
+            scd.Windowed = TRUE;
+            check("IDXGIFactory::CreateSwapChain", factory->CreateSwapChain(dev, &scd, &win.swap_chain));
             ID3D11Resource * image;
-            hr = win.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image);
-            if(FAILED(hr)) throw std::runtime_error("IDXGISwapChain::GetBuffer(...) failed");
+            check("IDXGISwapChain::GetBuffer", win.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image));
+            check("ID3D11Device::CreateRenderTargetView", dev->CreateRenderTargetView(image, nullptr, &win.swap_chain_view));
 
-            hr = dev->CreateRenderTargetView(image, nullptr, &fb.render_target_view);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
+            // Create a framebuffer for this window
+            auto [fb_handle, fb] = objects.create<framebuffer>();
+            fb.dims = dimensions;
+            fb.render_target_views = {win.swap_chain_view};
+            win.fb = fb_handle;
 
-            win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
-            fb.depth_stencil_view = objects[win.depth_image].depth_stencil_view;
+            // If render pass specifies a depth attachment, create a depth buffer specifically for this window
+            if(pass_desc.depth_attachment)
+            {
+                win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, pass_desc.depth_attachment->format, rhi::depth_attachment_bit}, {});
+                fb.depth_stencil_view = objects[win.depth_image].depth_stencil_view;
+            }
+
             return {handle};
         }
         GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }
@@ -367,19 +377,33 @@ namespace rhi
         
         void submit_command_buffer(command_buffer cmd)
         {
+            ctx->ClearState();
+            ctx->RSSetState(rasterizer_state);
             cmd_emulator.execute(cmd, overload(
                 [this](const begin_render_pass_command & c)
                 {
+                    auto & pass = objects[c.pass];
                     auto & fb = objects[c.framebuffer];
 
-                    ctx->ClearState();
-                    ctx->RSSetState(rasterizer_state);
+                    // Clear render targets if specified by render pass
+                    for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
+                    {
+                        if(std::holds_alternative<clear>(pass.desc.color_attachments[i].load_op))
+                        {
+                            const FLOAT rgba[] {0,0,0,1};
+                            ctx->ClearRenderTargetView(fb.render_target_views[i], rgba);
+                        }
+                    }
+                    if(pass.desc.depth_attachment)
+                    {
+                        if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
+                        {
+                            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
+                        }
+                    }
 
-                    FLOAT rgba[] {0,0,0,1};
-                    ctx->ClearRenderTargetView(fb.render_target_view, rgba);
-                    ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
-
-                    ctx->OMSetRenderTargets(1, &fb.render_target_view, fb.depth_stencil_view);
+                    // Set the render targets and viewport
+                    ctx->OMSetRenderTargets(exactly(fb.render_target_views.size()), fb.render_target_views.data(), fb.depth_stencil_view);
                     D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
                     ctx->RSSetViewports(1, &vp);
                 },
@@ -430,7 +454,12 @@ namespace rhi
         }
 
         command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override 
+        { 
+            if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");
+            if(objects[pass].desc.depth_attachment && !objects[framebuffer].depth_stencil_view) throw std::logic_error("depth attachment count mismatch");
+            cmd_emulator.begin_render_pass(cmd, pass, framebuffer); 
+        }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }

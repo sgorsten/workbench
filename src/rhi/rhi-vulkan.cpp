@@ -675,30 +675,59 @@ void vk_device::destroy_framebuffer(framebuffer framebuffer)
     objects.destroy(framebuffer);
 }
 
-static VkAttachmentDescription make_attachment_description(VkFormat format, VkSampleCountFlagBits samples, VkAttachmentLoadOp load_op, VkImageLayout initial_layout=VK_IMAGE_LAYOUT_UNDEFINED, VkAttachmentStoreOp store_op=VK_ATTACHMENT_STORE_OP_DONT_CARE, VkImageLayout final_layout=VK_IMAGE_LAYOUT_UNDEFINED)
+static VkAttachmentDescription make_attachment_description(const rhi::attachment_desc & desc)
 {
-    return {0, format, samples, load_op, store_op, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, initial_layout, final_layout};
+    auto convert_layout = [](rhi::layout layout)
+    {
+        switch(layout)
+        {
+        case rhi::layout::color_attachment_optimal: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case rhi::layout::depth_stencil_attachment_optimal: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case rhi::layout::transfer_src_optimal: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        case rhi::layout::transfer_dst_optimal: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        case rhi::layout::present_src: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        default: fail_fast();
+        }
+    };
+    VkAttachmentDescription attachment {0, get_vk_format(desc.format), VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_UNDEFINED};
+    std::visit(overload(
+        [](dont_care) {},
+        [&](clear) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
+        [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
+    ), desc.load_op);
+    std::visit(overload(
+        [](dont_care) {},
+        [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
+    ), desc.store_op);
+    return attachment;
 }
 
 render_pass vk_device::create_render_pass(const render_pass_desc & desc) 
 {
-    const VkAttachmentDescription attachments[]
+    std::vector<VkAttachmentDescription> attachments;
+    std::vector<VkAttachmentReference> color_refs;
+    for(auto & color_attachment : desc.color_attachments)
     {
-        make_attachment_description(selection.surface_format.format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR),
-        make_attachment_description(VK_FORMAT_D32_SFLOAT, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED)
-    };
-    const VkAttachmentReference color_refs[] {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-    const VkAttachmentReference depth_ref {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        color_refs.push_back({exactly(attachments.size()), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+        attachments.push_back(make_attachment_description(color_attachment));
+    }
+    VkAttachmentReference depth_ref {};
+    if(desc.depth_attachment)
+    {
+        depth_ref = {exactly(attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        attachments.push_back(make_attachment_description(*desc.depth_attachment));
+    }
 
     VkSubpassDescription subpass_desc {};
     subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass_desc.colorAttachmentCount = exactly(countof(color_refs));
-    subpass_desc.pColorAttachments = color_refs;
-    subpass_desc.pDepthStencilAttachment = &depth_ref;
+    subpass_desc.pColorAttachments = color_refs.data();
+    subpass_desc.pDepthStencilAttachment = desc.depth_attachment ? &depth_ref : nullptr;
     
     VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
     render_pass_info.attachmentCount = exactly(countof(attachments));
-    render_pass_info.pAttachments = attachments;
+    render_pass_info.pAttachments = attachments.data();
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass_desc;
 
