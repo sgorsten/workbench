@@ -7,6 +7,17 @@
 
 namespace rhi
 {
+    GLenum get_gl_format(image_format format)
+    {
+        switch(format)
+        {
+        #define X(FORMAT, SIZE, TYPE, VK, GL, DX) case FORMAT: return GL;
+        #include "rhi-format.inl"
+        #undef X
+        default: fail_fast();
+        }
+    }
+
     struct gl_buffer
     {
         GLuint buffer_object = 0;
@@ -136,7 +147,7 @@ namespace rhi
             {
             case rhi::image_shape::_2d:
                 glCreateTextures(GL_TEXTURE_2D, 1, &im.texture_object);
-                glTextureStorage2D(im.texture_object, desc.mip_levels, get_format_info(desc.format).gl_format, desc.dimensions.x, desc.dimensions.y);
+                glTextureStorage2D(im.texture_object, desc.mip_levels, get_gl_format(desc.format), desc.dimensions.x, desc.dimensions.y);
                 if(initial_data.size() == 1) glTextureSubImage2D(im.texture_object, 0, 0, 0, desc.dimensions.x, desc.dimensions.y, GL_RGBA, GL_UNSIGNED_BYTE, initial_data[0]);
                 break;
             }

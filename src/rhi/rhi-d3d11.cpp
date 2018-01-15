@@ -13,6 +13,17 @@
 
 namespace rhi
 {
+    DXGI_FORMAT get_dx_format(image_format format)
+    {
+        switch(format)
+        {
+        #define X(FORMAT, SIZE, TYPE, VK, GL, DX) case FORMAT: return DX;
+        #include "rhi-format.inl"
+        #undef X
+        default: fail_fast();
+        }
+    }
+
     struct d3d_error : public std::error_category
     {
         const char * name() const noexcept override { return "HRESULT"; }
@@ -55,8 +66,8 @@ namespace rhi
     struct d3d_framebuffer
     {
         int2 dims;
-        ID3D11RenderTargetView * render_target_view;
-        ID3D11DepthStencilView * depth_stencil_view;
+        ID3D11RenderTargetView * render_target_view; // non-owning
+        ID3D11DepthStencilView * depth_stencil_view; // non-owning
     };
 
     struct d3d_descriptor_set_layout
@@ -78,8 +89,8 @@ namespace rhi
     {
         GLFWwindow * w;
         IDXGISwapChain * swap_chain;
-        ID3D11Texture2D * depth_texture;
-        rhi::framebuffer fb;
+        image depth_image;
+        framebuffer fb;
     };
 
     struct d3d_device : device
@@ -166,9 +177,8 @@ namespace rhi
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
-            const auto & info = get_format_info(desc.format);
             if(desc.shape != rhi::image_shape::_2d) throw std::logic_error("shape not supported");
-            D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), 1, static_cast<DXGI_FORMAT>(info.dxgi_format), {1,0}, D3D11_USAGE_DEFAULT};
+            D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), 1, get_dx_format(desc.format), {1,0}, D3D11_USAGE_DEFAULT};
             if(desc.flags & rhi::image_flag::sampled_image_bit) tex_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
             if(desc.flags & rhi::image_flag::color_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
             if(desc.flags & rhi::image_flag::depth_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_DEPTH_STENCIL;
@@ -181,7 +191,7 @@ namespace rhi
             if(initial_data.empty()) check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, nullptr, &tex));
             else
             {              
-                const D3D11_SUBRESOURCE_DATA data {initial_data[0], info.pixel_size*desc.dimensions.x};
+                const D3D11_SUBRESOURCE_DATA data {initial_data[0], exactly(get_pixel_size(desc.format)*desc.dimensions.x)};
                 check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, &data, &tex));
             }
 
@@ -264,21 +274,8 @@ namespace rhi
             hr = dev->CreateRenderTargetView(image, nullptr, &fb.render_target_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
-            D3D11_TEXTURE2D_DESC desc {};
-            desc.Width = dimensions.x;
-            desc.Height = dimensions.y;
-            desc.MipLevels = 1;
-            desc.ArraySize = 1;
-            desc.Format = DXGI_FORMAT_D32_FLOAT;
-            desc.SampleDesc.Count = 1;
-            desc.Usage = D3D11_USAGE_DEFAULT;
-            desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-            hr = dev->CreateTexture2D(&desc, nullptr, &win.depth_texture);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateTexture2D(...) failed");
-
-            hr = dev->CreateDepthStencilView(win.depth_texture, nullptr, &fb.depth_stencil_view);
-            if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
-
+            win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
+            fb.depth_stencil_view = objects[win.depth_image].depth_stencil_view;
             return {handle};
         }
         GLFWwindow * get_glfw_window(window window) override { return objects[window].w; }

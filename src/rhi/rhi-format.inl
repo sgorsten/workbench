@@ -1,0 +1,6 @@
+// #define X(FORMAT, SIZE, TYPE, VK, GL, DX)
+X(rhi::image_format::rgba_unorm8,   4,  rhi::attachment_type::color,         VK_FORMAT_R8G8B8A8_UNORM,      GL_RGBA8,              DXGI_FORMAT_R8G8B8A8_UNORM)
+X(rhi::image_format::rgba_float16,  8,  rhi::attachment_type::color,         VK_FORMAT_R16G16B16A16_SFLOAT, GL_RGBA16F,            DXGI_FORMAT_R16G16B16A16_FLOAT)
+X(rhi::image_format::rgba_float32,  16, rhi::attachment_type::color,         VK_FORMAT_R32G32B32A32_SFLOAT, GL_RGBA32F,            DXGI_FORMAT_R32G32B32A32_FLOAT)
+X(rhi::image_format::depth_unorm16, 2,  rhi::attachment_type::depth_stencil, VK_FORMAT_D16_UNORM,           GL_DEPTH_COMPONENT16,  DXGI_FORMAT_D16_UNORM)
+X(rhi::image_format::depth_float32, 4,  rhi::attachment_type::depth_stencil, VK_FORMAT_D32_SFLOAT,          GL_DEPTH_COMPONENT32F, DXGI_FORMAT_D32_FLOAT)

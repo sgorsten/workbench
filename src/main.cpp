@@ -198,7 +198,7 @@ public:
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
 
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
-        checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::r8g8b8a8_unorm, rhi::sampled_image_bit}, {grid});
+        checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << info.name << ")";
         rwindow = dev->create_window(pass, {512,512}, ss.str());

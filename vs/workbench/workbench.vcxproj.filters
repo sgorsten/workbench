@@ -42,4 +42,9 @@
       <UniqueIdentifier>{f8f04ceb-4a3a-4b67-a3b6-e03351c46ac7}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\rhi\rhi-format.inl">
+      <Filter>rhi</Filter>
+    </None>
+  </ItemGroup>
 </Project>

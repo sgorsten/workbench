@@ -8,6 +8,17 @@
 
 namespace rhi
 {
+    VkFormat get_vk_format(image_format format)
+    {
+        switch(format)
+        {
+        #define X(FORMAT, SIZE, TYPE, VK, GL, DX) case FORMAT: return VK;
+        #include "rhi-format.inl"
+        #undef X
+        default: fail_fast();
+        }
+    }
+
     struct physical_device_selection
     {
         VkPhysicalDevice physical_device;
@@ -121,7 +132,6 @@ namespace rhi
         sampler create_sampler(const sampler_desc & desc) override;
         void destroy_sampler(sampler sampler) override;
 
-        image make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect);
         void destroy_framebuffer(framebuffer framebuffer);
 
         render_pass create_render_pass(const render_pass_desc & desc) override;
@@ -517,7 +527,7 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
     default: throw std::logic_error("bad gfx::image_shape");
     }
 
-    image_info.format = static_cast<VkFormat>(get_format_info(desc.format).vk_format);
+    image_info.format = get_vk_format(desc.format);
     image_info.extent = {static_cast<uint32_t>(desc.dimensions.x), static_cast<uint32_t>(desc.dimensions.y), static_cast<uint32_t>(desc.dimensions.z)};
     image_info.mipLevels = desc.mip_levels;        
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -594,42 +604,6 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
     image_view_info.subresourceRange.baseArrayLayer = 0;
     image_view_info.subresourceRange.layerCount = image_info.arrayLayers;
     check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &im.image_view));
-    return handle;
-}
-
-image vk_device::make_render_target(int2 dims, VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect)
-{
-    auto [handle, rt] = objects.create<image>();
-
-    VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.format = format;
-    image_info.extent = {exactly(dims.x), exactly(dims.y), 1};
-    image_info.mipLevels = 1;
-    image_info.arrayLayers = 1;
-    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.usage = usage;
-    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    check("vkCreateImage", vkCreateImage(dev, &image_info, nullptr, &rt.image_object));
-
-    VkMemoryRequirements mem_reqs;
-    vkGetImageMemoryRequirements(dev, rt.image_object, &mem_reqs);
-    rt.device_memory = allocate(mem_reqs, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    check("vkBindImageMemory", vkBindImageMemory(dev, rt.image_object, rt.device_memory, 0));
-    
-    VkImageViewCreateInfo image_view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    image_view_info.image = rt.image_object;
-    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    image_view_info.format = format;
-    image_view_info.subresourceRange.aspectMask = aspect;
-    image_view_info.subresourceRange.baseMipLevel = 0;
-    image_view_info.subresourceRange.levelCount = 1;
-    image_view_info.subresourceRange.baseArrayLayer = 0;
-    image_view_info.subresourceRange.layerCount = 1;
-    check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &rt.image_view));
-
     return handle;
 }
 
@@ -1057,7 +1031,7 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
     auto [fb_handle, fb] = objects.create<framebuffer>();
     fb.dims = dimensions;
     fb.framebuffers.resize(win.swapchain_image_views.size());
-    win.depth_image = make_render_target(dimensions, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+    win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
     for(size_t i=0; i<win.swapchain_image_views.size(); ++i)
     {
         std::vector<VkImageView> attachments {win.swapchain_image_views[i], objects[win.depth_image].image_view};

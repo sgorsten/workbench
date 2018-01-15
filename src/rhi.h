@@ -40,7 +40,7 @@ namespace rhi
     struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
 
     // Image creation info
-    enum class image_format { r8g8b8a8_unorm };
+    enum class image_format { rgba_unorm8, rgba_float16, rgba_float32, depth_unorm16, depth_float32 };
     enum class image_shape { _1d, _2d, _3d, cube };
     enum image_flag
     {
@@ -52,11 +52,11 @@ namespace rhi
     using image_flags = int;
     struct image_desc
     {
-        image_shape  shape      = image_shape::_2d;
-        int3         dimensions = {1,1,1};
-        int          mip_levels = 1;
-        image_format format     = image_format::r8g8b8a8_unorm;
-        image_flags  flags      = 0;
+        image_shape shape;
+        int3 dimensions;
+        int mip_levels;
+        image_format format;
+        image_flags flags;
         // Not yet supported: multisampling, arrays
     };
 

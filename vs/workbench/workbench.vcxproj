@@ -196,6 +196,9 @@
       <Project>{bc591c12-3043-4761-a80a-d0acfcd39d79}</Project>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\rhi\rhi-format.inl" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
