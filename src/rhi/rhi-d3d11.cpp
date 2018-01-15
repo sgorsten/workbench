@@ -39,6 +39,12 @@ namespace rhi
         ID3D11Resource * resource;
         ID3D11ShaderResourceView * shader_resource_view;
         ID3D11RenderTargetView * render_target_view;
+        ID3D11DepthStencilView * depth_stencil_view;
+    };
+
+    struct d3d_sampler
+    {
+        ID3D11SamplerState * sampler_state;
     };
 
     struct d3d_render_pass
@@ -88,12 +94,13 @@ namespace rhi
         template<class T> struct traits;
         template<> struct traits<buffer> { using type = d3d_buffer; };
         template<> struct traits<image> { using type = d3d_image; };
+        template<> struct traits<sampler> { using type = d3d_sampler; };
         template<> struct traits<render_pass> { using type = d3d_render_pass; };
         template<> struct traits<framebuffer> { using type = d3d_framebuffer; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = d3d_pipeline; };
         template<> struct traits<window> { using type = d3d_window; };
-        heterogeneous_object_set<traits, buffer, image, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -159,13 +166,64 @@ namespace rhi
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
+            if(desc.shape != rhi::image_shape::_2d) throw std::logic_error("shape not supported");
+            D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1,0}, D3D11_USAGE_DEFAULT};
+            if(desc.flags & rhi::image_flag::sampled_image_bit) tex_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+            if(desc.flags & rhi::image_flag::color_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
+            if(desc.flags & rhi::image_flag::depth_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_DEPTH_STENCIL;
+            if(desc.flags & rhi::image_flag::generate_mips_bit)
+            {
+                tex_desc.BindFlags |= (D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET);
+                tex_desc.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
+            }
+            ID3D11Texture2D * tex;
+            if(initial_data.empty()) check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, nullptr, &tex));
+            else
+            {              
+                const D3D11_SUBRESOURCE_DATA data {initial_data[0], desc.dimensions.x * 4};
+                check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, &data, &tex));
+            }
+
             auto [handle, im] = objects.create<image>();
+            im.resource = tex;
+            if(desc.flags & rhi::image_flag::sampled_image_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateShaderResourceView(im.resource, nullptr, &im.shader_resource_view));
+            if(desc.flags & rhi::image_flag::color_attachment_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateRenderTargetView(im.resource, nullptr, &im.render_target_view));
+            if(desc.flags & rhi::image_flag::depth_attachment_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateDepthStencilView(im.resource, nullptr, &im.depth_stencil_view));
+            if(desc.flags & rhi::image_flag::generate_mips_bit) ctx->GenerateMips(im.shader_resource_view);
             return handle;
         }
         void destroy_image(image image) override { objects.destroy(image); }
 
-        sampler create_sampler(const sampler_desc & desc) override { return {}; }
-        void destroy_sampler(sampler sampler) override {}
+        sampler create_sampler(const sampler_desc & desc) override 
+        {
+            auto convert_mode = [](rhi::address_mode mode)
+            {
+                switch(mode)
+                {
+                case rhi::address_mode::repeat: return D3D11_TEXTURE_ADDRESS_WRAP;
+                case rhi::address_mode::mirrored_repeat: return D3D11_TEXTURE_ADDRESS_MIRROR;
+                case rhi::address_mode::clamp_to_edge: return D3D11_TEXTURE_ADDRESS_CLAMP;
+                case rhi::address_mode::mirror_clamp_to_edge: return D3D11_TEXTURE_ADDRESS_MIRROR_ONCE;
+                case rhi::address_mode::clamp_to_border: return D3D11_TEXTURE_ADDRESS_BORDER;
+                default: fail_fast();
+                }
+            };
+            D3D11_SAMPLER_DESC samp_desc {};
+            if(desc.mag_filter == filter::linear) samp_desc.Filter = static_cast<D3D11_FILTER>(samp_desc.Filter|D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT);
+            if(desc.min_filter == filter::linear) samp_desc.Filter = static_cast<D3D11_FILTER>(samp_desc.Filter|D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT);
+            if(desc.mip_filter)
+            {
+                samp_desc.MaxLOD = 1000;
+                if(desc.mip_filter == filter::linear) samp_desc.Filter = static_cast<D3D11_FILTER>(samp_desc.Filter|D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR);
+            }
+            samp_desc.AddressU = convert_mode(desc.wrap_s);
+            samp_desc.AddressV = convert_mode(desc.wrap_t);
+            samp_desc.AddressW = convert_mode(desc.wrap_r);
+            auto [handle, samp] = objects.create<sampler>();
+            dev->CreateSamplerState(&samp_desc, &samp.sampler_state);
+            return handle;
+        }
+        void destroy_sampler(sampler sampler) override { objects.destroy(sampler); }
 
         render_pass create_render_pass(const render_pass_desc & desc) override 
         {
@@ -178,28 +236,28 @@ namespace rhi
         window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
         {
             auto [fb_handle, fb] = objects.create<framebuffer>();
-            auto [handle, window] = objects.create<window>();
+            auto [handle, win] = objects.create<window>();
             fb.dims = dimensions;
-            window.fb = fb_handle;
+            win.fb = fb_handle;
 
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
             glfwWindowHint(GLFW_OPENGL_API, GLFW_NO_API);
-            window.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
-            if(!window.w) throw std::runtime_error("glfwCreateWindow(...) failed");
+            win.w = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
+            if(!win.w) throw std::runtime_error("glfwCreateWindow(...) failed");
             
             DXGI_SWAP_CHAIN_DESC scd {};
             scd.BufferCount = 1;                                    // one back buffer
             scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;     // use 32-bit color
             scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;      // how swap chain is to be used
-            scd.OutputWindow = glfwGetWin32Window(window.w);        // the window to be used
+            scd.OutputWindow = glfwGetWin32Window(win.w);        // the window to be used
             scd.SampleDesc.Count = 1;
             scd.Windowed = TRUE;                                    // windowed/full-screen mode
-            auto hr = factory->CreateSwapChain(dev, &scd, &window.swap_chain);
+            auto hr = factory->CreateSwapChain(dev, &scd, &win.swap_chain);
             if(FAILED(hr)) throw std::runtime_error("IDXGIFactory::CreateSwapChain(...) failed");
 
             ID3D11Resource * image;
-            hr = window.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image);
+            hr = win.swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image);
             if(FAILED(hr)) throw std::runtime_error("IDXGISwapChain::GetBuffer(...) failed");
 
             hr = dev->CreateRenderTargetView(image, nullptr, &fb.render_target_view);
@@ -214,10 +272,10 @@ namespace rhi
             desc.SampleDesc.Count = 1;
             desc.Usage = D3D11_USAGE_DEFAULT;
             desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-            hr = dev->CreateTexture2D(&desc, nullptr, &window.depth_texture);
+            hr = dev->CreateTexture2D(&desc, nullptr, &win.depth_texture);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateTexture2D(...) failed");
 
-            hr = dev->CreateDepthStencilView(window.depth_texture, nullptr, &fb.depth_stencil_view);
+            hr = dev->CreateDepthStencilView(win.depth_texture, nullptr, &fb.depth_stencil_view);
             if(FAILED(hr)) throw std::runtime_error("ID3D11Device::CreateRenderTargetView(...) failed");
 
             return {handle};
@@ -235,8 +293,8 @@ namespace rhi
 
         shader create_shader(const shader_module & module) override
         {
-            auto [handle, shader] = objects.create<shader>();
-            shader = module;
+            auto [handle, s] = objects.create<shader>();
+            s = module;
             return handle;
         }
 
@@ -347,7 +405,13 @@ namespace rhi
                         const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
                         ctx->VSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
                         ctx->PSSetConstantBuffers1(exactly(index), 1, &objects[range.buffer].buffer_object, &first_constant, &num_constants);
-                    }, [this](size_t index, sampler sampler, image image) {});
+                    }, [this](size_t index, sampler sampler, image image) 
+                    {
+                        ctx->VSSetSamplers(exactly(index), 1, &objects[sampler].sampler_state);
+                        ctx->VSSetShaderResources(exactly(index), 1, &objects[image].shader_resource_view);
+                        ctx->PSSetSamplers(exactly(index), 1, &objects[sampler].sampler_state);
+                        ctx->PSSetShaderResources(exactly(index), 1, &objects[image].shader_resource_view);
+                    });
                 },
                 [this](const bind_vertex_buffer_command & c)
                 {
