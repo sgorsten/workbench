@@ -491,12 +491,14 @@ namespace rhi
         void submit_and_wait(command_buffer submit) override
         {
             submit_command_buffer(submit);
+            glFlush();
             cmd_emulator.destroy_command_buffer(submit);
         }
         void acquire_and_submit_and_present(command_buffer submit, window window) override
         {
             submit_command_buffer(submit);
             glfwSwapBuffers(objects[window].w);
+            glFlush();
             cmd_emulator.destroy_command_buffer(submit);
         }
 

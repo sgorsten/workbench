@@ -144,7 +144,12 @@ namespace rhi
         struct emulated_command_buffer { std::vector<command> commands; };
         object_set<command_buffer, emulated_command_buffer> buffers;
     public:
-        command_buffer create_command_buffer() { return std::get<command_buffer>(buffers.create()); }
+        command_buffer create_command_buffer() 
+        { 
+            auto [handle, buf] = buffers.create();
+            buf.commands.clear();
+            return handle;
+        }
         void destroy_command_buffer(command_buffer cmd) { buffers.destroy(cmd); }
 
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer, clear}); }
@@ -156,6 +161,13 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) { buffers[cmd].commands.push_back(draw_indexed_command{first_index, index_count}); }
         void end_render_pass(command_buffer cmd) { buffers[cmd].commands.push_back(end_render_pass_command{}); }
 
-        template<class ExecuteCommandFunction> void execute(command_buffer cmd, ExecuteCommandFunction execute_command) const { for(auto & command : buffers[cmd].commands) std::visit(execute_command, command); }
+        template<class ExecuteCommandFunction> void execute(command_buffer cmd, ExecuteCommandFunction execute_command) const 
+        { 
+            auto & buf = buffers[cmd];
+            for(auto & command : buf.commands)
+            {
+                std::visit(execute_command, command);
+            }
+        }
     };
 }

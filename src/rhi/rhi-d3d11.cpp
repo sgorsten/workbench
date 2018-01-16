@@ -445,14 +445,12 @@ namespace rhi
         void submit_command_buffer(command_buffer cmd)
         {
             d3d_pipeline * current_pipeline = 0;
+            ctx->ClearState();
             cmd_emulator.execute(cmd, overload(
                 [this,&current_pipeline](const begin_render_pass_command & c)
                 {
                     auto & pass = objects[c.pass];
                     auto & fb = objects[c.framebuffer];
-
-                    current_pipeline = nullptr;
-                    ctx->ClearState();
 
                     // Clear render targets if specified by render pass
                     for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
@@ -516,9 +514,18 @@ namespace rhi
                         }
                     }      
                 },
-                [this](const bind_index_buffer_command & c) { ctx->IASetIndexBuffer(objects[c.range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); },
-                [this](const draw_command & c) { ctx->Draw(c.vertex_count, c.first_vertex); },
-                [this](const draw_indexed_command & c) { ctx->DrawIndexed(c.index_count, c.first_index, 0); },
+                [this](const bind_index_buffer_command & c) 
+                { 
+                    ctx->IASetIndexBuffer(objects[c.range.buffer].buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); 
+                },
+                [this](const draw_command & c)
+                { 
+                    ctx->Draw(c.vertex_count, c.first_vertex); 
+                },
+                [this](const draw_indexed_command & c)
+                { 
+                    ctx->DrawIndexed(c.index_count, c.first_index, 0); 
+                },
                 [this](const end_render_pass_command &) {}
             ));
         }
@@ -541,12 +548,14 @@ namespace rhi
         void submit_and_wait(command_buffer cmd)
         {
             submit_command_buffer(cmd);
+            ctx->Flush(); // TODO: Remove once we support fences
             cmd_emulator.destroy_command_buffer(cmd);
         }
         void acquire_and_submit_and_present(command_buffer cmd, window window)
         {
             submit_command_buffer(cmd);
             objects[window].swap_chain->Present(1, 0);
+            ctx->Flush(); // TODO: Remove once we support fences
             cmd_emulator.destroy_command_buffer(cmd);
         }
 

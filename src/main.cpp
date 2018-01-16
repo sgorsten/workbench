@@ -246,20 +246,15 @@ public:
     cubemap_utilities(const common_assets & assets, std::shared_ptr<rhi::device> dev) : dev{dev}
     {
         cube_op_vs = dev->create_shader(assets.cube_op_vs);
+        const float y = dev->get_info().inverted_framebuffers ? -1 : 1;
         const cube_op_vertex face_vertices[]
         {
-            {{-1,-1},{+1,+1,+1}}, {{+1,-1},{+1,+1,-1}}, {{+1,+1},{+1,-1,-1}}, {{-1,-1},{+1,+1,+1}}, {{+1,+1},{+1,-1,-1}}, {{-1,+1},{+1,-1,+1}}, // standard positive x face
-            {{-1,-1},{-1,+1,-1}}, {{+1,-1},{-1,+1,+1}}, {{+1,+1},{-1,-1,+1}}, {{-1,-1},{-1,+1,-1}}, {{+1,+1},{-1,-1,+1}}, {{-1,+1},{-1,-1,-1}}, // standard negative x face
-            {{-1,-1},{-1,+1,-1}}, {{+1,-1},{+1,+1,-1}}, {{+1,+1},{+1,+1,+1}}, {{-1,-1},{-1,+1,-1}}, {{+1,+1},{+1,+1,+1}}, {{-1,+1},{-1,+1,+1}}, // standard positive y face
-            {{-1,-1},{-1,-1,+1}}, {{+1,-1},{+1,-1,+1}}, {{+1,+1},{+1,-1,-1}}, {{-1,-1},{-1,-1,+1}}, {{+1,+1},{+1,-1,-1}}, {{-1,+1},{-1,-1,-1}}, // standard negative y face
-            {{-1,-1},{-1,+1,+1}}, {{+1,-1},{+1,+1,+1}}, {{+1,+1},{+1,-1,+1}}, {{-1,-1},{-1,+1,+1}}, {{+1,+1},{+1,-1,+1}}, {{-1,+1},{-1,-1,+1}}, // standard positive z face
-            {{-1,-1},{+1,+1,-1}}, {{+1,-1},{-1,+1,-1}}, {{+1,+1},{-1,-1,-1}}, {{-1,-1},{+1,+1,-1}}, {{+1,+1},{-1,-1,-1}}, {{-1,+1},{+1,-1,-1}}, // standard negative z face
-            {{-1,+1},{+1,+1,+1}}, {{+1,+1},{+1,+1,-1}}, {{+1,-1},{+1,-1,-1}}, {{-1,+1},{+1,+1,+1}}, {{+1,-1},{+1,-1,-1}}, {{-1,-1},{+1,-1,+1}}, // inverted positive x face
-            {{-1,+1},{-1,+1,-1}}, {{+1,+1},{-1,+1,+1}}, {{+1,-1},{-1,-1,+1}}, {{-1,+1},{-1,+1,-1}}, {{+1,-1},{-1,-1,+1}}, {{-1,-1},{-1,-1,-1}}, // inverted negative x face
-            {{-1,+1},{-1,+1,-1}}, {{+1,+1},{+1,+1,-1}}, {{+1,-1},{+1,+1,+1}}, {{-1,+1},{-1,+1,-1}}, {{+1,-1},{+1,+1,+1}}, {{-1,-1},{-1,+1,+1}}, // inverted positive y face
-            {{-1,+1},{-1,-1,+1}}, {{+1,+1},{+1,-1,+1}}, {{+1,-1},{+1,-1,-1}}, {{-1,+1},{-1,-1,+1}}, {{+1,-1},{+1,-1,-1}}, {{-1,-1},{-1,-1,-1}}, // inverted negative y face
-            {{-1,+1},{-1,+1,+1}}, {{+1,+1},{+1,+1,+1}}, {{+1,-1},{+1,-1,+1}}, {{-1,+1},{-1,+1,+1}}, {{+1,-1},{+1,-1,+1}}, {{-1,-1},{-1,-1,+1}}, // inverted positive z face
-            {{-1,+1},{+1,+1,-1}}, {{+1,+1},{-1,+1,-1}}, {{+1,-1},{-1,-1,-1}}, {{-1,+1},{+1,+1,-1}}, {{+1,-1},{-1,-1,-1}}, {{-1,-1},{+1,-1,-1}}, // inverted negative z face
+            {{-1,-y},{+1,+1,+1}}, {{+1,-y},{+1,+1,-1}}, {{+1,+y},{+1,-1,-1}}, {{-1,-y},{+1,+1,+1}}, {{+1,+y},{+1,-1,-1}}, {{-1,+y},{+1,-1,+1}}, // standard positive x face
+            {{-1,-y},{-1,+1,-1}}, {{+1,-y},{-1,+1,+1}}, {{+1,+y},{-1,-1,+1}}, {{-1,-y},{-1,+1,-1}}, {{+1,+y},{-1,-1,+1}}, {{-1,+y},{-1,-1,-1}}, // standard negative x face
+            {{-1,-y},{-1,+1,-1}}, {{+1,-y},{+1,+1,-1}}, {{+1,+y},{+1,+1,+1}}, {{-1,-y},{-1,+1,-1}}, {{+1,+y},{+1,+1,+1}}, {{-1,+y},{-1,+1,+1}}, // standard positive y face
+            {{-1,-y},{-1,-1,+1}}, {{+1,-y},{+1,-1,+1}}, {{+1,+y},{+1,-1,-1}}, {{-1,-y},{-1,-1,+1}}, {{+1,+y},{+1,-1,-1}}, {{-1,+y},{-1,-1,-1}}, // standard negative y face
+            {{-1,-y},{-1,+1,+1}}, {{+1,-y},{+1,+1,+1}}, {{+1,+y},{+1,-1,+1}}, {{-1,-y},{-1,+1,+1}}, {{+1,+y},{+1,-1,+1}}, {{-1,+y},{-1,-1,+1}}, // standard positive z face
+            {{-1,-y},{+1,+1,-1}}, {{+1,-y},{-1,+1,-1}}, {{+1,+y},{-1,-1,-1}}, {{-1,-y},{+1,+1,-1}}, {{+1,+y},{-1,-1,-1}}, {{-1,+y},{+1,-1,-1}}, // standard negative z face
         };
         cube_op_vertex_buffer = dev->create_buffer({sizeof(face_vertices), rhi::buffer_usage::vertex, false}, face_vertices);
     }
@@ -269,7 +264,7 @@ public:
         return dev->create_pipeline({render_pass, pipeline_layout, {cube_op_vertex::get_binding(0)}, {cube_op_vs, fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false});
     }
 
-    template<class F> void render_to_cubemap(rhi::image target_cube_map, const int2 & dimensions, rhi::render_pass render_pass, bool invert_framebuffers, F bind_pipeline)
+    template<class F> void render_to_cubemap(rhi::image target_cube_map, const int2 & dimensions, rhi::render_pass render_pass, F bind_pipeline)
     {
         rhi::framebuffer face_framebuffers[6];
         for(int i=0; i<6; ++i) face_framebuffers[i] = dev->create_framebuffer({dimensions, render_pass, {{target_cube_map,i}}});
@@ -278,7 +273,7 @@ public:
         {
             cmd.begin_render_pass(render_pass, face_framebuffers[i], {{0,0,0,0},1,0});
             bind_pipeline(cmd);
-            cmd.bind_vertex_buffer(0, {cube_op_vertex_buffer, exactly(sizeof(cube_op_vertex)*6*(i + (invert_framebuffers?6:0))), sizeof(cube_op_vertex)*6});
+            cmd.bind_vertex_buffer(0, {cube_op_vertex_buffer, exactly(sizeof(cube_op_vertex)*6*i), sizeof(cube_op_vertex)*6});
             cmd.draw(0, 6);
             cmd.end_render_pass();
         }
@@ -382,14 +377,11 @@ public:
         env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
         env_cubemap2 = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
 
-        desc_pool.reset();
-        uniform_buffer.reset();
-
         // Resample the environment spheremap into a cubemap
         auto resample_set = desc_pool.alloc(resample_layout);
         resample_set.write(0, uniform_buffer, make_transform_4x4(assets.game_coords, {coord_axis::right, coord_axis::down, coord_axis::forward}));
         resample_set.write(1, spheremap_sampler, env_spheremap);
-        cube_utils.render_to_cubemap(env_cubemap, {512,512}, render_to_rgba_unorm8, info.inverted_framebuffers, [&](gfx::command_buffer & cmd)
+        cube_utils.render_to_cubemap(env_cubemap, {512,512}, render_to_rgba_unorm8, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(cube_sample_sphere_pipe);
             cmd.bind_descriptor_set(convert_spheremap_layout, 0, resample_set);
@@ -398,7 +390,7 @@ public:
         // Copy cubemap to another cubemap
         auto copy_set = desc_pool.alloc(cube_op_set_layout);
         copy_set.write(0, spheremap_sampler, env_cubemap);
-        cube_utils.render_to_cubemap(env_cubemap2, {512,512}, render_to_rgba_unorm8, info.inverted_framebuffers, [&](gfx::command_buffer & cmd)
+        cube_utils.render_to_cubemap(env_cubemap2, {512,512}, render_to_rgba_unorm8, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(cube_copy_pipe);
             cmd.bind_descriptor_set(cube_op_pipeline_layout, 0, copy_set);  
@@ -406,7 +398,7 @@ public:
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
-        gwindow->set_pos(window_pos);
+        gwindow->set_pos(window_pos);   
     }
 
     ~device_session()
@@ -442,20 +434,18 @@ public:
     }
 
     void render_frame(const camera & cam)
-    {
+    {       
+        // Reset resources
+        desc_pool.reset();
+        uniform_buffer.reset();
+
+        // Set up per scene and per view uniforms
         auto fb = dev->get_swapchain_framebuffer(gwindow->get_rhi_window());
         auto ndc_coords = dev->get_ndc_coords(fb);
-
         const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range);
         struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; } per_view_uniforms;
         per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, ndc_coords), cam.get_view_matrix());
         per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, ndc_coords), cam.get_skybox_view_matrix());
-
-        // Reset resources
-        desc_pool.reset();
-        uniform_buffer.reset();        
-
-        // Set up per scene and per view uniforms
         auto per_scene_view_set = desc_pool.alloc(per_scene_view_layout)
             .write(0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f))
             .write(1, uniform_buffer.write(per_view_uniforms));
@@ -464,10 +454,10 @@ public:
 
         // Draw objects to our primary framebuffer
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()), {{0,0,0,1},1.0f,0});
-        cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
 
         // Draw skybox
         cmd.bind_pipeline(skybox_pipe_cubemap);
+        cmd.bind_descriptor_set(skybox_pipe_layout, 0, per_scene_view_set);
         cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_cubemap));
         cmd.bind_vertex_buffer(0, box_vertex_buffer);
         cmd.bind_index_buffer(box_index_buffer);
