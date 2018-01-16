@@ -128,12 +128,13 @@ namespace rhi
     };
 
     // Framebuffer creation info
+    struct framebuffer_attachment_desc { image image; int layer; };
     struct framebuffer_desc
     {
         int2 dimensions;
         render_pass pass;
-        std::vector<image> color_attachments;
-        std::optional<image> depth_attachment;
+        std::vector<framebuffer_attachment_desc> color_attachments;
+        std::optional<framebuffer_attachment_desc> depth_attachment;
     };
 
     // Descriptor set layout creation info
@@ -165,6 +166,7 @@ namespace rhi
 
     struct device_info { coord_system ndc_coords; linalg::z_range z_range; };
     struct buffer_range { buffer buffer; size_t offset, size; };
+    struct clear_values { float4 color; float depth; uint8_t stencil; };
 
     struct device
     {
@@ -182,7 +184,7 @@ namespace rhi
         virtual char * get_mapped_memory(buffer buffer) = 0;
         virtual void destroy_buffer(buffer buffer) = 0;
 
-        virtual image create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0;
+        virtual image create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0; // one ptr for non-cube, six ptrs in +x,-x,+y,-y,+z,-z order for cube
         virtual void destroy_image(image image) = 0;
 
         virtual sampler create_sampler(const sampler_desc & desc) = 0;
@@ -241,7 +243,7 @@ namespace rhi
 
         virtual command_buffer start_command_buffer() = 0;
 
-        virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) = 0;
+        virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) = 0;
         virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;
         virtual void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) = 0;
         virtual void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) = 0;

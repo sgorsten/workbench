@@ -49,8 +49,8 @@ namespace rhi
     {
         ID3D11Resource * resource;
         ID3D11ShaderResourceView * shader_resource_view;
-        ID3D11RenderTargetView * render_target_view;
-        ID3D11DepthStencilView * depth_stencil_view;
+        std::vector<ID3D11RenderTargetView *> render_target_views;
+        std::vector<ID3D11DepthStencilView *> depth_stencil_views;
     };
 
     struct d3d_sampler
@@ -213,8 +213,30 @@ namespace rhi
                 im.resource = tex;
             } 
             if(desc.flags & rhi::image_flag::sampled_image_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateShaderResourceView(im.resource, nullptr, &im.shader_resource_view));
-            if(desc.flags & rhi::image_flag::color_attachment_bit) check("ID3D11Device::CreateRenderTargetView", dev->CreateRenderTargetView(im.resource, nullptr, &im.render_target_view));
-            if(desc.flags & rhi::image_flag::depth_attachment_bit) check("ID3D11Device::CreateDepthStencilView", dev->CreateDepthStencilView(im.resource, nullptr, &im.depth_stencil_view));
+            if(desc.flags & rhi::image_flag::color_attachment_bit)
+            {
+                D3D11_RENDER_TARGET_VIEW_DESC view_desc {get_dx_format(desc.format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
+                view_desc.Texture2DArray.MipSlice = 0;
+                view_desc.Texture2DArray.ArraySize = 1;
+                im.render_target_views.resize(array_size);
+                for(size_t i=0; i<im.render_target_views.size(); ++i)
+                {
+                    view_desc.Texture2DArray.FirstArraySlice = exactly(i);
+                    check("ID3D11Device::CreateRenderTargetView", dev->CreateRenderTargetView(im.resource, &view_desc, &im.render_target_views[i]));
+                }
+            }
+            if(desc.flags & rhi::image_flag::depth_attachment_bit) 
+            {
+                D3D11_DEPTH_STENCIL_VIEW_DESC view_desc {get_dx_format(desc.format), D3D11_DSV_DIMENSION_TEXTURE2DARRAY};
+                view_desc.Texture2DArray.MipSlice = 0;
+                view_desc.Texture2DArray.ArraySize = 1;
+                im.depth_stencil_views.resize(array_size);
+                for(size_t i=0; i<im.depth_stencil_views.size(); ++i)
+                {
+                    view_desc.Texture2DArray.FirstArraySlice = exactly(i);
+                    check("ID3D11Device::CreateDepthStencilView", dev->CreateDepthStencilView(im.resource, &view_desc, &im.depth_stencil_views[i]));
+                }
+            }
             if(desc.flags & rhi::image_flag::generate_mips_bit) ctx->GenerateMips(im.shader_resource_view);
             return handle;
         }
@@ -263,8 +285,8 @@ namespace rhi
         {
             auto [handle, fb] = objects.create<framebuffer>();
             fb.dims = desc.dimensions;
-            for(auto attachment : desc.color_attachments) fb.render_target_views.push_back(objects[attachment].render_target_view);
-            if(desc.depth_attachment) fb.depth_stencil_view = objects[*desc.depth_attachment].depth_stencil_view;
+            for(auto attachment : desc.color_attachments) fb.render_target_views.push_back(objects[attachment.image].render_target_views[attachment.layer]);
+            if(desc.depth_attachment) fb.depth_stencil_view = objects[desc.depth_attachment->image].depth_stencil_views[desc.depth_attachment->layer];
             return handle;
         }
         void destroy_framebuffer(framebuffer framebuffer) override { objects.destroy(framebuffer); }
@@ -306,7 +328,7 @@ namespace rhi
             if(pass_desc.depth_attachment)
             {
                 win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, pass_desc.depth_attachment->format, rhi::depth_attachment_bit}, {});
-                fb.depth_stencil_view = objects[win.depth_image].depth_stencil_view;
+                fb.depth_stencil_view = objects[win.depth_image].depth_stencil_views[0];
             }
 
             return {handle};
@@ -434,15 +456,14 @@ namespace rhi
                     {
                         if(std::holds_alternative<clear>(pass.desc.color_attachments[i].load_op))
                         {
-                            const FLOAT rgba[] {0,0,0,1};
-                            ctx->ClearRenderTargetView(fb.render_target_views[i], rgba);
+                            ctx->ClearRenderTargetView(fb.render_target_views[i], &c.clear.color[0]);
                         }
                     }
                     if(pass.desc.depth_attachment)
                     {
                         if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
                         {
-                            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, 1.0f, 0);
+                            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, c.clear.depth, c.clear.stencil);
                         }
                     }
 
@@ -500,11 +521,11 @@ namespace rhi
         }
 
         command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override 
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
         { 
             if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");
             if(objects[pass].desc.depth_attachment && !objects[framebuffer].depth_stencil_view) throw std::logic_error("depth attachment count mismatch");
-            cmd_emulator.begin_render_pass(cmd, pass, framebuffer); 
+            cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); 
         }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }

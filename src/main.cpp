@@ -227,6 +227,9 @@ class device_session
     rhi::image env_spheremap;
     rhi::image env_cubemap;
 
+    rhi::render_pass render_to_rgba_unorm8;
+    rhi::framebuffer env_cubemap_fb[6];
+
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
@@ -274,15 +277,11 @@ public:
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
         env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
+        env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
 
-        const std::vector<byte4> f0{512*512, {255,  0,  0,255}}; // x>0
-        const std::vector<byte4> f1{512*512, {  0,255,255,255}}; // x<0
-        const std::vector<byte4> f2{512*512, {  0,255,  0,255}}; // y>0
-        const std::vector<byte4> f3{512*512, {255,  0,255,255}}; // y<0
-        const std::vector<byte4> f4{512*512, {  0,  0,255,255}}; // z>0
-        const std::vector<byte4> f5{512*512, {255,255,  0,255}}; // z<0
-        env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {f0.data(), f1.data(), f2.data(), f3.data(), f4.data(), f5.data()});
-        //env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
+        // Create framebuffers to render to cubemap
+        render_to_rgba_unorm8 = dev->create_render_pass({{{rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}}}});
+        for(int i=0; i<6; ++i) env_cubemap_fb[i] = dev->create_framebuffer({{512,512}, render_to_rgba_unorm8, {{env_cubemap,i}}});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
@@ -296,8 +295,10 @@ public:
         for(auto shader : {skybox_vs, vs, skybox_fs_spheremap, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
         for(auto layout : {pipe_layout, skybox_pipe_layout}) dev->destroy_pipeline_layout(layout);
         for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
+        for(auto fb : env_cubemap_fb) dev->destroy_framebuffer(fb);
         for(auto image : {checkerboard, env_spheremap, env_cubemap}) dev->destroy_image(image);
         for(auto sampler : {nearest, spheremap_sampler}) dev->destroy_sampler(sampler);
+        dev->destroy_render_pass(render_to_rgba_unorm8);
         dev->destroy_render_pass(pass);
     }
 
@@ -336,9 +337,18 @@ public:
             .write(0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f))
             .write(1, uniform_buffer.write(per_view_uniforms));
 
-        // Draw objects to our framebuffer
         gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
-        cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()));
+
+        // Clear faces of cubemap
+        const float4 clear_colors[] {{1,0,0,1},{0,1,1,1},{0,1,0,1},{1,0,1,1},{0,0,1,1},{1,1,0,1}};
+        for(size_t i=0; i<6; ++i)
+        {
+            cmd.begin_render_pass(render_to_rgba_unorm8, env_cubemap_fb[i], {clear_colors[i]});
+            cmd.end_render_pass();
+        }
+
+        // Draw objects to our primary framebuffer
+        cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()), {{0,0,0,1},1.0f,0});
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
 
         // Draw skybox

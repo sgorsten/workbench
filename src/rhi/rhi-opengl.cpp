@@ -239,10 +239,10 @@ namespace rhi
             glCreateFramebuffers(1, &fb.framebuffer_object);
             for(size_t i=0; i<desc.color_attachments.size(); ++i) 
             {
-                glNamedFramebufferTexture(fb.framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), objects[desc.color_attachments[i]].texture_object, 0);
+                glNamedFramebufferTextureLayer(fb.framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), objects[desc.color_attachments[i].image].texture_object, 0, desc.color_attachments[i].layer);
                 draw_buffers.push_back(exactly(GL_COLOR_ATTACHMENT0+i));
             }
-            if(desc.depth_attachment) glNamedFramebufferTexture(fb.framebuffer_object, GL_DEPTH_ATTACHMENT, objects[*desc.depth_attachment].texture_object, 0);
+            if(desc.depth_attachment) glNamedFramebufferTextureLayer(fb.framebuffer_object, GL_DEPTH_ATTACHMENT, objects[desc.depth_attachment->image].texture_object, 0, desc.depth_attachment->layer);
             glNamedFramebufferDrawBuffers(fb.framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
             return handle;
         }
@@ -386,12 +386,15 @@ namespace rhi
                     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
                     glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
 
+                    glClearColor(c.clear.color[0], c.clear.color[1], c.clear.color[2], c.clear.color[3]);
+                    glClearDepthf(c.clear.depth);
+                    glClearStencil(c.clear.stencil);
+
                     // Clear render targets if specified by render pass
                     for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
                     {
                         if(std::holds_alternative<clear>(pass.desc.color_attachments[i].load_op))
                         {
-                            glClearColor(0,0,0,1);
                             glClear(GL_COLOR_BUFFER_BIT); // TODO: Use glClearTexImage(...) when we use multiple color attachments                            
                         }
                     }
@@ -399,8 +402,7 @@ namespace rhi
                     {
                         if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
                         {
-                            glClearDepthf(1.0f);
-                            glClear(GL_DEPTH_BUFFER_BIT);
+                            glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
                         }
                     }
                 },
@@ -409,6 +411,7 @@ namespace rhi
                     auto & p = objects[c.pipe];
                     glUseProgram(p.program_object);
                     p.bind_vertex_array(context);
+                    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
                     // Rasterizer state
                     switch(p.desc.front_face)
@@ -475,7 +478,7 @@ namespace rhi
         }
 
         command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }

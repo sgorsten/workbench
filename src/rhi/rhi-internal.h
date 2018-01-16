@@ -56,59 +56,59 @@ namespace rhi
 
     class descriptor_emulator
     {
-        struct sampled_image { rhi::sampler sampler; rhi::image image; };
+        struct sampled_image { sampler sampler; image image; };
 
-        struct descriptor_pool
+        struct emulated_descriptor_pool
         {
-            std::vector<rhi::buffer_range> buffer_bindings;
+            std::vector<buffer_range> buffer_bindings;
             std::vector<sampled_image> image_bindings;
-            std::vector<rhi::descriptor_set> sets;
+            std::vector<descriptor_set> sets;
             size_t used_sets=0;
         };
 
-        struct descriptor_set_layout
+        struct emulated_descriptor_set_layout
         {
-            std::vector<rhi::descriptor_binding> bindings;
+            std::vector<descriptor_binding> bindings;
             std::unordered_map<int, size_t> buffer_offsets;
             std::unordered_map<int, size_t> image_offsets;
             size_t num_buffers=0, num_images=0;
         };
 
-        struct descriptor_set
+        struct emulated_descriptor_set
         {
-            rhi::descriptor_pool pool;
-            rhi::descriptor_set_layout layout;
+            descriptor_pool pool;
+            descriptor_set_layout layout;
             size_t buffer_offset, image_offset;
         };
 
-        struct pipeline_layout
+        struct emulated_pipeline_layout
         {
-            struct set { rhi::descriptor_set_layout layout; size_t buffer_offset, image_offset; };
+            struct set { descriptor_set_layout layout; size_t buffer_offset, image_offset; };
             std::vector<set> sets;
             size_t num_buffers=0, num_images=0;
         };
 
         template<class T> struct traits;
-        template<> struct traits<rhi::descriptor_pool> { using type = descriptor_pool; };
-        template<> struct traits<rhi::descriptor_set_layout> { using type = descriptor_set_layout; };      
-        template<> struct traits<rhi::descriptor_set> { using type = descriptor_set; };
-        template<> struct traits<rhi::pipeline_layout> { using type = pipeline_layout; };
-        heterogeneous_object_set<traits, rhi::descriptor_pool, rhi::descriptor_set_layout, rhi::descriptor_set, rhi::pipeline_layout> objects;
+        template<> struct traits<descriptor_pool> { using type = emulated_descriptor_pool; };
+        template<> struct traits<descriptor_set_layout> { using type = emulated_descriptor_set_layout; };      
+        template<> struct traits<descriptor_set> { using type = emulated_descriptor_set; };
+        template<> struct traits<pipeline_layout> { using type = emulated_pipeline_layout; };
+        heterogeneous_object_set<traits, descriptor_pool, descriptor_set_layout, descriptor_set, pipeline_layout> objects;
     public:
-        size_t get_flat_buffer_binding(rhi::pipeline_layout layout, int set, int binding) const;
-        size_t get_flat_image_binding(rhi::pipeline_layout layout, int set, int binding) const;
+        size_t get_flat_buffer_binding(pipeline_layout layout, int set, int binding) const;
+        size_t get_flat_image_binding(pipeline_layout layout, int set, int binding) const;
 
-        rhi::descriptor_set_layout create_descriptor_set_layout(const std::vector<rhi::descriptor_binding> & bindings);
-        rhi::pipeline_layout create_pipeline_layout(const std::vector<rhi::descriptor_set_layout> & sets);
-        rhi::descriptor_pool create_descriptor_pool();
+        descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings);
+        pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets);
+        descriptor_pool create_descriptor_pool();
 
-        void reset_descriptor_pool(rhi::descriptor_pool pool);
-        rhi::descriptor_set alloc_descriptor_set(rhi::descriptor_pool pool, rhi::descriptor_set_layout layout);
-        void write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range);
-        void write_descriptor(rhi::descriptor_set set, int binding, rhi::sampler sampler, rhi::image image);
+        void reset_descriptor_pool(descriptor_pool pool);
+        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout);
+        void write_descriptor(descriptor_set set, int binding, buffer_range range);
+        void write_descriptor(descriptor_set set, int binding, sampler sampler, image image);
 
         template<class BindBufferFunction, class BindImageFunction>
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
+        void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
         {
             const auto & pipeline_layout = objects[layout];
             const auto & descriptor_set = objects[set];
@@ -125,37 +125,37 @@ namespace rhi
         }
 
         // TODO: Check for dependencies before wiping out
-        void destroy(rhi::descriptor_set_layout layout) { objects.destroy(layout); }
-        void destroy(rhi::pipeline_layout layout) { objects.destroy(layout); }
-        void destroy(rhi::descriptor_pool pool) { objects.destroy(pool); }
+        void destroy(descriptor_set_layout layout) { objects.destroy(layout); }
+        void destroy(pipeline_layout layout) { objects.destroy(layout); }
+        void destroy(descriptor_pool pool) { objects.destroy(pool); }
     };
 
-    struct begin_render_pass_command { rhi::render_pass pass; rhi::framebuffer framebuffer; };
-    struct bind_pipeline_command { rhi::pipeline pipe; };
-    struct bind_descriptor_set_command { rhi::pipeline_layout layout; int set_index; rhi::descriptor_set set; };
-    struct bind_vertex_buffer_command { int index; rhi::buffer_range range; };
-    struct bind_index_buffer_command { rhi::buffer_range range; };
+    struct begin_render_pass_command { render_pass pass; framebuffer framebuffer; clear_values clear; };
+    struct bind_pipeline_command { pipeline pipe; };
+    struct bind_descriptor_set_command { pipeline_layout layout; int set_index; descriptor_set set; };
+    struct bind_vertex_buffer_command { int index; buffer_range range; };
+    struct bind_index_buffer_command { buffer_range range; };
     struct draw_command { int first_vertex, vertex_count; };
     struct draw_indexed_command { int first_index, index_count; };
     struct end_render_pass_command {};
     class command_emulator
     {
         using command = std::variant<begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
-        struct command_buffer { std::vector<command> commands; };
-        object_set<rhi::command_buffer, command_buffer> buffers;
+        struct emulated_command_buffer { std::vector<command> commands; };
+        object_set<command_buffer, emulated_command_buffer> buffers;
     public:
-        rhi::command_buffer create_command_buffer() { return std::get<rhi::command_buffer>(buffers.create()); }
-        void destroy_command_buffer(rhi::command_buffer cmd) { buffers.destroy(cmd); }
+        command_buffer create_command_buffer() { return std::get<command_buffer>(buffers.create()); }
+        void destroy_command_buffer(command_buffer cmd) { buffers.destroy(cmd); }
 
-        void begin_render_pass(rhi::command_buffer cmd, rhi::render_pass pass, rhi::framebuffer framebuffer) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer}); }
-        void bind_pipeline(rhi::command_buffer cmd, rhi::pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
-        void bind_descriptor_set(rhi::command_buffer cmd, rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) { buffers[cmd].commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }
-        void bind_vertex_buffer(rhi::command_buffer cmd, int index, rhi::buffer_range range) { buffers[cmd].commands.push_back(bind_vertex_buffer_command{index, range}); }
-        void bind_index_buffer(rhi::command_buffer cmd, rhi::buffer_range range) { buffers[cmd].commands.push_back(bind_index_buffer_command{range}); }
-        void draw(rhi::command_buffer cmd, int first_vertex, int vertex_count) { buffers[cmd].commands.push_back(draw_command{first_vertex, vertex_count}); }
-        void draw_indexed(rhi::command_buffer cmd, int first_index, int index_count) { buffers[cmd].commands.push_back(draw_indexed_command{first_index, index_count}); }
-        void end_render_pass(rhi::command_buffer cmd) { buffers[cmd].commands.push_back(end_render_pass_command{}); }
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer, clear}); }
+        void bind_pipeline(command_buffer cmd, pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
+        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) { buffers[cmd].commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }
+        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) { buffers[cmd].commands.push_back(bind_vertex_buffer_command{index, range}); }
+        void bind_index_buffer(command_buffer cmd, buffer_range range) { buffers[cmd].commands.push_back(bind_index_buffer_command{range}); }
+        void draw(command_buffer cmd, int first_vertex, int vertex_count) { buffers[cmd].commands.push_back(draw_command{first_vertex, vertex_count}); }
+        void draw_indexed(command_buffer cmd, int first_index, int index_count) { buffers[cmd].commands.push_back(draw_indexed_command{first_index, index_count}); }
+        void end_render_pass(command_buffer cmd) { buffers[cmd].commands.push_back(end_render_pass_command{}); }
 
-        template<class ExecuteCommandFunction> void execute(rhi::command_buffer cmd, ExecuteCommandFunction execute_command) const { for(auto & command : buffers[cmd].commands) std::visit(execute_command, command); }
+        template<class ExecuteCommandFunction> void execute(command_buffer cmd, ExecuteCommandFunction execute_command) const { for(auto & command : buffers[cmd].commands) std::visit(execute_command, command); }
     };
 }

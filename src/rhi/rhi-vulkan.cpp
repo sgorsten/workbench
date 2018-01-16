@@ -40,7 +40,8 @@ namespace rhi
     {
         VkDeviceMemory device_memory;
         VkImage image_object;
-        VkImageView image_view;        
+        VkImageView image_view;
+        std::vector<VkImageView> layer_views;
     };
 
     struct vk_shader
@@ -53,6 +54,13 @@ namespace rhi
     {
         pipeline_desc desc;
         VkPipeline pipeline_object;
+    };
+
+    struct vk_render_pass
+    {
+        VkRenderPass pass_object;
+        size_t num_color_clears;
+        bool has_depth_clear;
     };
 
     struct vk_framebuffer
@@ -99,7 +107,7 @@ namespace rhi
         template<> struct traits<buffer> { using type = vk_buffer; };
         template<> struct traits<image> { using type = vk_image; };
         template<> struct traits<sampler> { using type = VkSampler; };
-        template<> struct traits<render_pass> { using type = VkRenderPass; };
+        template<> struct traits<render_pass> { using type = vk_render_pass; };
         template<> struct traits<framebuffer> { using type = vk_framebuffer; };
         template<> struct traits<descriptor_pool> { using type = VkDescriptorPool; };
         template<> struct traits<descriptor_set_layout> { using type = VkDescriptorSetLayout; };
@@ -171,7 +179,7 @@ namespace rhi
 
         // rendering
         command_buffer start_command_buffer() override;
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer) override;
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override;
         void bind_pipeline(command_buffer cmd, pipeline pipe) override;
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override;
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override;
@@ -572,6 +580,7 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
         }
     }
 
+    // Create a view of the overall object
     VkImageViewCreateInfo image_view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     image_view_info.image = im.image_object;
     image_view_info.viewType = view_type;
@@ -583,11 +592,28 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
     image_view_info.subresourceRange.baseArrayLayer = 0;
     image_view_info.subresourceRange.layerCount = image_info.arrayLayers;
     check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &im.image_view));
+
+    // Create views of individual layers (useful for render targets)
+    im.layer_views.resize(image_info.arrayLayers);
+    switch(view_type)
+    {
+    case VK_IMAGE_VIEW_TYPE_CUBE: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    case VK_IMAGE_VIEW_TYPE_1D_ARRAY: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_1D; break;
+    case VK_IMAGE_VIEW_TYPE_2D_ARRAY: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    }
+    image_view_info.subresourceRange.layerCount = 1;
+    for(size_t i=0; i<im.layer_views.size(); ++i)
+    {
+        image_view_info.subresourceRange.baseArrayLayer = exactly(i);
+        check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &im.layer_views[i]));
+    }
     return handle;
 }
 
 void vk_device::destroy_image(image image)
 {
+    for(auto view : objects[image].layer_views) vkDestroyImageView(dev, view, nullptr);
     vkDestroyImageView(dev, objects[image].image_view, nullptr);
     vkDestroyImage(dev, objects[image].image_object, nullptr);
     vkFreeMemory(dev, objects[image].device_memory, nullptr);
@@ -677,6 +703,7 @@ static VkAttachmentDescription make_attachment_description(const rhi::attachment
 }
 render_pass vk_device::create_render_pass(const render_pass_desc & desc) 
 {
+    auto [handle, pass] = objects.create<render_pass>();
     std::vector<VkAttachmentDescription> attachments;
     std::vector<VkAttachmentReference> color_refs;
     for(auto & color_attachment : desc.color_attachments)
@@ -703,13 +730,14 @@ render_pass vk_device::create_render_pass(const render_pass_desc & desc)
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass_desc;
 
-    auto [handle, pass] = objects.create<render_pass>();
-    check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass));
+    check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass.pass_object));
+    for(size_t i=0; i<desc.color_attachments.size(); ++i) if(attachments[i].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) ++pass.num_color_clears;
+    pass.has_depth_clear = desc.depth_attachment && attachments.back().loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
     return handle;
 }
 void vk_device::destroy_render_pass(render_pass pass)
 { 
-    vkDestroyRenderPass(dev, objects[pass], nullptr);
+    vkDestroyRenderPass(dev, objects[pass].pass_object, nullptr);
     objects.destroy(pass); 
 }
 
@@ -719,11 +747,11 @@ framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
     fb = {desc.dimensions, {VK_NULL_HANDLE}, 0};
 
     std::vector<VkImageView> attachments;
-    for(auto attachment : desc.color_attachments) attachments.push_back(objects[attachment].image_view);
-    if(desc.depth_attachment) attachments.push_back(objects[*desc.depth_attachment].image_view);
+    for(auto attachment : desc.color_attachments) attachments.push_back(objects[attachment.image].layer_views[attachment.layer]);
+    if(desc.depth_attachment) attachments.push_back(objects[desc.depth_attachment->image].layer_views[desc.depth_attachment->layer]);
     
     VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    framebuffer_info.renderPass = objects[desc.pass];
+    framebuffer_info.renderPass = objects[desc.pass].pass_object;
     framebuffer_info.attachmentCount = exactly(attachments.size());
     framebuffer_info.pAttachments = attachments.data();
     framebuffer_info.width = exactly(desc.dimensions.x);
@@ -980,7 +1008,7 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = objects[desc.layout];
-    pipelineInfo.renderPass = objects[desc.pass];
+    pipelineInfo.renderPass = objects[desc.pass].pass_object;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
     pipelineInfo.basePipelineIndex = -1; // Optional
@@ -1071,7 +1099,7 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
     {
         std::vector<VkImageView> attachments {win.swapchain_image_views[i], objects[win.depth_image].image_view};
         VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        framebuffer_info.renderPass = objects[pass];
+        framebuffer_info.renderPass = objects[pass].pass_object;
         framebuffer_info.attachmentCount = exactly(attachments.size());
         framebuffer_info.pAttachments = attachments.data();
         framebuffer_info.width = dimensions.x;
@@ -1111,17 +1139,21 @@ command_buffer vk_device::start_command_buffer()
     return handle;
 }
 
-void vk_device::begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer)
+void vk_device::begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear)
 {
-    auto & fb = objects[framebuffer];
+    VkClearValue clear_color, clear_depth_stencil;
+    clear_color.color = {clear.color[0], clear.color[1], clear.color[2], clear.color[3]};
+    clear_depth_stencil.depthStencil = {clear.depth, clear.stencil};
+    std::vector<VkClearValue> clear_values {objects[pass].num_color_clears, clear_color};
+    if(objects[pass].has_depth_clear) clear_values.push_back(clear_depth_stencil);
 
-    VkClearValue clear_values[] {{0, 0, 0, 1}, {1.0f, 0}};
+    auto & fb = objects[framebuffer];
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass_begin_info.renderPass = objects[pass];
+    pass_begin_info.renderPass = objects[pass].pass_object;
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
     pass_begin_info.renderArea = {{0,0},{exactly(fb.dims.x),exactly(fb.dims.y)}};
     pass_begin_info.clearValueCount = exactly(countof(clear_values));
-    pass_begin_info.pClearValues = clear_values;
+    pass_begin_info.pClearValues = clear_values.data();
 
     vkCmdBeginRenderPass(objects[cmd], &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
     const VkViewport viewports[] {{0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1}};

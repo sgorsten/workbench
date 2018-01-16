@@ -83,7 +83,7 @@ namespace gfx
         rhi::device & dev;
         rhi::command_buffer cmd;
 
-        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer) { dev.begin_render_pass(cmd, pass, framebuffer); }
+        void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer, const rhi::clear_values & clear) { dev.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(rhi::pipeline pipe) { dev.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) { dev.bind_descriptor_set(cmd, layout, set_index, set); }
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, descriptor_set set) { dev.bind_descriptor_set(cmd, layout, set_index, set.set); }
