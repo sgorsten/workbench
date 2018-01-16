@@ -146,11 +146,34 @@ namespace rhi
             auto [handle, im] = objects.create<image>();
             switch(desc.shape)
             {
+            case rhi::image_shape::_1d:
+                glCreateTextures(GL_TEXTURE_1D, 1, &im.texture_object);
+                glTextureStorage1D(im.texture_object, desc.mip_levels, glf.internal_format, desc.dimensions.x);
+                if(initial_data.size() == 1) glTextureSubImage1D(im.texture_object, 0, 0, desc.dimensions.x, glf.format, glf.type, initial_data[0]);
+                break;
             case rhi::image_shape::_2d:
                 glCreateTextures(GL_TEXTURE_2D, 1, &im.texture_object);
                 glTextureStorage2D(im.texture_object, desc.mip_levels, glf.internal_format, desc.dimensions.x, desc.dimensions.y);
                 if(initial_data.size() == 1) glTextureSubImage2D(im.texture_object, 0, 0, 0, desc.dimensions.x, desc.dimensions.y, glf.format, glf.type, initial_data[0]);
                 break;
+            case rhi::image_shape::_3d:
+                glCreateTextures(GL_TEXTURE_3D, 1, &im.texture_object);
+                glTextureStorage3D(im.texture_object, desc.mip_levels, glf.internal_format, desc.dimensions.x, desc.dimensions.y, desc.dimensions.z);
+                if(initial_data.size() == 1) glTextureSubImage3D(im.texture_object, 0, 0, 0, 0, desc.dimensions.x, desc.dimensions.y, desc.dimensions.z, glf.format, glf.type, initial_data[0]);
+                break;
+            case rhi::image_shape::cube:
+                glCreateTextures(GL_TEXTURE_CUBE_MAP, 1, &im.texture_object);
+                glTextureStorage2D(im.texture_object, desc.mip_levels, glf.internal_format, desc.dimensions.x, desc.dimensions.y);
+                if(initial_data.size() == 6)
+                {
+                    GLuint view;
+                    glGenTextures(1, &view);
+                    glTextureView(view, GL_TEXTURE_2D_ARRAY, im.texture_object, glf.internal_format, 0, 1, 0, 6);
+                    for(size_t i=0; i<6; ++i) glTextureSubImage3D(view, 0, 0, 0, exactly(i), desc.dimensions.x, desc.dimensions.y, 1, glf.format, glf.type, initial_data[i]);
+                    glDeleteTextures(1, &view);
+                }
+                break;
+            default: fail_fast();
             }
             return handle;
         }
@@ -393,8 +416,12 @@ namespace rhi
                     case rhi::front_face::counter_clockwise: glFrontFace(GL_CCW); break;
                     case rhi::front_face::clockwise: glFrontFace(GL_CW); break;
                     }
-                    glEnable(GL_CULL_FACE);
-                    glCullFace(GL_BACK);
+                    switch(p.desc.cull_mode)
+                    {
+                    case rhi::cull_mode::none: glDisable(GL_CULL_FACE); break;
+                    case rhi::cull_mode::back: glEnable(GL_CULL_FACE); glCullFace(GL_BACK); break;
+                    case rhi::cull_mode::front: glEnable(GL_CULL_FACE); glCullFace(GL_FRONT); break;
+                    }                   
 
                     // Depth stencil state
                     (p.desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);

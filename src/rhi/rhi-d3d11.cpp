@@ -172,29 +172,49 @@ namespace rhi
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
-            if(desc.shape != rhi::image_shape::_2d) throw std::logic_error("shape not supported");
-            D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), 1, get_dx_format(desc.format), {1,0}, D3D11_USAGE_DEFAULT};
-            if(desc.flags & rhi::image_flag::sampled_image_bit) tex_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
-            if(desc.flags & rhi::image_flag::color_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-            if(desc.flags & rhi::image_flag::depth_attachment_bit) tex_desc.BindFlags |= D3D11_BIND_DEPTH_STENCIL;
+            UINT array_size = 1, bind_flags = 0, misc_flags = 0;
+            if(desc.flags & rhi::image_flag::sampled_image_bit) bind_flags |= D3D11_BIND_SHADER_RESOURCE;
+            if(desc.flags & rhi::image_flag::color_attachment_bit) bind_flags |= D3D11_BIND_RENDER_TARGET;
+            if(desc.flags & rhi::image_flag::depth_attachment_bit) bind_flags |= D3D11_BIND_DEPTH_STENCIL;
             if(desc.flags & rhi::image_flag::generate_mips_bit)
             {
-                tex_desc.BindFlags |= (D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET);
-                tex_desc.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
+                bind_flags |= (D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET);
+                misc_flags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
             }
-            ID3D11Texture2D * tex;
-            if(initial_data.empty()) check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, nullptr, &tex));
-            else
-            {              
-                const D3D11_SUBRESOURCE_DATA data {initial_data[0], exactly(get_pixel_size(desc.format)*desc.dimensions.x)};
-                check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, &data, &tex));
+            if(desc.shape == rhi::image_shape::cube)
+            {
+                array_size *= 6;
+                misc_flags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
             }
+            std::vector<D3D11_SUBRESOURCE_DATA> data;
+            const size_t row_pitch = get_pixel_size(desc.format)*desc.dimensions.x, slice_pitch = row_pitch*desc.dimensions.y;
+            for(auto d : initial_data) data.push_back({d, exactly(row_pitch), exactly(slice_pitch)});
 
             auto [handle, im] = objects.create<image>();
-            im.resource = tex;
+            if(desc.shape == rhi::image_shape::_1d)
+            {
+                const D3D11_TEXTURE1D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
+                ID3D11Texture1D * tex;
+                check("ID3D11Device::CreateTexture1D", dev->CreateTexture1D(&tex_desc, data.empty() ? nullptr : data.data(), &tex));
+                im.resource = tex;
+            }
+            else if(desc.shape == rhi::image_shape::_3d)
+            {
+                const D3D11_TEXTURE3D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.dimensions.z), exactly(desc.mip_levels), get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
+                ID3D11Texture3D * tex;
+                check("ID3D11Device::CreateTexture2D", dev->CreateTexture3D(&tex_desc, data.empty() ? nullptr : data.data(), &tex));
+                im.resource = tex;
+            }
+            else // 2D or cube textures
+            {
+                const D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), {1,0}, D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
+                ID3D11Texture2D * tex;
+                check("ID3D11Device::CreateTexture2D", dev->CreateTexture2D(&tex_desc, data.empty() ? nullptr : data.data(), &tex));
+                im.resource = tex;
+            } 
             if(desc.flags & rhi::image_flag::sampled_image_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateShaderResourceView(im.resource, nullptr, &im.shader_resource_view));
-            if(desc.flags & rhi::image_flag::color_attachment_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateRenderTargetView(im.resource, nullptr, &im.render_target_view));
-            if(desc.flags & rhi::image_flag::depth_attachment_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateDepthStencilView(im.resource, nullptr, &im.depth_stencil_view));
+            if(desc.flags & rhi::image_flag::color_attachment_bit) check("ID3D11Device::CreateRenderTargetView", dev->CreateRenderTargetView(im.resource, nullptr, &im.render_target_view));
+            if(desc.flags & rhi::image_flag::depth_attachment_bit) check("ID3D11Device::CreateDepthStencilView", dev->CreateDepthStencilView(im.resource, nullptr, &im.depth_stencil_view));
             if(desc.flags & rhi::image_flag::generate_mips_bit) ctx->GenerateMips(im.shader_resource_view);
             return handle;
         }
@@ -371,7 +391,12 @@ namespace rhi
 
             D3D11_RASTERIZER_DESC rasterizer_desc {};
             rasterizer_desc.FillMode = D3D11_FILL_SOLID;
-            rasterizer_desc.CullMode = D3D11_CULL_BACK;
+            switch(desc.cull_mode)
+            {
+            case rhi::cull_mode::none: rasterizer_desc.CullMode = D3D11_CULL_NONE; break;
+            case rhi::cull_mode::back: rasterizer_desc.CullMode = D3D11_CULL_BACK; break;
+            case rhi::cull_mode::front: rasterizer_desc.CullMode = D3D11_CULL_FRONT; break;
+            }
             rasterizer_desc.FrontCounterClockwise = desc.front_face == rhi::front_face::counter_clockwise;
             rasterizer_desc.DepthClipEnable = TRUE;
             check("ID3D11Device::CreateRasterizerState", dev->CreateRasterizerState(&rasterizer_desc, &pipe.rasterizer_state));

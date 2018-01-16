@@ -501,7 +501,7 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
         image_info.arrayLayers *= 6;
         image_info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         break;
-    default: throw std::logic_error("bad gfx::image_shape");
+    default: fail_fast();
     }
 
     image_info.format = get_vk_format(desc.format);
@@ -883,7 +883,12 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    switch(desc.cull_mode)
+    {
+    case rhi::cull_mode::none: rasterizer.cullMode = VK_CULL_MODE_NONE; break;
+    case rhi::cull_mode::back: rasterizer.cullMode = VK_CULL_MODE_BACK_BIT; break;
+    case rhi::cull_mode::front: rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT; break;
+    }
     switch(desc.front_face)
     {
     case rhi::front_face::counter_clockwise: rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; break;

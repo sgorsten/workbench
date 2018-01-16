@@ -149,6 +149,7 @@ namespace rhi
     enum class primitive_topology { points, lines, triangles };
     enum class compare_op { never, less, equal, less_or_equal, greater, not_equal, greater_or_equal, always };
     enum class front_face { counter_clockwise, clockwise };
+    enum class cull_mode { none, back, front };
     struct pipeline_desc
     {
         render_pass pass;
@@ -156,7 +157,8 @@ namespace rhi
         std::vector<vertex_binding_desc> input; // input state
         std::vector<shader> stages;             // programmable stages
         primitive_topology topology;            // rasterizer state
-        front_face front_face;                  
+        front_face front_face;       
+        cull_mode cull_mode;
         std::optional<compare_op> depth_test;   // depth state
         bool depth_write;
     };

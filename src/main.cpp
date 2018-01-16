@@ -106,7 +106,7 @@ struct common_assets
     coord_system game_coords;
     mesh basis_mesh, ground_mesh, box_mesh;
     shader_module vs, fs, fs_unlit;
-    shader_module skybox_vs, skybox_fs_spheremap;
+    shader_module skybox_vs, skybox_fs_spheremap, skybox_fs_cubemap;
     image env_spheremap;
 
     common_assets() : game_coords {coord_axis::right, coord_axis::down, coord_axis::forward} //{coord_axis::right, coord_axis::forward, coord_axis::up}
@@ -187,6 +187,15 @@ struct common_assets
                 f_color = texture(u_texture, compute_spherical_texcoords(normalize(direction)));
             }
         )");
+        skybox_fs_cubemap = compiler.compile(shader_stage::fragment, R"(#version 450
+            layout(set=1,binding=0) uniform samplerCube u_texture;
+            layout(location=0) in vec3 direction;
+            layout(location=0) out vec4 f_color;
+            void main()
+            {
+                f_color = texture(u_texture, normalize(direction));
+            }
+        )");
 
         //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
         //for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
@@ -210,12 +219,13 @@ class device_session
     rhi::pipeline_layout pipe_layout, skybox_pipe_layout;
 
     rhi::render_pass pass;
-    rhi::shader vs, fs, fs_unlit, skybox_vs, skybox_fs_spheremap;
-    rhi::pipeline wire_pipe, solid_pipe, skybox_pipe;
+    rhi::shader vs, fs, fs_unlit, skybox_vs, skybox_fs_spheremap, skybox_fs_cubemap;
+    rhi::pipeline wire_pipe, solid_pipe, skybox_pipe_spheremap, skybox_pipe_cubemap;
 
     rhi::sampler nearest, spheremap_sampler;
     rhi::image checkerboard;
-    rhi::image env_tex;
+    rhi::image env_spheremap;
+    rhi::image env_cubemap;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
@@ -251,17 +261,28 @@ public:
         fs_unlit = dev->create_shader(assets.fs_unlit);
         skybox_vs = dev->create_shader(assets.skybox_vs);
         skybox_fs_spheremap = dev->create_shader(assets.skybox_fs_spheremap);
+        skybox_fs_cubemap = dev->create_shader(assets.skybox_fs_cubemap);
 
-        wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::compare_op::less, true});
-        solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::compare_op::less, true});
-        skybox_pipe = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_spheremap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::compare_op::always, false});
+        wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
+        solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
+        skybox_pipe_spheremap = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_spheremap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
+        skybox_pipe_cubemap = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
         spheremap_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::repeat, rhi::address_mode::clamp_to_edge});
 
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
-        env_tex = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
+        env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
+
+        const std::vector<byte4> f0{512*512, {255,  0,  0,255}}; // x>0
+        const std::vector<byte4> f1{512*512, {  0,255,255,255}}; // x<0
+        const std::vector<byte4> f2{512*512, {  0,255,  0,255}}; // y>0
+        const std::vector<byte4> f3{512*512, {255,  0,255,255}}; // y<0
+        const std::vector<byte4> f4{512*512, {  0,  0,255,255}}; // z>0
+        const std::vector<byte4> f5{512*512, {255,255,  0,255}}; // z<0
+        env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {f0.data(), f1.data(), f2.data(), f3.data(), f4.data(), f5.data()});
+        //env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
@@ -271,15 +292,13 @@ public:
     ~device_session()
     {
         gwindow.reset();
-        for(auto pipeline : {skybox_pipe, solid_pipe, wire_pipe}) dev->destroy_pipeline(pipeline);
-        for(auto shader : {skybox_vs, vs, skybox_fs_spheremap, fs, fs_unlit}) dev->destroy_shader(shader);
+        for(auto pipeline : {skybox_pipe_spheremap, skybox_pipe_cubemap, solid_pipe, wire_pipe}) dev->destroy_pipeline(pipeline);
+        for(auto shader : {skybox_vs, vs, skybox_fs_spheremap, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
         for(auto layout : {pipe_layout, skybox_pipe_layout}) dev->destroy_pipeline_layout(layout);
         for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
+        for(auto image : {checkerboard, env_spheremap, env_cubemap}) dev->destroy_image(image);
+        for(auto sampler : {nearest, spheremap_sampler}) dev->destroy_sampler(sampler);
         dev->destroy_render_pass(pass);
-        dev->destroy_image(env_tex);
-        dev->destroy_image(checkerboard);
-        dev->destroy_sampler(nearest);
-        dev->destroy_sampler(spheremap_sampler);
     }
 
     bool update(camera & cam, float timestep)
@@ -322,9 +341,9 @@ public:
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()));
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
 
-        // Draw skybax
-        cmd.bind_pipeline(skybox_pipe);
-        cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_tex));
+        // Draw skybox
+        cmd.bind_pipeline(skybox_pipe_cubemap); //skybox_pipe_spheremap);
+        cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_cubemap)); //env_spheremap));
         cmd.bind_vertex_buffer(0, box_vertex_buffer);
         cmd.bind_index_buffer(box_index_buffer);
         cmd.draw_indexed(0, 36);
