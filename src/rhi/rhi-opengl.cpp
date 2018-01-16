@@ -138,7 +138,7 @@ namespace rhi
             enable_debug_callback(hidden_window);
         }
         
-        device_info get_info() const override { return {linalg::neg_one_to_one}; }
+        device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {

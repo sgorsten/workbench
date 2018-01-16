@@ -129,7 +129,7 @@ namespace rhi
         void end_transient(VkCommandBuffer command_buffer);
 
         // info
-        device_info get_info() const override { return {linalg::zero_to_one}; }
+        device_info get_info() const override { return {linalg::zero_to_one, false}; }
 
         // resources
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override;

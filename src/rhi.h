@@ -164,7 +164,7 @@ namespace rhi
         bool depth_write;
     };
 
-    struct device_info { linalg::z_range z_range; };
+    struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
     struct buffer_range { buffer buffer; size_t offset, size; };
     struct clear_values { float4 color; float depth; uint8_t stencil; };
 

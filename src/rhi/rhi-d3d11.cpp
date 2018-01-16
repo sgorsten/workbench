@@ -131,7 +131,7 @@ namespace rhi
             check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory));
         }
 
-        device_info get_info() const override { return {linalg::zero_to_one}; }
+        device_info get_info() const override { return {linalg::zero_to_one, true}; }
 
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
@@ -375,7 +375,8 @@ namespace rhi
                 options.shader_model = 50;
                 compiler.set_options(options);
                 const auto hlsl = compiler.compile();
-                //debug_callback(hlsl.c_str());
+                debug_callback(hlsl.c_str());
+                debug_callback("");
 
                 // Compile HLSL and create shader stages and input layout
                 ID3DBlob * shader_blob, * error_blob;
