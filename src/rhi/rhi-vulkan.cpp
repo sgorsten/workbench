@@ -129,7 +129,7 @@ namespace rhi
         void end_transient(VkCommandBuffer command_buffer);
 
         // info
-        device_info get_info() const override { return {{coord_axis::right, coord_axis::down, coord_axis::forward}, linalg::zero_to_one}; }
+        device_info get_info() const override { return {linalg::zero_to_one}; }
 
         // resources
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override;
@@ -159,6 +159,7 @@ namespace rhi
         void destroy_render_pass(render_pass pass) override;
 
         framebuffer create_framebuffer(const framebuffer_desc & desc) override;
+        coord_system get_ndc_coords(framebuffer framebuffer) override { return {coord_axis::right, coord_axis::down, coord_axis::forward}; }
         void destroy_framebuffer(framebuffer framebuffer) override;
 
         // pipelines

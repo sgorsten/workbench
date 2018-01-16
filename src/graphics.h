@@ -42,7 +42,7 @@ namespace gfx
         char * mapped;
         size_t size, used;
     public:
-        dynamic_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : dev{dev}, buffer{dev->create_buffer({size, usage, true}, nullptr)}, mapped{dev->get_mapped_memory(buffer)}, size{size} {}
+        dynamic_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : dev{dev}, buffer{dev->create_buffer({size, usage, true}, nullptr)}, mapped{dev->get_mapped_memory(buffer)}, size{size}, used{0} {}
         ~dynamic_buffer() { dev->destroy_buffer(buffer); }
 
         void reset() { used = 0; }

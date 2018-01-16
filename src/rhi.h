@@ -164,7 +164,7 @@ namespace rhi
         bool depth_write;
     };
 
-    struct device_info { coord_system ndc_coords; linalg::z_range z_range; };
+    struct device_info { linalg::z_range z_range; };
     struct buffer_range { buffer buffer; size_t offset, size; };
     struct clear_values { float4 color; float depth; uint8_t stencil; };
 
@@ -213,6 +213,7 @@ namespace rhi
         virtual void destroy_render_pass(render_pass pass) = 0;
 
         virtual framebuffer create_framebuffer(const framebuffer_desc & desc) = 0;
+        virtual coord_system get_ndc_coords(framebuffer framebuffer) = 0;
         virtual void destroy_framebuffer(framebuffer framebuffer) = 0;
 
         ///////////////

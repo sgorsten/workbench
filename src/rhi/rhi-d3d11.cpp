@@ -115,8 +115,6 @@ namespace rhi
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
-        d3d_pipeline * current_pipeline;   
-
         d3d_device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
         {
             const D3D_FEATURE_LEVEL feature_levels[] {D3D_FEATURE_LEVEL_11_1};
@@ -133,7 +131,7 @@ namespace rhi
             check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory));
         }
 
-        device_info get_info() const override { return {{coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::zero_to_one}; }
+        device_info get_info() const override { return {linalg::zero_to_one}; }
 
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
@@ -289,6 +287,7 @@ namespace rhi
             if(desc.depth_attachment) fb.depth_stencil_view = objects[desc.depth_attachment->image].depth_stencil_views[desc.depth_attachment->layer];
             return handle;
         }
+        coord_system get_ndc_coords(framebuffer framebuffer) override { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
         void destroy_framebuffer(framebuffer framebuffer) override { objects.destroy(framebuffer); }
 
         window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
@@ -444,12 +443,15 @@ namespace rhi
         
         void submit_command_buffer(command_buffer cmd)
         {
-            ctx->ClearState();
+            d3d_pipeline * current_pipeline = 0;
             cmd_emulator.execute(cmd, overload(
-                [this](const begin_render_pass_command & c)
+                [this,&current_pipeline](const begin_render_pass_command & c)
                 {
                     auto & pass = objects[c.pass];
                     auto & fb = objects[c.framebuffer];
+
+                    current_pipeline = nullptr;
+                    ctx->ClearState();
 
                     // Clear render targets if specified by render pass
                     for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
@@ -463,7 +465,7 @@ namespace rhi
                     {
                         if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
                         {
-                            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH, c.clear.depth, c.clear.stencil);
+                            ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH|D3D11_CLEAR_DEPTH, c.clear.depth, c.clear.stencil);
                         }
                     }
 
@@ -472,20 +474,20 @@ namespace rhi
                     D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
                     ctx->RSSetViewports(1, &vp);
                 },
-                [this](const bind_pipeline_command & c)
+                [this,&current_pipeline](const bind_pipeline_command & c)
                 {
                     current_pipeline = &objects[c.pipe];
                     ctx->IASetInputLayout(current_pipeline->layout);
-                    ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
-                    ctx->RSSetState(current_pipeline->rasterizer_state);
-                    ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
-                    ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, 0);
                     switch(current_pipeline->desc.topology)
                     {
                     case primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
                     case primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
                     case primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
                     }
+                    ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
+                    ctx->RSSetState(current_pipeline->rasterizer_state);
+                    ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
+                    ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, 0);
                 },
                 [this](const bind_descriptor_set_command & c)
                 {
@@ -502,7 +504,7 @@ namespace rhi
                         ctx->PSSetShaderResources(exactly(index), 1, &objects[image].shader_resource_view);
                     });
                 },
-                [this](const bind_vertex_buffer_command & c)
+                [this,&current_pipeline](const bind_vertex_buffer_command & c)
                 {
                     for(auto & buf : current_pipeline->desc.input)
                     {

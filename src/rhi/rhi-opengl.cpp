@@ -138,7 +138,7 @@ namespace rhi
             enable_debug_callback(hidden_window);
         }
         
-        device_info get_info() const override { return {{coord_axis::right, coord_axis::up, coord_axis::forward}, linalg::neg_one_to_one}; }
+        device_info get_info() const override { return {linalg::neg_one_to_one}; }
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
@@ -246,6 +246,7 @@ namespace rhi
             glNamedFramebufferDrawBuffers(fb.framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
             return handle;
         }
+        coord_system get_ndc_coords(framebuffer framebuffer) override { return {coord_axis::right, objects[framebuffer].framebuffer_object ? coord_axis::down : coord_axis::up, coord_axis::forward}; }
         void destroy_framebuffer(framebuffer framebuffer) override { objects.destroy(framebuffer); }
 
         descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return desc_emulator.create_descriptor_set_layout(bindings); }

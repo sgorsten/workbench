@@ -109,7 +109,7 @@ struct common_assets
     shader_module skybox_vs, skybox_fs_spheremap, skybox_fs_cubemap;
     image env_spheremap;
 
-    common_assets() : game_coords {coord_axis::right, coord_axis::down, coord_axis::forward} //{coord_axis::right, coord_axis::forward, coord_axis::up}
+    common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
         env_spheremap = load_image_hdr("../../assets/monument-valley.hdr");
 
@@ -228,13 +228,46 @@ class device_session
     rhi::image env_cubemap;
 
     rhi::render_pass render_to_rgba_unorm8;
-    rhi::framebuffer env_cubemap_fb[6];
+    
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
+
+    template<class F> void render_to_cubemap(rhi::image target_cube_map, const coord_system & preferred_coords, const int2 & dimensions, rhi::render_pass render_pass, F bind_face_matrix)
+    {
+        rhi::framebuffer face_framebuffers[6];
+        for(int i=0; i<6; ++i) face_framebuffers[i] = dev->create_framebuffer({dimensions, render_pass, {{target_cube_map,i}}});
+
+        desc_pool.reset();
+        uniform_buffer.reset();
+        gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
+        const float4x4 proj_matrix {{1,0,0,0}, {0,1,0,0}, {0,0,1,1}, {0,0,0,0}};
+        const coord_system face_coords[]
+        {
+            {coord_axis::forward, coord_axis::up, coord_axis::left},
+            {coord_axis::back, coord_axis::up, coord_axis::right},
+            {coord_axis::right, coord_axis::forward, coord_axis::down},
+            {coord_axis::right, coord_axis::back, coord_axis::up},
+            {coord_axis::right, coord_axis::up, coord_axis::forward},
+            {coord_axis::left, coord_axis::up, coord_axis::back},
+        };
+        for(int i=0; i<6; ++i)
+        {
+            const float4x4 view_proj_matrix = mul(proj_matrix, make_transform_4x4(face_coords[i], dev->get_ndc_coords(face_framebuffers[i])), make_transform_4x4(coord_system{coord_axis::right, coord_axis::down, coord_axis::forward}, preferred_coords));
+            cmd.begin_render_pass(render_to_rgba_unorm8, face_framebuffers[i], {{0,0,0,0},1,0});
+            bind_face_matrix(cmd, view_proj_matrix);
+            cmd.bind_vertex_buffer(0, box_vertex_buffer);
+            cmd.bind_index_buffer(box_index_buffer);
+            cmd.draw_indexed(0, 36);
+            cmd.end_render_pass();
+        }
+        dev->submit_and_wait(cmd.cmd);
+
+        for(auto fb : face_framebuffers) dev->destroy_framebuffer(fb);
+    }
 public:
     device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) : 
-        dev{dev}, info{dev->get_info()}, desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 16*1024},
+        dev{dev}, info{dev->get_info()}, desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
         basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
         ground_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
         box_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
@@ -259,6 +292,8 @@ public:
         pass_desc.color_attachments.push_back({rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::present_src}});
         pass_desc.depth_attachment = {rhi::image_format::depth_float32, rhi::clear{}, rhi::dont_care{}};
         pass = dev->create_render_pass(pass_desc);
+        render_to_rgba_unorm8 = dev->create_render_pass({{{rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}}}});
+
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
         fs_unlit = dev->create_shader(assets.fs_unlit);
@@ -268,7 +303,7 @@ public:
 
         wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
         solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
-        skybox_pipe_spheremap = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_spheremap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
+        skybox_pipe_spheremap = dev->create_pipeline({render_to_rgba_unorm8, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_spheremap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
         skybox_pipe_cubemap = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
@@ -279,19 +314,16 @@ public:
         env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
         env_cubemap = dev->create_image({rhi::image_shape::cube, {512,512,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
 
-        // Create framebuffers to render to cubemap
-        render_to_rgba_unorm8 = dev->create_render_pass({{{rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}}}});
-        for(int i=0; i<6; ++i) env_cubemap_fb[i] = dev->create_framebuffer({{512,512}, render_to_rgba_unorm8, {{env_cubemap,i}}});
-
-        // Clear faces of cubemap
-        gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
-        const float4 clear_colors[] {{1,0,0,1},{0,1,1,1},{0,1,0,1},{1,0,1,1},{0,0,1,1},{1,1,0,1}};
-        for(size_t i=0; i<6; ++i)
+        // Resample the environment spheremap into a cubemap
+        render_to_cubemap(env_cubemap, assets.game_coords, {512,512}, render_to_rgba_unorm8, [this](gfx::command_buffer & cmd, const float4x4 & matrix)
         {
-            cmd.begin_render_pass(render_to_rgba_unorm8, env_cubemap_fb[i], {clear_colors[i]});
-            cmd.end_render_pass();
-        }
-        dev->submit_and_wait(cmd.cmd);
+            const struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; } per_view_uniforms {matrix, matrix};
+            cmd.bind_pipeline(skybox_pipe_spheremap);
+            cmd.bind_descriptor_set(skybox_pipe_layout, 0, desc_pool.alloc(per_scene_view_layout)
+                .write(0, uniform_buffer, float3{0,0,0})
+                .write(1, uniform_buffer, per_view_uniforms));
+            cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_spheremap));  
+        });
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
@@ -305,7 +337,6 @@ public:
         for(auto shader : {skybox_vs, vs, skybox_fs_spheremap, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
         for(auto layout : {pipe_layout, skybox_pipe_layout}) dev->destroy_pipeline_layout(layout);
         for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
-        for(auto fb : env_cubemap_fb) dev->destroy_framebuffer(fb);
         for(auto image : {checkerboard, env_spheremap, env_cubemap}) dev->destroy_image(image);
         for(auto sampler : {nearest, spheremap_sampler}) dev->destroy_sampler(sampler);
         dev->destroy_render_pass(render_to_rgba_unorm8);
@@ -333,10 +364,13 @@ public:
 
     void render_frame(const camera & cam)
     {
+        auto fb = dev->get_swapchain_framebuffer(gwindow->get_rhi_window());
+        auto ndc_coords = dev->get_ndc_coords(fb);
+
         const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range);
         struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; } per_view_uniforms;
-        per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_view_matrix());
-        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, info.ndc_coords), cam.get_skybox_view_matrix());
+        per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, ndc_coords), cam.get_view_matrix());
+        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, ndc_coords), cam.get_skybox_view_matrix());
 
         // Reset resources
         desc_pool.reset();
