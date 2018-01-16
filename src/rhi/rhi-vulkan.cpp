@@ -188,7 +188,8 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override;
         void end_render_pass(command_buffer cmd) override;
 
-        void present(command_buffer submit, window window) override;
+        void submit_and_wait(command_buffer cmd) override;
+        void acquire_and_submit_and_present(command_buffer cmd, window window) override;
         void wait_idle() override;
     };
 
@@ -1197,9 +1198,15 @@ void vk_device::end_render_pass(command_buffer cmd)
     vkCmdEndRenderPass(objects[cmd]);
 }
 
-void vk_device::present(command_buffer submit, window window)
+void vk_device::submit_and_wait(command_buffer cmd)
 {
-    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[submit])); 
+    end_transient(objects[cmd]);
+    objects.destroy(cmd);
+}
+
+void vk_device::acquire_and_submit_and_present(command_buffer cmd, window window)
+{
+    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd])); 
 
     auto & win = objects[window];
 
@@ -1209,7 +1216,7 @@ void vk_device::present(command_buffer submit, window window)
     submit_info.pWaitSemaphores = &win.image_available;
     submit_info.pWaitDstStageMask = wait_stages;
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &objects[submit];
+    submit_info.pCommandBuffers = &objects[cmd];
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &win.render_finished;
     check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submit_info, nullptr)); //objects[fence]));
@@ -1223,7 +1230,7 @@ void vk_device::present(command_buffer submit, window window)
     check("vkQueuePresentKHR", vkQueuePresentKHR(queue, &present_info));
             
     check("vkQueueWaitIdle", vkQueueWaitIdle(queue)); // TODO: Do something with fences instead
-    vkFreeCommandBuffers(dev, staging_pool, 1, &objects[submit]);
+    vkFreeCommandBuffers(dev, staging_pool, 1, &objects[cmd]);
 
     auto & fb = objects[win.swapchain_framebuffer];
     check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));

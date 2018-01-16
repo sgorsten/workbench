@@ -487,11 +487,16 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void present(command_buffer submit, window window) override
+        void submit_and_wait(command_buffer submit) override
+        {
+            submit_command_buffer(submit);
+            cmd_emulator.destroy_command_buffer(submit);
+        }
+        void acquire_and_submit_and_present(command_buffer submit, window window) override
         {
             submit_command_buffer(submit);
             glfwSwapBuffers(objects[window].w);
-            cmd_emulator.destroy_command_buffer(submit);            
+            cmd_emulator.destroy_command_buffer(submit);
         }
 
         void wait_idle() override { glFlush(); }

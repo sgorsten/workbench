@@ -535,11 +535,16 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void present(command_buffer submit, window window) override
+        void submit_and_wait(command_buffer cmd)
         {
-            submit_command_buffer(submit);
+            submit_command_buffer(cmd);
+            cmd_emulator.destroy_command_buffer(cmd);
+        }
+        void acquire_and_submit_and_present(command_buffer cmd, window window)
+        {
+            submit_command_buffer(cmd);
             objects[window].swap_chain->Present(1, 0);
-            cmd_emulator.destroy_command_buffer(submit);
+            cmd_emulator.destroy_command_buffer(cmd);
         }
 
         void wait_idle() override { ctx->Flush(); }

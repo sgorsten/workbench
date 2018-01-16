@@ -283,6 +283,16 @@ public:
         render_to_rgba_unorm8 = dev->create_render_pass({{{rhi::image_format::rgba_unorm8, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}}}});
         for(int i=0; i<6; ++i) env_cubemap_fb[i] = dev->create_framebuffer({{512,512}, render_to_rgba_unorm8, {{env_cubemap,i}}});
 
+        // Clear faces of cubemap
+        gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
+        const float4 clear_colors[] {{1,0,0,1},{0,1,1,1},{0,1,0,1},{1,0,1,1},{0,0,1,1},{1,1,0,1}};
+        for(size_t i=0; i<6; ++i)
+        {
+            cmd.begin_render_pass(render_to_rgba_unorm8, env_cubemap_fb[i], {clear_colors[i]});
+            cmd.end_render_pass();
+        }
+        dev->submit_and_wait(cmd.cmd);
+
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
         gwindow->set_pos(window_pos);
@@ -339,14 +349,6 @@ public:
 
         gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
 
-        // Clear faces of cubemap
-        const float4 clear_colors[] {{1,0,0,1},{0,1,1,1},{0,1,0,1},{1,0,1,1},{0,0,1,1},{1,1,0,1}};
-        for(size_t i=0; i<6; ++i)
-        {
-            cmd.begin_render_pass(render_to_rgba_unorm8, env_cubemap_fb[i], {clear_colors[i]});
-            cmd.end_render_pass();
-        }
-
         // Draw objects to our primary framebuffer
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()), {{0,0,0,1},1.0f,0});
         cmd.bind_descriptor_set(pipe_layout, 0, per_scene_view_set);
@@ -387,7 +389,7 @@ public:
             }
         }
         cmd.end_render_pass();
-        dev->present(cmd.cmd, gwindow->get_rhi_window());
+        dev->acquire_and_submit_and_present(cmd.cmd, gwindow->get_rhi_window());
     }
 };
 

@@ -252,7 +252,8 @@ namespace rhi
         virtual void draw_indexed(command_buffer cmd, int first_index, int index_count) = 0;
         virtual void end_render_pass(command_buffer cmd) = 0;
 
-        virtual void present(command_buffer submit, window window) = 0;
+        virtual void submit_and_wait(command_buffer cmd) = 0; // Submit commands to execute immediately, then wait for completion
+        virtual void acquire_and_submit_and_present(command_buffer cmd, window window) = 0; // Submit commands to execute when the next frame is available, followed by a present
         virtual void wait_idle() = 0;
     };
 
