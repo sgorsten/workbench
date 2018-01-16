@@ -5,7 +5,7 @@
 #include <GLFW/glfw3.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
-#include <d3d11_1.h>
+#include <d3d11_4.h>
 #include <d3dcompiler.h>
 #include "../../dep/SPIRV-Cross/spirv_hlsl.hpp"
 #pragma comment(lib, "d3d11.lib")
@@ -38,6 +38,12 @@ namespace rhi
             throw std::system_error(std::error_code(exactly(result), d3d_error::instance()), ss.str());
         }
     }
+
+    struct d3d_fence
+    {
+        ID3D11Fence * fence;
+        UINT64 value = 0;
+    };
 
     struct d3d_buffer
     {
@@ -98,11 +104,12 @@ namespace rhi
     {
         std::function<void(const char *)> debug_callback;    
 
-        ID3D11Device1 * dev;
-        ID3D11DeviceContext1 * ctx;
+        ID3D11Device5 * dev;
+        ID3D11DeviceContext4 * ctx;
         IDXGIFactory * factory;
 
         template<class T> struct traits;
+        template<> struct traits<fence> { using type = d3d_fence; };
         template<> struct traits<buffer> { using type = d3d_buffer; };
         template<> struct traits<image> { using type = d3d_image; };
         template<> struct traits<sampler> { using type = d3d_sampler; };
@@ -111,7 +118,7 @@ namespace rhi
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = d3d_pipeline; };
         template<> struct traits<window> { using type = d3d_window; };
-        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, fence, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -122,9 +129,9 @@ namespace rhi
             ID3D11DeviceContext * ctx11;
             IDXGIDevice * dxgi_dev;
             check("D3D11CreateDevice", D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_DEBUG, feature_levels, 1, D3D11_SDK_VERSION, &dev11, nullptr, &ctx11));
-            check("IUnknown::QueryInterface", dev11->QueryInterface(__uuidof(ID3D11Device1), (void **)&dev));
-            check("IUnknown::QueryInterface", ctx11->QueryInterface(__uuidof(ID3D11DeviceContext1), (void **)&ctx));
-            check("IUnknown::QueryInterface", dev->QueryInterface(__uuidof(IDXGIDevice), (void **)&dxgi_dev));
+            check("IUnknown::QueryInterface", dev11->QueryInterface(&dev));
+            check("IUnknown::QueryInterface", ctx11->QueryInterface(&ctx));
+            check("IUnknown::QueryInterface", dev->QueryInterface(&dxgi_dev));
 
             IDXGIAdapter * adapter = nullptr;
             check("IDXGIDevice::GetAdapter", dxgi_dev->GetAdapter(&adapter));
@@ -132,6 +139,18 @@ namespace rhi
         }
 
         device_info get_info() const override { return {linalg::zero_to_one, true}; }
+
+        fence create_fence() override 
+        { 
+            auto [handle, f] = objects.create<fence>();
+            check("ID3D11Device5::CreateFence", dev->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&f.fence));
+            return handle;
+        }
+        void wait_for_fence(fence fence) override 
+        { 
+            check("ID3D11DeviceContext4::Wait", ctx->Wait(objects[fence].fence, objects[fence].value));
+        }
+        void destroy_fence(fence fence) override { objects.destroy(fence); }
 
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
@@ -375,8 +394,7 @@ namespace rhi
                 options.shader_model = 50;
                 compiler.set_options(options);
                 const auto hlsl = compiler.compile();
-                debug_callback(hlsl.c_str());
-                debug_callback("");
+                //debug_callback(hlsl.c_str());
 
                 // Compile HLSL and create shader stages and input layout
                 ID3DBlob * shader_blob, * error_blob;
@@ -530,7 +548,11 @@ namespace rhi
             ));
         }
 
-        command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
+        command_pool create_command_pool() override { return cmd_emulator.create_command_pool(); }
+        void destroy_command_pool(command_pool pool) override { return cmd_emulator.destroy_command_pool(pool); }
+        void reset_command_pool(command_pool pool) override { return cmd_emulator.reset_command_pool(pool); }
+        command_buffer start_command_buffer(command_pool pool) override { return cmd_emulator.start_command_buffer(pool); }
+
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
         { 
             if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");
@@ -545,18 +567,16 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void submit_and_wait(command_buffer cmd)
+        void submit_and_wait(command_buffer cmd, fence fence)
         {
             submit_command_buffer(cmd);
-            ctx->Flush(); // TODO: Remove once we support fences
-            cmd_emulator.destroy_command_buffer(cmd);
+            if(fence) check("ID3D11DeviceContext4::Signal", ctx->Signal(objects[fence].fence, ++objects[fence].value));
         }
-        void acquire_and_submit_and_present(command_buffer cmd, window window)
+        void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence)
         {
             submit_command_buffer(cmd);
             objects[window].swap_chain->Present(1, 0);
-            ctx->Flush(); // TODO: Remove once we support fences
-            cmd_emulator.destroy_command_buffer(cmd);
+            if(fence) check("ID3D11DeviceContext4::Signal", ctx->Signal(objects[fence].fence, ++objects[fence].value));
         }
 
         void wait_idle() override { ctx->Flush(); }

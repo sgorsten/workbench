@@ -19,6 +19,11 @@ namespace rhi
         }
     }
 
+    struct gl_fence
+    {
+        GLsync sync_object = 0;
+    };
+
     struct gl_buffer
     {
         GLuint buffer_object = 0;
@@ -89,6 +94,7 @@ namespace rhi
         size_t index_buffer_offset=0;
 
         template<class T> struct traits;
+        template<> struct traits<fence> { using type = gl_fence; };
         template<> struct traits<buffer> { using type = gl_buffer; };
         template<> struct traits<image> { using type = gl_image; };
         template<> struct traits<sampler> { using type = GLuint; };
@@ -97,7 +103,7 @@ namespace rhi
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = gl_pipeline; };
         template<> struct traits<window> { using type = gl_window; };
-        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, fence, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -139,6 +145,26 @@ namespace rhi
         }
         
         device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
+
+        fence create_fence() override
+        {
+            auto [handle, f] = objects.create<fence>();
+            return handle;
+        }
+        void wait_for_fence(fence fence) override 
+        { 
+            auto & f = objects[fence];
+            switch(glClientWaitSync(f.sync_object, 0, GL_TIMEOUT_IGNORED))
+            {
+            case GL_TIMEOUT_EXPIRED: case GL_WAIT_FAILED: throw std::runtime_error("glClientWaitSync(...) failed");
+            }
+            glDeleteSync(f.sync_object);
+            f.sync_object = nullptr;
+        }
+        void destroy_fence(fence fence) override 
+        {
+            objects.destroy(fence);
+        }
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
@@ -478,7 +504,11 @@ namespace rhi
             ));
         }
 
-        command_buffer start_command_buffer() override { return cmd_emulator.create_command_buffer(); }
+        command_pool create_command_pool() override { return cmd_emulator.create_command_pool(); }
+        void destroy_command_pool(command_pool pool) override { return cmd_emulator.destroy_command_pool(pool); }
+        void reset_command_pool(command_pool pool) override { return cmd_emulator.reset_command_pool(pool); }
+        command_buffer start_command_buffer(command_pool pool) override { return cmd_emulator.start_command_buffer(pool); }
+
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
@@ -488,18 +518,16 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void submit_and_wait(command_buffer submit) override
+        void submit_and_wait(command_buffer submit, fence fence) override
         {
             submit_command_buffer(submit);
-            glFlush();
-            cmd_emulator.destroy_command_buffer(submit);
+            if(fence) objects[fence].sync_object = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         }
-        void acquire_and_submit_and_present(command_buffer submit, window window) override
+        void acquire_and_submit_and_present(command_buffer submit, window window, fence fence) override
         {
             submit_command_buffer(submit);
             glfwSwapBuffers(objects[window].w);
-            glFlush();
-            cmd_emulator.destroy_command_buffer(submit);
+            if(fence) objects[fence].sync_object = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         }
 
         void wait_idle() override { glFlush(); }

@@ -264,11 +264,11 @@ public:
         return dev->create_pipeline({render_pass, pipeline_layout, {cube_op_vertex::get_binding(0)}, {cube_op_vs, fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false});
     }
 
-    template<class F> void render_to_cubemap(rhi::image target_cube_map, const int2 & dimensions, rhi::render_pass render_pass, F bind_pipeline)
+    template<class F> void render_to_cubemap(rhi::command_pool pool, rhi::image target_cube_map, const int2 & dimensions, rhi::render_pass render_pass, rhi::fence fence, F bind_pipeline)
     {
         rhi::framebuffer face_framebuffers[6];
         for(int i=0; i<6; ++i) face_framebuffers[i] = dev->create_framebuffer({dimensions, render_pass, {{target_cube_map,i}}});
-        gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
+        gfx::command_buffer cmd {*dev, dev->start_command_buffer(pool)};
         for(int i=0; i<6; ++i)
         {
             cmd.begin_render_pass(render_pass, face_framebuffers[i], {{0,0,0,0},1,0});
@@ -277,7 +277,8 @@ public:
             cmd.draw(0, 6);
             cmd.end_render_pass();
         }
-        dev->submit_and_wait(cmd.cmd);
+        dev->submit_and_wait(cmd.cmd, fence);
+        dev->wait_idle();
         for(auto fb : face_framebuffers) dev->destroy_framebuffer(fb);
     }
 };
@@ -286,8 +287,11 @@ class device_session
 {
     std::shared_ptr<rhi::device> dev;
     rhi::device_info info;
+    rhi::command_pool cmd_pool;
     gfx::descriptor_pool desc_pool;
     gfx::dynamic_buffer uniform_buffer;
+    rhi::fence transient_resource_fence;
+
     gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer;
     cubemap_utilities cube_utils;
 
@@ -317,7 +321,10 @@ class device_session
     double2 last_cursor;
 public:
     device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) :
-        dev{dev}, info{dev->get_info()}, desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
+        dev{dev}, info{dev->get_info()}, 
+        cmd_pool{dev->create_command_pool()},
+        desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
+        transient_resource_fence{dev->create_fence()},
         basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
         ground_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
         box_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
@@ -381,7 +388,7 @@ public:
         auto resample_set = desc_pool.alloc(resample_layout);
         resample_set.write(0, uniform_buffer, make_transform_4x4(assets.game_coords, {coord_axis::right, coord_axis::down, coord_axis::forward}));
         resample_set.write(1, spheremap_sampler, env_spheremap);
-        cube_utils.render_to_cubemap(env_cubemap, {512,512}, render_to_rgba_unorm8, [&](gfx::command_buffer & cmd)
+        cube_utils.render_to_cubemap(cmd_pool, env_cubemap, {512,512}, render_to_rgba_unorm8, {}, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(cube_sample_sphere_pipe);
             cmd.bind_descriptor_set(convert_spheremap_layout, 0, resample_set);
@@ -390,7 +397,7 @@ public:
         // Copy cubemap to another cubemap
         auto copy_set = desc_pool.alloc(cube_op_set_layout);
         copy_set.write(0, spheremap_sampler, env_cubemap);
-        cube_utils.render_to_cubemap(env_cubemap2, {512,512}, render_to_rgba_unorm8, [&](gfx::command_buffer & cmd)
+        cube_utils.render_to_cubemap(cmd_pool, env_cubemap2, {512,512}, render_to_rgba_unorm8, transient_resource_fence, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(cube_copy_pipe);
             cmd.bind_descriptor_set(cube_op_pipeline_layout, 0, copy_set);  
@@ -398,11 +405,12 @@ public:
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
-        gwindow->set_pos(window_pos);   
+        gwindow->set_pos(window_pos); 
     }
 
     ~device_session()
     {
+        dev->wait_for_fence(transient_resource_fence);
         gwindow.reset();
         for(auto pipeline : {skybox_pipe_cubemap, solid_pipe, wire_pipe}) dev->destroy_pipeline(pipeline);
         for(auto shader : {skybox_vs, vs, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
@@ -436,6 +444,8 @@ public:
     void render_frame(const camera & cam)
     {       
         // Reset resources
+        dev->wait_for_fence(transient_resource_fence);
+        dev->reset_command_pool(cmd_pool);
         desc_pool.reset();
         uniform_buffer.reset();
 
@@ -450,7 +460,7 @@ public:
             .write(0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f))
             .write(1, uniform_buffer.write(per_view_uniforms));
 
-        gfx::command_buffer cmd {*dev, dev->start_command_buffer()};
+        gfx::command_buffer cmd {*dev, dev->start_command_buffer(cmd_pool)};
 
         // Draw objects to our primary framebuffer
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()), {{0,0,0,1},1.0f,0});
@@ -492,7 +502,7 @@ public:
             }
         }
         cmd.end_render_pass();
-        dev->acquire_and_submit_and_present(cmd.cmd, gwindow->get_rhi_window());
+        dev->acquire_and_submit_and_present(cmd.cmd, gwindow->get_rhi_window(), transient_resource_fence);
     }
 };
 

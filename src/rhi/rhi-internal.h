@@ -141,16 +141,32 @@ namespace rhi
     class command_emulator
     {
         using command = std::variant<begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
+        struct emulated_command_pool { std::vector<command_buffer> buffers; };
         struct emulated_command_buffer { std::vector<command> commands; };
+        object_set<command_pool, emulated_command_pool> pools;
         object_set<command_buffer, emulated_command_buffer> buffers;
     public:
-        command_buffer create_command_buffer() 
+        command_pool create_command_pool() 
+        { 
+            auto [handle, buf] = pools.create();
+            return handle;
+        }
+        void destroy_command_pool(command_pool pool) 
+        { 
+            reset_command_pool(pool);
+            return pools.destroy(pool); 
+        }
+        void reset_command_pool(command_pool pool) 
+        { 
+            for(auto buf : pools[pool].buffers) buffers.destroy(buf); 
+            pools[pool].buffers.clear();
+        }
+        command_buffer start_command_buffer(command_pool pool) 
         { 
             auto [handle, buf] = buffers.create();
             buf.commands.clear();
             return handle;
         }
-        void destroy_command_buffer(command_buffer cmd) { buffers.destroy(cmd); }
 
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer, clear}); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
