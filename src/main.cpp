@@ -145,7 +145,11 @@ struct common_assets
         standard = standard_shaders::compile(compiler);
 
         vs = compiler.compile(shader_stage::vertex, preamble + pbr_lighting + R"(
-            layout(set=1,binding=0) uniform PerObject { mat4 model_matrix; } per_object;
+            layout(set=1,binding=0) uniform PerObject 
+            { 
+                mat4 u_model_matrix;
+                vec2 u_material; // roughness, metalness
+            };
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
             layout(location=2) in vec3 v_normal;
@@ -156,14 +160,19 @@ struct common_assets
             layout(location=3) out vec2 texcoord;
             void main()
             {
-                position = (per_object.model_matrix * vec4(v_position,1)).xyz;
+                position = (u_model_matrix * vec4(v_position,1)).xyz;
                 color = v_color;
-                normal = (per_object.model_matrix * vec4(v_normal,0)).xyz;
+                normal = (u_model_matrix * vec4(v_normal,0)).xyz;
                 texcoord = v_texcoord;
                 gl_Position = u_view_proj_matrix * vec4(position,1);
             }
         )");
         fs = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
+            layout(set=1,binding=0) uniform PerObject 
+            { 
+                mat4 u_model_matrix;
+                vec2 u_material; // roughness, metalness
+            };
             layout(set=1,binding=1) uniform sampler2D u_albedo_tex;
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 color;
@@ -172,7 +181,7 @@ struct common_assets
             layout(location=0) out vec4 f_color;
             void main() 
             { 
-                f_color = vec4(compute_lighting(position, normalize(normal), color*texture(u_albedo_tex, texcoord).rgb, 0.5, 1.0, 1.0), 1);
+                f_color = vec4(compute_lighting(position, normalize(normal), color*texture(u_albedo_tex, texcoord).rgb, u_material.x, u_material.y, 1.0), 1);
             }
         )");
         fs_unlit = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
@@ -316,7 +325,7 @@ public:
         for(auto shader : {skybox_vs, vs, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
         for(auto layout : {pipe_layout, skybox_pipe_layout}) dev->destroy_pipeline_layout(layout);
         for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
-        for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2, env_cubemap3}) dev->destroy_image(image);
+        for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2, env_cubemap3, brdf_integral}) dev->destroy_image(image);
         for(auto sampler : {nearest}) dev->destroy_sampler(sampler);
         dev->destroy_render_pass(pass);
         dev->destroy_command_pool(cmd_pool);
@@ -386,7 +395,12 @@ public:
 
         // Draw the ground
         cmd.bind_pipeline(solid_pipe);
-        cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(cam.coords(coord_axis::down)*0.3f))
+
+        struct { float4x4 model_matrix; float roughness, metalness; } per_object;
+        per_object.model_matrix = translation_matrix(cam.coords(coord_axis::down)*0.5f);
+        per_object.roughness = 0.5f;
+        per_object.metalness = 0.0f;
+        cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, per_object)
                                                                                   .write(1, nearest, checkerboard));
         cmd.bind_vertex_buffer(0, ground_vertex_buffer);
         cmd.bind_index_buffer(ground_index_buffer);
@@ -399,8 +413,10 @@ public:
         {
             for(int j=0; j<6; ++j)
             {
-                const float3 position = cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f);
-                cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, translation_matrix(position))
+                per_object.model_matrix = translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f));
+                per_object.roughness = (j+0.5f)/6;
+                per_object.metalness = (i+0.5f)/6;
+                cmd.bind_descriptor_set(pipe_layout, 1, desc_pool.alloc(per_object_layout).write(0, uniform_buffer, per_object)
                                                                                           .write(1, nearest, checkerboard));
                 cmd.draw_indexed(0, 32*32*6);
             }

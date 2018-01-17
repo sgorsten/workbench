@@ -243,17 +243,21 @@ standard_device_objects::~standard_device_objects()
     dev->destroy_pipeline(compute_reflectance_cubemap_pipeline);
     dev->destroy_pipeline(compute_irradiance_cubemap_pipeline);
     dev->destroy_pipeline(copy_cubemap_from_spheremap_pipeline);
+    dev->destroy_pipeline(compute_brdf_integral_image_pipeline);
     dev->destroy_render_pass(render_to_rgba_float16_pass);
     dev->destroy_render_pass(render_to_rg_float16_pass);
+    dev->destroy_pipeline_layout(empty_pipeline_layout);
     dev->destroy_pipeline_layout(op_pipeline_layout);
     dev->destroy_descriptor_set_layout(op_set_layout);
     dev->destroy_shader(compute_reflectance_cubemap_fragment_shader);
     dev->destroy_shader(compute_irradiance_cubemap_fragment_shader);
     dev->destroy_shader(copy_cubemap_from_spheremap_fragment_shader);
     dev->destroy_shader(render_cubemap_vertex_shader);
+    dev->destroy_shader(compute_brdf_integral_image_fragment_shader);
     dev->destroy_shader(render_image_vertex_shader);
     dev->destroy_sampler(spheremap_sampler);
     dev->destroy_sampler(cubemap_sampler);
+    dev->destroy_sampler(image_sampler);
     dev->destroy_buffer(render_cubemap_vertex_buffer);
     dev->destroy_buffer(render_image_vertex_buffer);
 }
