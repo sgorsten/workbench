@@ -93,7 +93,6 @@ namespace rhi
         sampled_image_bit    = 1<<0, // Image can be bound to a sampler
         color_attachment_bit = 1<<1, // Image can be bound to a framebuffer as a color attachment
         depth_attachment_bit = 1<<2, // Image can be bound to a framebuffer as the depth/stencil attachment
-        generate_mips_bit    = 1<<3  // Data for mip levels greater than zero should be automatically generated
     };
     using image_flags = int;
     struct image_desc
@@ -130,7 +129,7 @@ namespace rhi
     };
 
     // Framebuffer creation info
-    struct framebuffer_attachment_desc { image image; int layer; };
+    struct framebuffer_attachment_desc { image image; int mip, layer; };
     struct framebuffer_desc
     {
         int2 dimensions;
@@ -253,6 +252,7 @@ namespace rhi
         virtual void reset_command_pool(command_pool pool) = 0;
         virtual command_buffer start_command_buffer(command_pool pool) = 0;
 
+        virtual void generate_mipmaps(command_buffer cmd, image image) = 0;
         virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) = 0;
         virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;
         virtual void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) = 0;

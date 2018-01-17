@@ -130,6 +130,7 @@ namespace rhi
         void destroy(descriptor_pool pool) { objects.destroy(pool); }
     };
 
+    struct generate_mipmaps_command { image im; };
     struct begin_render_pass_command { render_pass pass; framebuffer framebuffer; clear_values clear; };
     struct bind_pipeline_command { pipeline pipe; };
     struct bind_descriptor_set_command { pipeline_layout layout; int set_index; descriptor_set set; };
@@ -140,7 +141,7 @@ namespace rhi
     struct end_render_pass_command {};
     class command_emulator
     {
-        using command = std::variant<begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
+        using command = std::variant<generate_mipmaps_command, begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
         struct emulated_command_pool { std::vector<command_buffer> buffers; };
         struct emulated_command_buffer { std::vector<command> commands; };
         object_set<command_pool, emulated_command_pool> pools;
@@ -168,6 +169,7 @@ namespace rhi
             return handle;
         }
 
+        void generate_mipmaps(command_buffer cmd, image image) { buffers[cmd].commands.push_back(generate_mipmaps_command{image}); }
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer, clear}); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) { buffers[cmd].commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }

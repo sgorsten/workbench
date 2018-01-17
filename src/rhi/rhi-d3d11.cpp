@@ -53,10 +53,9 @@ namespace rhi
     
     struct d3d_image
     {
+        rhi::image_format format;
         ID3D11Resource * resource;
         ID3D11ShaderResourceView * shader_resource_view;
-        std::vector<ID3D11RenderTargetView *> render_target_views;
-        std::vector<ID3D11DepthStencilView *> depth_stencil_views;
     };
 
     struct d3d_sampler
@@ -194,7 +193,7 @@ namespace rhi
             if(desc.flags & rhi::image_flag::sampled_image_bit) bind_flags |= D3D11_BIND_SHADER_RESOURCE;
             if(desc.flags & rhi::image_flag::color_attachment_bit) bind_flags |= D3D11_BIND_RENDER_TARGET;
             if(desc.flags & rhi::image_flag::depth_attachment_bit) bind_flags |= D3D11_BIND_DEPTH_STENCIL;
-            if(desc.flags & rhi::image_flag::generate_mips_bit)
+            if(desc.mip_levels > 1)
             {
                 bind_flags |= (D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET);
                 misc_flags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
@@ -209,6 +208,7 @@ namespace rhi
             for(auto d : initial_data) data.push_back({d, exactly(row_pitch), exactly(slice_pitch)});
 
             auto [handle, im] = objects.create<image>();
+            im.format = desc.format;
             if(desc.shape == rhi::image_shape::_1d)
             {
                 const D3D11_TEXTURE1D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
@@ -231,31 +231,6 @@ namespace rhi
                 im.resource = tex;
             } 
             if(desc.flags & rhi::image_flag::sampled_image_bit) check("ID3D11Device::CreateShaderResourceView", dev->CreateShaderResourceView(im.resource, nullptr, &im.shader_resource_view));
-            if(desc.flags & rhi::image_flag::color_attachment_bit)
-            {
-                D3D11_RENDER_TARGET_VIEW_DESC view_desc {get_dx_format(desc.format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
-                view_desc.Texture2DArray.MipSlice = 0;
-                view_desc.Texture2DArray.ArraySize = 1;
-                im.render_target_views.resize(array_size);
-                for(size_t i=0; i<im.render_target_views.size(); ++i)
-                {
-                    view_desc.Texture2DArray.FirstArraySlice = exactly(i);
-                    check("ID3D11Device::CreateRenderTargetView", dev->CreateRenderTargetView(im.resource, &view_desc, &im.render_target_views[i]));
-                }
-            }
-            if(desc.flags & rhi::image_flag::depth_attachment_bit) 
-            {
-                D3D11_DEPTH_STENCIL_VIEW_DESC view_desc {get_dx_format(desc.format), D3D11_DSV_DIMENSION_TEXTURE2DARRAY};
-                view_desc.Texture2DArray.MipSlice = 0;
-                view_desc.Texture2DArray.ArraySize = 1;
-                im.depth_stencil_views.resize(array_size);
-                for(size_t i=0; i<im.depth_stencil_views.size(); ++i)
-                {
-                    view_desc.Texture2DArray.FirstArraySlice = exactly(i);
-                    check("ID3D11Device::CreateDepthStencilView", dev->CreateDepthStencilView(im.resource, &view_desc, &im.depth_stencil_views[i]));
-                }
-            }
-            if(desc.flags & rhi::image_flag::generate_mips_bit) ctx->GenerateMips(im.shader_resource_view);
             return handle;
         }
         void destroy_image(image image) override { objects.destroy(image); }
@@ -299,12 +274,34 @@ namespace rhi
         }
         void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
 
+        ID3D11RenderTargetView * create_render_target_view(ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
+        {
+            D3D11_RENDER_TARGET_VIEW_DESC view_desc {get_dx_format(format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
+            view_desc.Texture2DArray.MipSlice = exactly(mip);
+            view_desc.Texture2DArray.FirstArraySlice = exactly(layer);
+            view_desc.Texture2DArray.ArraySize = 1;
+            ID3D11RenderTargetView * view;
+            check("ID3D11Device::CreateRenderTargetView", dev->CreateRenderTargetView(resource, &view_desc, &view));
+            return view;
+        }
+
+        ID3D11DepthStencilView * create_depth_stencil_view(ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
+        {
+            D3D11_DEPTH_STENCIL_VIEW_DESC view_desc {get_dx_format(format), D3D11_DSV_DIMENSION_TEXTURE2DARRAY};
+            view_desc.Texture2DArray.MipSlice = exactly(mip);
+            view_desc.Texture2DArray.FirstArraySlice = exactly(layer);
+            view_desc.Texture2DArray.ArraySize = 1;
+            ID3D11DepthStencilView * view;
+            check("ID3D11Device::CreateDepthStencilView", dev->CreateDepthStencilView(resource, &view_desc, &view));
+            return view;
+        }
+
         framebuffer create_framebuffer(const framebuffer_desc & desc) override
         {
             auto [handle, fb] = objects.create<framebuffer>();
             fb.dims = desc.dimensions;
-            for(auto attachment : desc.color_attachments) fb.render_target_views.push_back(objects[attachment.image].render_target_views[attachment.layer]);
-            if(desc.depth_attachment) fb.depth_stencil_view = objects[desc.depth_attachment->image].depth_stencil_views[desc.depth_attachment->layer];
+            for(auto attachment : desc.color_attachments) fb.render_target_views.push_back(create_render_target_view(objects[attachment.image].resource, objects[attachment.image].format, attachment.mip, attachment.layer));
+            if(desc.depth_attachment) fb.depth_stencil_view = create_depth_stencil_view(objects[desc.depth_attachment->image].resource, objects[desc.depth_attachment->image].format, desc.depth_attachment->mip, desc.depth_attachment->layer);
             return handle;
         }
         coord_system get_ndc_coords(framebuffer framebuffer) override { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
@@ -347,7 +344,7 @@ namespace rhi
             if(pass_desc.depth_attachment)
             {
                 win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, pass_desc.depth_attachment->format, rhi::depth_attachment_bit}, {});
-                fb.depth_stencil_view = objects[win.depth_image].depth_stencil_views[0];
+                fb.depth_stencil_view = create_depth_stencil_view(objects[win.depth_image].resource, pass_desc.depth_attachment->format, 0, 0);
             }
 
             return {handle};
@@ -466,6 +463,10 @@ namespace rhi
             d3d_pipeline * current_pipeline = 0;
             ctx->ClearState();
             cmd_emulator.execute(cmd, overload(
+                [this](const generate_mipmaps_command & c)
+                {
+                    ctx->GenerateMips(objects[c.im].shader_resource_view);
+                },
                 [this,&current_pipeline](const begin_render_pass_command & c)
                 {
                     auto & pass = objects[c.pass];
@@ -554,6 +555,7 @@ namespace rhi
         void reset_command_pool(command_pool pool) override { return cmd_emulator.reset_command_pool(pool); }
         command_buffer start_command_buffer(command_pool pool) override { return cmd_emulator.start_command_buffer(pool); }
 
+        void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
         { 
             if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");

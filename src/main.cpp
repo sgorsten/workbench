@@ -109,7 +109,6 @@ struct common_assets
     mesh basis_mesh, ground_mesh, box_mesh;
     shader_module vs, fs, fs_unlit;
     shader_module skybox_vs, skybox_fs_cubemap;
-    shader_module cube_copy_fs;
     image env_spheremap;
 
     common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
@@ -119,9 +118,7 @@ struct common_assets
         shader_compiler compiler;
         standard = standard_shaders::compile(compiler);
 
-        vs = compiler.compile(shader_stage::vertex, R"(#version 450
-            layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
-            layout(set=0,binding=1) uniform PerView { mat4 view_proj_matrix, skybox_view_proj_matrix; } per_view;
+        vs = compiler.compile(shader_stage::vertex, preamble + pbr_lighting + R"(
             layout(set=1,binding=0) uniform PerObject { mat4 model_matrix; } per_object;
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
@@ -137,12 +134,11 @@ struct common_assets
                 color = v_color;
                 normal = (per_object.model_matrix * vec4(v_normal,0)).xyz;
                 texcoord = v_texcoord;
-                gl_Position = per_view.view_proj_matrix * vec4(position,1);
+                gl_Position = u_view_proj_matrix * vec4(position,1);
             }
         )");
-        fs = compiler.compile(shader_stage::fragment, R"(#version 450
-            layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
-            layout(set=1,binding=1) uniform sampler2D albedo_tex;
+        fs = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
+            layout(set=1,binding=1) uniform sampler2D u_albedo_tex;
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 color;
             layout(location=2) in vec3 normal;
@@ -150,12 +146,10 @@ struct common_assets
             layout(location=0) out vec4 f_color;
             void main() 
             { 
-                vec3 light_vec = normalize(per_scene.light_pos - position);
-                vec3 normal_vec = normalize(normal);
-                f_color = vec4(color*texture(albedo_tex, texcoord).rgb*max(dot(light_vec, normal_vec),0),1); 
+                f_color = vec4(compute_lighting(position, normalize(normal), color*texture(u_albedo_tex, texcoord).rgb, 0.5, 0.0, 1.0), 1);
             }
         )");
-        fs_unlit = compiler.compile(shader_stage::fragment, R"(#version 450
+        fs_unlit = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
             layout(location=0) in vec3 position;
             layout(location=1) in vec3 color;
             layout(location=0) out vec4 f_color;
@@ -165,9 +159,7 @@ struct common_assets
             }
         )");
 
-        skybox_vs = compiler.compile(shader_stage::vertex, R"(#version 450
-            layout(set=0,binding=0) uniform PerScene { vec3 light_pos; } per_scene;
-            layout(set=0,binding=1) uniform PerView { mat4 view_proj_matrix, skybox_view_proj_matrix; } per_view;
+        skybox_vs = compiler.compile(shader_stage::vertex, preamble + pbr_lighting + R"(
             layout(location=0) in vec3 v_position;
             layout(location=1) in vec3 v_color;
             layout(location=2) in vec3 v_normal;
@@ -176,7 +168,7 @@ struct common_assets
             void main()
             {
                 direction = v_position;
-                gl_Position = per_view.skybox_view_proj_matrix * vec4(v_position,1);
+                gl_Position = u_skybox_view_proj_matrix * vec4(v_position,1);
             }
         )");
         skybox_fs_cubemap = compiler.compile(shader_stage::fragment, R"(#version 450
@@ -187,13 +179,6 @@ struct common_assets
             {
                 f_color = texture(u_texture, normalize(direction));
             }
-        )");
-
-        cube_copy_fs = compiler.compile(shader_stage::fragment, R"(#version 450
-            layout(set=0,binding=0) uniform samplerCube u_texture;
-            layout(location=0) in vec3 direction;
-            layout(location=0) out vec4 f_color;
-            void main() { f_color = texture(u_texture, direction); }
         )");
 
         //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
@@ -230,6 +215,8 @@ class device_session
     rhi::image env_spheremap;
     rhi::image env_cubemap;
     rhi::image env_cubemap2;
+    rhi::image env_cubemap3;
+    rhi::image brdf_integral;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
@@ -246,8 +233,10 @@ public:
         box_index_buffer{dev, rhi::buffer_usage::index, assets.box_mesh.triangles}
     {
         per_scene_view_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::uniform_buffer, 1},
-            {1, rhi::descriptor_type::uniform_buffer, 1}
+            {0, rhi::descriptor_type::combined_image_sampler, 1},
+            {1, rhi::descriptor_type::combined_image_sampler, 1},
+            {2, rhi::descriptor_type::combined_image_sampler, 1},
+            {3, rhi::descriptor_type::uniform_buffer, 1}
         });
         per_object_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::uniform_buffer, 1},
@@ -282,6 +271,8 @@ public:
         env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
         env_cubemap = standard.create_cubemap_from_spheremap(512, cmd_pool, desc_pool, uniform_buffer, env_spheremap, assets.game_coords);
         env_cubemap2 = standard.create_irradiance_cubemap(32, cmd_pool, desc_pool, uniform_buffer, env_cubemap);
+        env_cubemap3 = standard.create_reflectance_cubemap(128, cmd_pool, desc_pool, uniform_buffer, env_cubemap);
+        brdf_integral = standard.create_brdf_integral_image(cmd_pool, desc_pool, uniform_buffer);
         dev->wait_idle();
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
@@ -297,7 +288,7 @@ public:
         for(auto shader : {skybox_vs, vs, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
         for(auto layout : {pipe_layout, skybox_pipe_layout}) dev->destroy_pipeline_layout(layout);
         for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
-        for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2}) dev->destroy_image(image);
+        for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2, env_cubemap3}) dev->destroy_image(image);
         for(auto sampler : {nearest, spheremap_sampler}) dev->destroy_sampler(sampler);
         dev->destroy_render_pass(pass);
         dev->destroy_command_pool(cmd_pool);
@@ -335,12 +326,15 @@ public:
         auto fb = dev->get_swapchain_framebuffer(gwindow->get_rhi_window());
         auto ndc_coords = dev->get_ndc_coords(fb);
         const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range);
-        struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; } per_view_uniforms;
+        struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; float3 eye_position; } per_view_uniforms;
         per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, ndc_coords), cam.get_view_matrix());
         per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, ndc_coords), cam.get_skybox_view_matrix());
-        auto per_scene_view_set = desc_pool.alloc(per_scene_view_layout)
-            .write(0, uniform_buffer.write(cam.coords(coord_axis::up)*2.0f))
-            .write(1, uniform_buffer.write(per_view_uniforms));
+        per_view_uniforms.eye_position = cam.position;
+        auto per_scene_view_set = desc_pool.alloc(per_scene_view_layout);
+        per_scene_view_set.write(0, standard.spheremap_sampler, brdf_integral);
+        per_scene_view_set.write(1, standard.cubemap_sampler, env_cubemap2);
+        per_scene_view_set.write(2, standard.cubemap_sampler, env_cubemap3);
+        per_scene_view_set.write(3, uniform_buffer.write(per_view_uniforms));
 
         gfx::command_buffer cmd {*dev, dev->start_command_buffer(cmd_pool)};
 
@@ -350,7 +344,7 @@ public:
         // Draw skybox
         cmd.bind_pipeline(skybox_pipe_cubemap);
         cmd.bind_descriptor_set(skybox_pipe_layout, 0, per_scene_view_set);
-        cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_cubemap2));
+        cmd.bind_descriptor_set(skybox_pipe_layout, 1, desc_pool.alloc(skybox_per_object_layout).write(0, spheremap_sampler, env_cubemap));
         cmd.bind_vertex_buffer(0, box_vertex_buffer);
         cmd.bind_index_buffer(box_index_buffer);
         cmd.draw_indexed(0, 36);

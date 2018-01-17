@@ -41,7 +41,8 @@ namespace rhi
         VkDeviceMemory device_memory;
         VkImage image_object;
         VkImageView image_view;
-        std::vector<VkImageView> layer_views;
+        VkImageCreateInfo image_info;
+        VkImageViewCreateInfo view_info;
     };
 
     struct vk_shader
@@ -66,6 +67,7 @@ namespace rhi
     struct vk_framebuffer
     {
         int2 dims;
+        std::vector<VkImageView> views; // Views belonging to this framebuffer
         std::vector<VkFramebuffer> framebuffers; // If this framebuffer targets a swapchain, the framebuffers for each swapchain image
         uint32_t current_index; // If this framebuffer targets a swapchain, the index of the current backbuffer
     };
@@ -190,6 +192,7 @@ namespace rhi
         void reset_command_pool(command_pool pool) override;
         command_buffer start_command_buffer(command_pool pool) override;
 
+        void generate_mipmaps(command_buffer cmd, image image) override;
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override;
         void bind_pipeline(command_buffer cmd, pipeline pipe) override;
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override;
@@ -418,7 +421,7 @@ void vk_device::end_transient(VkCommandBuffer command_buffer)
 
 fence vk_device::create_fence(bool signaled) 
 {
-    const VkFenceCreateInfo create_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0, signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0};
+    const VkFenceCreateInfo create_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0, signaled ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{0}};
     auto [handle, f] = objects.create<fence>();
     check("vkCreateFence", vkCreateFence(dev, &create_info, nullptr, &f));
     return handle; 
@@ -547,7 +550,7 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
     image_info.mipLevels = desc.mip_levels;        
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    if(initial_data.size()) image_info.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image_info.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if(image_info.mipLevels > 1) image_info.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if(desc.flags & image_flag::sampled_image_bit) image_info.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
     if(desc.flags & image_flag::color_attachment_bit) image_info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -583,29 +586,7 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
             copy_region.imageSubresource = layers;
             copy_region.imageExtent = image_info.extent;
             vkCmdCopyBufferToImage(cmd, staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
-
-            // Generate mip levels using blits
-            VkOffset3D dims {desc.dimensions.x, desc.dimensions.y, desc.dimensions.z};
-            for(uint32_t i=1; i<image_info.mipLevels; ++i)
-            {
-                VkImageBlit blit {};
-                blit.srcSubresource = layers;
-                blit.srcSubresource.mipLevel = i-1;
-                blit.srcOffsets[1] = dims;
-
-                dims.x = std::max(dims.x/2,1);
-                dims.y = std::max(dims.y/2,1);
-                dims.z = std::max(dims.z/2,1);
-                blit.dstSubresource = layers;
-                blit.dstSubresource.mipLevel = i;
-                blit.dstOffsets[1] = dims;
-
-                transition_layout(cmd, im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-                transition_layout(cmd, im.image_object, i, exactly(layer), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                vkCmdBlitImage(cmd, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-                transition_layout(cmd, im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            }
-            transition_layout(cmd, im.image_object, image_info.mipLevels-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            transition_layout(cmd, im.image_object, 0, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             end_transient(cmd);
         }
     }
@@ -623,27 +604,13 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
     image_view_info.subresourceRange.layerCount = image_info.arrayLayers;
     check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &im.image_view));
 
-    // Create views of individual layers (useful for render targets)
-    im.layer_views.resize(image_info.arrayLayers);
-    switch(view_type)
-    {
-    case VK_IMAGE_VIEW_TYPE_CUBE: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
-    case VK_IMAGE_VIEW_TYPE_1D_ARRAY: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_1D; break;
-    case VK_IMAGE_VIEW_TYPE_2D_ARRAY: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
-    case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY: image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
-    }
-    image_view_info.subresourceRange.layerCount = 1;
-    for(size_t i=0; i<im.layer_views.size(); ++i)
-    {
-        image_view_info.subresourceRange.baseArrayLayer = exactly(i);
-        check("vkCreateImageView", vkCreateImageView(dev, &image_view_info, nullptr, &im.layer_views[i]));
-    }
+    im.image_info = image_info;
+    im.view_info = image_view_info;
     return handle;
 }
 
 void vk_device::destroy_image(image image)
 {
-    for(auto view : objects[image].layer_views) vkDestroyImageView(dev, view, nullptr);
     vkDestroyImageView(dev, objects[image].image_view, nullptr);
     vkDestroyImage(dev, objects[image].image_object, nullptr);
     vkFreeMemory(dev, objects[image].device_memory, nullptr);
@@ -771,19 +738,36 @@ void vk_device::destroy_render_pass(render_pass pass)
     objects.destroy(pass); 
 }
 
+static VkImageView get_mip_and_layer_view(VkDevice dev, VkImageViewCreateInfo info, int mip, int layer)
+{
+    switch(info.viewType)
+    {
+    case VK_IMAGE_VIEW_TYPE_CUBE: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    case VK_IMAGE_VIEW_TYPE_1D_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_1D; break;
+    case VK_IMAGE_VIEW_TYPE_2D_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    }
+    info.subresourceRange.baseMipLevel = exactly(mip);
+    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.baseArrayLayer = exactly(layer);
+    info.subresourceRange.layerCount = 1;
+    VkImageView view;
+    check("vkCreateImageView", vkCreateImageView(dev, &info, nullptr, &view));
+    return view;
+}
+
 framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
 {
     auto [handle, fb] = objects.create<framebuffer>();
-    fb = {desc.dimensions, {VK_NULL_HANDLE}, 0};
-
-    std::vector<VkImageView> attachments;
-    for(auto attachment : desc.color_attachments) attachments.push_back(objects[attachment.image].layer_views[attachment.layer]);
-    if(desc.depth_attachment) attachments.push_back(objects[desc.depth_attachment->image].layer_views[desc.depth_attachment->layer]);
+    fb.dims = desc.dimensions;
+    fb.framebuffers.push_back(VK_NULL_HANDLE);
+    for(auto attachment : desc.color_attachments) fb.views.push_back(get_mip_and_layer_view(dev, objects[attachment.image].view_info, attachment.mip, attachment.layer));
+    if(desc.depth_attachment) fb.views.push_back(get_mip_and_layer_view(dev, objects[desc.depth_attachment->image].view_info, desc.depth_attachment->mip, desc.depth_attachment->layer));
     
     VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     framebuffer_info.renderPass = objects[desc.pass].pass_object;
-    framebuffer_info.attachmentCount = exactly(attachments.size());
-    framebuffer_info.pAttachments = attachments.data();
+    framebuffer_info.attachmentCount = exactly(fb.views.size());
+    framebuffer_info.pAttachments = fb.views.data();
     framebuffer_info.width = exactly(desc.dimensions.x);
     framebuffer_info.height = exactly(desc.dimensions.y);
     framebuffer_info.layers = 1;
@@ -793,6 +777,7 @@ framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
 void vk_device::destroy_framebuffer(framebuffer framebuffer)
 {
     for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
+    for(auto view : objects[framebuffer].views) vkDestroyImageView(dev, view, nullptr);
     objects.destroy(framebuffer);
 }
 
@@ -1200,6 +1185,41 @@ command_buffer vk_device::start_command_buffer(command_pool pool)
     check("vkBeginCommandBuffer", vkBeginCommandBuffer(cmd, &begin_info));
 
     return handle;
+}
+
+void vk_device::generate_mipmaps(command_buffer cmd, image image)
+{
+    auto & im = objects[image];
+    for(int layer=0; layer<im.image_info.arrayLayers; ++layer)
+    {
+        VkImageSubresourceLayers layers {};
+        layers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        layers.baseArrayLayer = exactly(layer);
+        layers.layerCount = 1;
+        VkOffset3D dims {im.image_info.extent.width, im.image_info.extent.height, im.image_info.extent.depth};
+        
+        transition_layout(objects[cmd], im.image_object, 0, exactly(layer), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        for(uint32_t i=1; i<im.image_info.mipLevels; ++i)
+        {
+            VkImageBlit blit {};
+            blit.srcSubresource = layers;
+            blit.srcSubresource.mipLevel = i-1;
+            blit.srcOffsets[1] = dims;
+
+            dims.x = std::max(dims.x/2,1);
+            dims.y = std::max(dims.y/2,1);
+            dims.z = std::max(dims.z/2,1);
+            blit.dstSubresource = layers;
+            blit.dstSubresource.mipLevel = i;
+            blit.dstOffsets[1] = dims;
+
+            transition_layout(objects[cmd], im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            transition_layout(objects[cmd], im.image_object, i, exactly(layer), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            vkCmdBlitImage(objects[cmd], im.image_object, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+            transition_layout(objects[cmd], im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+        transition_layout(objects[cmd], im.image_object, im.image_info.mipLevels-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
 }
 
 void vk_device::begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear)

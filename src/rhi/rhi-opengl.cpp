@@ -32,6 +32,7 @@ namespace rhi
 
     struct gl_image
     {
+        image_desc desc;
         GLuint texture_object;
     };
 
@@ -172,6 +173,7 @@ namespace rhi
         {
             auto glf = get_gl_format(desc.format);
             auto [handle, im] = objects.create<image>();
+            im.desc = desc;
             switch(desc.shape)
             {
             case rhi::image_shape::_1d:
@@ -267,10 +269,15 @@ namespace rhi
             glCreateFramebuffers(1, &fb.framebuffer_object);
             for(size_t i=0; i<desc.color_attachments.size(); ++i) 
             {
-                glNamedFramebufferTextureLayer(fb.framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), objects[desc.color_attachments[i].image].texture_object, 0, desc.color_attachments[i].layer);
+                if(objects[desc.color_attachments[i].image].desc.shape == rhi::image_shape::cube) glNamedFramebufferTextureLayer(fb.framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), objects[desc.color_attachments[i].image].texture_object, desc.color_attachments[i].mip, desc.color_attachments[i].layer);
+                else glNamedFramebufferTexture(fb.framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), objects[desc.color_attachments[i].image].texture_object, desc.color_attachments[i].mip);
                 draw_buffers.push_back(exactly(GL_COLOR_ATTACHMENT0+i));
             }
-            if(desc.depth_attachment) glNamedFramebufferTextureLayer(fb.framebuffer_object, GL_DEPTH_ATTACHMENT, objects[desc.depth_attachment->image].texture_object, 0, desc.depth_attachment->layer);
+            if(desc.depth_attachment) 
+            {
+                if(objects[desc.depth_attachment->image].desc.shape == rhi::image_shape::cube) glNamedFramebufferTextureLayer(fb.framebuffer_object, GL_DEPTH_ATTACHMENT, objects[desc.depth_attachment->image].texture_object, desc.depth_attachment->mip, desc.depth_attachment->layer);
+                else glNamedFramebufferTexture(fb.framebuffer_object, GL_DEPTH_ATTACHMENT, objects[desc.depth_attachment->image].texture_object, desc.depth_attachment->mip);
+            }
             glNamedFramebufferDrawBuffers(fb.framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
             return handle;
         }
@@ -406,6 +413,10 @@ namespace rhi
         {
             GLFWwindow * context = hidden_window;
             cmd_emulator.execute(cmd, overload(
+                [this](const generate_mipmaps_command & c)
+                {
+                    glGenerateTextureMipmap(objects[c.im].texture_object);
+                },
                 [this, &context](const begin_render_pass_command & c)
                 {
                     auto & pass = objects[c.pass];
@@ -511,6 +522,7 @@ namespace rhi
         void reset_command_pool(command_pool pool) override { return cmd_emulator.reset_command_pool(pool); }
         command_buffer start_command_buffer(command_pool pool) override { return cmd_emulator.start_command_buffer(pool); }
 
+        void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
