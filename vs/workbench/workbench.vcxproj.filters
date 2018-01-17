@@ -21,6 +21,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\core.cpp" />
     <ClCompile Include="..\..\src\graphics.cpp" />
+    <ClCompile Include="..\..\src\pbr.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\geometry.h" />
@@ -32,6 +33,7 @@
     </ClInclude>
     <ClInclude Include="..\..\src\core.h" />
     <ClInclude Include="..\..\src\test.h" />
+    <ClInclude Include="..\..\src\pbr.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="glad">

@@ -54,7 +54,7 @@ struct shader_compiler
     shader_compiler();
     ~shader_compiler();
 
-    shader_module compile(shader_stage stage, const char * glsl);
+    shader_module compile(shader_stage stage, const std::string & glsl);
 };
 
 std::ostream & operator << (std::ostream & out, const shader_module::scalar_type & s);

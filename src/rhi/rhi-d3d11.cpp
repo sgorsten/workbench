@@ -140,10 +140,11 @@ namespace rhi
 
         device_info get_info() const override { return {linalg::zero_to_one, true}; }
 
-        fence create_fence() override 
+        fence create_fence(bool signaled) override 
         { 
             auto [handle, f] = objects.create<fence>();
             check("ID3D11Device5::CreateFence", dev->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&f.fence));
+            if(signaled) check("ID3D11DeviceContext4::Signal", ctx->Signal(f.fence, ++f.value));
             return handle;
         }
         void wait_for_fence(fence fence) override 

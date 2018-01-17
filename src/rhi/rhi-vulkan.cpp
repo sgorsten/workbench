@@ -134,7 +134,7 @@ namespace rhi
         device_info get_info() const override { return {linalg::zero_to_one, false}; }
 
         // resources
-        fence create_fence() override;
+        fence create_fence(bool signaled) override;
         void wait_for_fence(fence fence) override;
         void destroy_fence(fence fence) override;
 
@@ -416,9 +416,9 @@ void vk_device::end_transient(VkCommandBuffer command_buffer)
 // vk_device resources //
 /////////////////////////
 
-fence vk_device::create_fence() 
+fence vk_device::create_fence(bool signaled) 
 {
-    const VkFenceCreateInfo create_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0, 0};
+    const VkFenceCreateInfo create_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0, signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0};
     auto [handle, f] = objects.create<fence>();
     check("vkCreateFence", vkCreateFence(dev, &create_info, nullptr, &f));
     return handle; 

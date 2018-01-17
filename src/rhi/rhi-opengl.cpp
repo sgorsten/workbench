@@ -146,9 +146,11 @@ namespace rhi
         
         device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
 
-        fence create_fence() override
+        
+        fence create_fence(bool signaled) override
         {
             auto [handle, f] = objects.create<fence>();
+            if(signaled) f.sync_object = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             return handle;
         }
         void wait_for_fence(fence fence) override 

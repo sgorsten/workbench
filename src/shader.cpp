@@ -241,7 +241,7 @@ shader_module load_shader_info_from_spirv(const std::vector<uint32_t> & words)
     return info;
 }
 
-shader_module shader_compiler::compile(shader_stage stage, const char * glsl)
+shader_module shader_compiler::compile(shader_stage stage, const std::string & glsl)
 {
     glslang::TShader shader([stage]()
     {
@@ -252,10 +252,11 @@ shader_module shader_compiler::compile(shader_stage stage, const char * glsl)
         default: throw std::logic_error("unsupported shader_stage");
         }
     }());
-    shader.setStrings(&glsl, 1);
+    const char * text = glsl.c_str();
+    shader.setStrings(&text, 1);
     if(!shader.parse(&glslang::DefaultTBuiltInResource, 450, ECoreProfile, false, false, static_cast<EShMessages>(EShMsgSpvRules|EShMsgVulkanRules)))
     {
-        throw std::runtime_error(std::string("GLSL compile failure: ") + shader.getInfoLog());
+        throw std::runtime_error(std::string("GLSL compile failure: ") + shader.getInfoLog() + "\nsource:\n" + text);
     }
     
     glslang::TProgram program;

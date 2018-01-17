@@ -182,7 +182,7 @@ namespace rhi
         // resources //
         ///////////////
 
-        virtual fence create_fence() = 0;
+        virtual fence create_fence(bool signaled) = 0;
         virtual void wait_for_fence(fence fence) = 0;
         virtual void destroy_fence(fence fence) = 0;
 
