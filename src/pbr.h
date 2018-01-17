@@ -45,6 +45,8 @@ struct standard_shaders
 struct standard_device_objects
 {
     std::shared_ptr<rhi::device> dev;
+
+    rhi::sampler image_sampler;
     rhi::sampler spheremap_sampler;
     rhi::sampler cubemap_sampler;
 

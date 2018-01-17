@@ -127,6 +127,7 @@ namespace rhi
             glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
             glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
             glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+            glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
             if(debug_callback) glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
             hidden_window = glfwCreateWindow(1, 1, "", nullptr, nullptr);
             if(!hidden_window) throw std::runtime_error("glfwCreateWindow(...) failed");
@@ -423,6 +424,7 @@ namespace rhi
                     auto & fb = objects[c.framebuffer];
                     context = fb.context;
                     glfwMakeContextCurrent(fb.context);
+                    glEnable(GL_FRAMEBUFFER_SRGB);
                     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
                     glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
 

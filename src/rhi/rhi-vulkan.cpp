@@ -59,6 +59,7 @@ namespace rhi
 
     struct vk_render_pass
     {
+        render_pass_desc desc;
         VkRenderPass pass_object;
         size_t num_color_clears;
         bool has_depth_clear;
@@ -701,6 +702,8 @@ static VkAttachmentDescription make_attachment_description(const rhi::attachment
 render_pass vk_device::create_render_pass(const render_pass_desc & desc) 
 {
     auto [handle, pass] = objects.create<render_pass>();
+    pass.desc = desc;
+
     std::vector<VkAttachmentDescription> attachments;
     std::vector<VkAttachmentReference> color_refs;
     for(auto & color_attachment : desc.color_attachments)
@@ -1045,6 +1048,9 @@ void vk_device::destroy_pipeline(pipeline pipeline)
 
 window vk_device::create_window(render_pass pass, const int2 & dimensions, std::string_view title) 
 {
+    if(objects[pass].desc.color_attachments.size() != 1) throw std::logic_error("create_window(...) requires render pass with exactly one color attachment");
+    const VkFormat format = get_vk_format(objects[pass].desc.color_attachments[0].format);
+
     const std::string buffer {begin(title), end(title)};
     auto [handle, win] = objects.create<window>();
     glfwDefaultWindowHints();
@@ -1068,8 +1074,8 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
     VkSwapchainCreateInfoKHR swapchain_info {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     swapchain_info.surface = win.surface;
     swapchain_info.minImageCount = selection.swap_image_count;
-    swapchain_info.imageFormat = selection.surface_format.format;
-    swapchain_info.imageColorSpace = selection.surface_format.colorSpace;
+    swapchain_info.imageFormat = format;
+    swapchain_info.imageColorSpace = VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; //selection.surface_format.colorSpace;
     swapchain_info.imageExtent = swap_extent;
     swapchain_info.imageArrayLayers = 1;
     swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -1092,7 +1098,7 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
         VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view_info.image = win.swapchain_images[i];
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format = selection.surface_format.format;
+        view_info.format = format;
         view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info.subresourceRange.baseMipLevel = 0;
         view_info.subresourceRange.levelCount = 1;
