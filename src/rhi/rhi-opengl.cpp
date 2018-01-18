@@ -374,7 +374,7 @@ namespace rhi
 
         command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
         void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
-        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
+        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
@@ -401,22 +401,21 @@ namespace rhi
                     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
                     glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
 
-                    glClearColor(c.clear.color[0], c.clear.color[1], c.clear.color[2], c.clear.color[3]);
-                    glClearDepthf(c.clear.depth);
-                    glClearStencil(c.clear.stencil);
-
                     // Clear render targets if specified by render pass
                     for(size_t i=0; i<pass.color_attachments.size(); ++i)
                     {
-                        if(std::holds_alternative<clear>(pass.color_attachments[i].load_op))
+                        if(auto op = std::get_if<clear_color>(&pass.color_attachments[i].load_op))
                         {
+                            glClearColor(op->r, op->g, op->b, op->a);
                             glClear(GL_COLOR_BUFFER_BIT); // TODO: Use glClearTexImage(...) when we use multiple color attachments                            
                         }
                     }
                     if(pass.depth_attachment)
                     {
-                        if(std::holds_alternative<clear>(pass.depth_attachment->load_op))
+                        if(auto op = std::get_if<clear_depth>(&pass.depth_attachment->load_op))
                         {
+                            glClearDepthf(op->depth);
+                            glClearStencil(op->stencil);
                             glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
                         }
                     }

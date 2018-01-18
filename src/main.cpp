@@ -283,8 +283,8 @@ public:
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
         skybox_pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, skybox_per_object_layout});
 
-        pass.color_attachments.push_back({rhi::image_format::rgba_srgb8, rhi::clear{}, rhi::store{rhi::layout::present_src}});
-        pass.depth_attachment = {rhi::image_format::depth_float32, rhi::clear{}, rhi::dont_care{}};
+        pass.color_attachments.push_back({rhi::clear_color{}, rhi::store{rhi::layout::present_src}});
+        pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
 
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
@@ -366,7 +366,7 @@ public:
         gfx::command_buffer cmd {*dev};
 
         // Draw objects to our primary framebuffer
-        cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()), {{0,0,0,1},1.0f,0});
+        cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()));
 
         // Draw skybox
         cmd.bind_pipeline(skybox_pipe_cubemap);

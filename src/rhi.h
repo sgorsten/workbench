@@ -115,14 +115,16 @@ namespace rhi
     // Render pass creation info
     enum class layout { color_attachment_optimal, depth_stencil_attachment_optimal, shader_read_only_optimal, transfer_src_optimal, transfer_dst_optimal, present_src };
     struct dont_care {};
-    struct clear {};
+    struct clear_color { float r,g,b,a; };
+    struct clear_depth { float depth; uint8_t stencil; };
     struct load { layout initial_layout; };
     struct store { layout final_layout; };
-    struct attachment_desc { image_format format; std::variant<dont_care, clear, load> load_op; std::variant<dont_care, store> store_op; };
+    struct color_attachment_desc { std::variant<dont_care, clear_color, load> load_op; std::variant<dont_care, store> store_op; };
+    struct depth_attachment_desc { std::variant<dont_care, clear_depth, load> load_op; std::variant<dont_care, store> store_op; };
     struct render_pass_desc 
     {
-        std::vector<attachment_desc> color_attachments;
-        std::optional<attachment_desc> depth_attachment;
+        std::vector<color_attachment_desc> color_attachments;
+        std::optional<depth_attachment_desc> depth_attachment;
     };
 
     // Framebuffer creation info
@@ -162,7 +164,6 @@ namespace rhi
 
     struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
     struct buffer_range { buffer buffer; size_t offset, size; };
-    struct clear_values { float4 color; float depth; uint8_t stencil; };
 
     struct device
     {
@@ -238,7 +239,7 @@ namespace rhi
         virtual command_buffer start_command_buffer() = 0;
 
         virtual void generate_mipmaps(command_buffer cmd, image image) = 0;
-        virtual void begin_render_pass(command_buffer cmd, const render_pass_desc & desc, framebuffer framebuffer, const clear_values & clear) = 0;
+        virtual void begin_render_pass(command_buffer cmd, const render_pass_desc & desc, framebuffer framebuffer) = 0;
         virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;
         virtual void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) = 0;
         virtual void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) = 0;

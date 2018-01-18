@@ -87,7 +87,7 @@ struct standard_device_objects
         std::vector<rhi::framebuffer> framebuffers;
         gfx::command_buffer cmd {*dev};
         rhi::framebuffer fb = dev->create_framebuffer({dimensions, {{target_image,mip,0}}});
-        cmd.begin_render_pass(render_pass, fb, {{0,0,0,0},1,0});
+        cmd.begin_render_pass(render_pass, fb);
         bind_pipeline(cmd);
         cmd.bind_vertex_buffer(0, {render_image_vertex_buffer, 0, sizeof(render_image_vertex)*6});
         cmd.draw(0, 6);
@@ -114,7 +114,7 @@ struct standard_device_objects
         for(int i=0; i<6; ++i)
         {
             rhi::framebuffer fb = dev->create_framebuffer({dimensions, {{target_cube_map,mip,i}}});
-            cmd.begin_render_pass(render_pass, fb, {{0,0,0,0},1,0});
+            cmd.begin_render_pass(render_pass, fb);
             bind_pipeline(cmd);
             cmd.bind_vertex_buffer(0, {render_cubemap_vertex_buffer, exactly(sizeof(render_cubemap_vertex)*6*i), sizeof(render_cubemap_vertex)*6});
             cmd.draw(0, 6);

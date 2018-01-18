@@ -25,30 +25,40 @@ namespace rhi
         }
     }
 
-    static VkAttachmentDescription make_attachment_description(const rhi::attachment_desc & desc)
+    static VkImageLayout convert_layout(rhi::layout layout)
     {
-        auto convert_layout = [](rhi::layout layout)
+        switch(layout)
         {
-            switch(layout)
-            {
-            case rhi::layout::color_attachment_optimal: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            case rhi::layout::depth_stencil_attachment_optimal: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            case rhi::layout::transfer_src_optimal: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            case rhi::layout::transfer_dst_optimal: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            case rhi::layout::present_src: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            default: fail_fast();
-            }
-        };
-        VkAttachmentDescription attachment {0, get_vk_format(desc.format), VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_UNDEFINED};
-        switch(get_attachment_type(desc.format))
-        {
-        case rhi::attachment_type::color: attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        case rhi::attachment_type::depth_stencil: attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case rhi::layout::color_attachment_optimal: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case rhi::layout::depth_stencil_attachment_optimal: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case rhi::layout::transfer_src_optimal: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        case rhi::layout::transfer_dst_optimal: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        case rhi::layout::present_src: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        default: fail_fast();
         }
+    };
+    static VkAttachmentDescription make_attachment_description(VkFormat format, const rhi::color_attachment_desc & desc)
+    {
+        VkAttachmentDescription attachment {0, format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
         std::visit(overload(
             [](dont_care) {},
-            [&](clear) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
+            [&](clear_color) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
+            [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
+        ), desc.load_op);
+        std::visit(overload(
+            [](dont_care) {},
+            [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
+        ), desc.store_op);
+        return attachment;
+    }
+
+    static VkAttachmentDescription make_attachment_description(VkFormat format, const rhi::depth_attachment_desc & desc)
+    {
+        VkAttachmentDescription attachment {0, format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        std::visit(overload(
+            [](dont_care) {},
+            [&](clear_depth) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
             [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
         ), desc.load_op);
         std::visit(overload(
@@ -65,17 +75,19 @@ namespace rhi
         std::optional<VkAttachmentReference> depth_ref;
 
         vk_render_pass_desc() {}
-        vk_render_pass_desc(const render_pass_desc & desc)
+        vk_render_pass_desc(const render_pass_desc & desc, const std::vector<VkFormat> & color_formats, std::optional<VkFormat> depth_format)
         {
-            for(auto & a : desc.color_attachments)
+            if(desc.color_attachments.size() != color_formats.size()) throw std::logic_error("render pass color attachments mismatch");
+            if(desc.depth_attachment.has_value() != depth_format.has_value()) throw std::logic_error("render pass color attachments mismatch");
+            for(size_t i=0; i<desc.color_attachments.size(); ++i)
             {
                 color_refs.push_back({exactly(attachments.size()), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
-                attachments.push_back(make_attachment_description(a));
+                attachments.push_back(make_attachment_description(color_formats[i], desc.color_attachments[i]));
             }
             if(desc.depth_attachment)
             {
                 depth_ref = {exactly(attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-                attachments.push_back(make_attachment_description(*desc.depth_attachment));
+                attachments.push_back(make_attachment_description(*depth_format, *desc.depth_attachment));
             }
         }
     };
@@ -130,6 +142,8 @@ namespace rhi
 
     struct vk_framebuffer
     {
+        std::vector<VkFormat> color_formats;
+        std::optional<VkFormat> depth_format;
         int2 dims;
         std::vector<VkImageView> views; // Views belonging to this framebuffer
         std::vector<VkFramebuffer> framebuffers; // If this framebuffer targets a swapchain, the framebuffers for each swapchain image
@@ -206,7 +220,7 @@ namespace rhi
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
         uint64_t submit(const VkSubmitInfo & submit_info);
         template<class F> void schedule(F f) { scheduled_actions.push({submitted_index, f}); }
-        const vk_render_pass & get_render_pass(const render_pass_desc & desc);
+        const vk_render_pass & get_render_pass(const render_pass_desc & desc, const std::vector<VkFormat> & color_formats, std::optional<VkFormat> depth_format);
         VkPipeline get_pipeline(rhi::pipeline pipe, VkRenderPass pass);
 
         // info
@@ -259,7 +273,7 @@ namespace rhi
         // rendering
         command_buffer start_command_buffer() override;
         void generate_mipmaps(command_buffer cmd, image image) override;
-        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer, const clear_values & clear) override;
+        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer) override;
         void bind_pipeline(command_buffer cmd, pipeline pipe) override;
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override;
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override;
@@ -706,9 +720,9 @@ static VkImageView get_mip_and_layer_view(VkDevice dev, VkImageViewCreateInfo in
     return view;
 }
 
-const vk_render_pass & vk_device::get_render_pass(const render_pass_desc & desc)
+const vk_render_pass & vk_device::get_render_pass(const render_pass_desc & desc, const std::vector<VkFormat> & color_formats, std::optional<VkFormat> depth_format)
 {
-    vk_render_pass_desc dd {desc};
+    vk_render_pass_desc dd {desc, color_formats, depth_format};
     auto & pass = render_passes[dd];
     if(!pass.pass_object)
     {
@@ -736,15 +750,33 @@ const vk_render_pass & vk_device::get_render_pass(const render_pass_desc & desc)
 framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
 {
     rhi::render_pass_desc pass_desc;
-    for(auto & color_attachment : desc.color_attachments) pass_desc.color_attachments.push_back({objects[color_attachment.image].desc.format, dont_care{}, dont_care{}});
-    if(desc.depth_attachment) pass_desc.depth_attachment = {objects[desc.depth_attachment->image].desc.format, dont_care{}, dont_care{}};
-    auto pass = get_render_pass(pass_desc).pass_object;
+    std::vector<VkFormat> color_formats;
+    std::optional<VkFormat> depth_format;
+    for(auto & color_attachment : desc.color_attachments) 
+    {
+        color_formats.push_back(get_vk_format(objects[color_attachment.image].desc.format));
+        pass_desc.color_attachments.push_back({dont_care{}, dont_care{}});
+    }
+    if(desc.depth_attachment) 
+    {
+        depth_format = get_vk_format(objects[desc.depth_attachment->image].desc.format);
+        pass_desc.depth_attachment = {dont_care{}, dont_care{}};
+    }
+    auto pass = get_render_pass(pass_desc, color_formats, depth_format).pass_object;
 
     auto [handle, fb] = objects.create<framebuffer>();
     fb.dims = desc.dimensions;
     fb.framebuffers.push_back(VK_NULL_HANDLE);
-    for(auto attachment : desc.color_attachments) fb.views.push_back(get_mip_and_layer_view(dev, objects[attachment.image].view_info, attachment.mip, attachment.layer));
-    if(desc.depth_attachment) fb.views.push_back(get_mip_and_layer_view(dev, objects[desc.depth_attachment->image].view_info, desc.depth_attachment->mip, desc.depth_attachment->layer));
+    for(auto attachment : desc.color_attachments) 
+    {
+        fb.color_formats.push_back(objects[attachment.image].view_info.format);
+        fb.views.push_back(get_mip_and_layer_view(dev, objects[attachment.image].view_info, attachment.mip, attachment.layer));
+    }
+    if(desc.depth_attachment) 
+    {
+        fb.depth_format = objects[desc.depth_attachment->image].view_info.format;
+        fb.views.push_back(get_mip_and_layer_view(dev, objects[desc.depth_attachment->image].view_info, desc.depth_attachment->mip, desc.depth_attachment->layer));
+    }
     
     VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     framebuffer_info.renderPass = pass;
@@ -1111,10 +1143,11 @@ window vk_device::create_window(const int2 & dimensions, std::string_view title)
     fb.dims = dimensions;
     fb.framebuffers.resize(win.swapchain_image_views.size());
     win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
-    auto render_pass = get_render_pass({
-        {{format, dont_care{}, dont_care{}}},
-        attachment_desc{rhi::image_format::depth_float32, dont_care{}, dont_care{}}
-    });
+
+    fb.color_formats = {get_vk_format(format)};
+    fb.depth_format = get_vk_format(rhi::image_format::depth_float32);
+
+    auto render_pass = get_render_pass({{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}}, fb.color_formats, fb.depth_format);
     for(size_t i=0; i<win.swapchain_image_views.size(); ++i)
     {
         std::vector<VkImageView> attachments {win.swapchain_image_views[i], objects[win.depth_image].image_view};
@@ -1216,17 +1249,31 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
     }
 }
 
-void vk_device::begin_render_pass(command_buffer cmd, const render_pass_desc & pass_desc, framebuffer framebuffer, const clear_values & clear)
+void vk_device::begin_render_pass(command_buffer cmd, const render_pass_desc & pass_desc, framebuffer framebuffer)
 {
-    auto & pass = get_render_pass(pass_desc);
-
-    VkClearValue clear_color, clear_depth_stencil;
-    clear_color.color = {clear.color[0], clear.color[1], clear.color[2], clear.color[3]};
-    clear_depth_stencil.depthStencil = {clear.depth, clear.stencil};
-    std::vector<VkClearValue> clear_values {pass.num_color_clears, clear_color};
-    if(pass.has_depth_clear) clear_values.push_back(clear_depth_stencil);
-
     auto & fb = objects[framebuffer];
+    auto & pass = get_render_pass(pass_desc, fb.color_formats, fb.depth_format);
+
+    std::vector<VkClearValue> clear_values;
+    for(auto & a : pass_desc.color_attachments)
+    {
+        if(auto op = std::get_if<clear_color>(&a.load_op))
+        {
+            VkClearValue clear;
+            clear.color = {op->r, op->g, op->b, op->a};
+            clear_values.push_back(clear);
+        }
+    }
+    if(pass_desc.depth_attachment)
+    {
+        if(auto op = std::get_if<clear_depth>(&pass_desc.depth_attachment->load_op))
+        {
+            VkClearValue clear;
+            clear.depthStencil = {op->depth, op->stencil};
+            clear_values.push_back(clear);
+        }
+    }
+
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     pass_begin_info.renderPass = pass.pass_object;
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
