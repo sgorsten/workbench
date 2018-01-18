@@ -62,8 +62,6 @@ struct standard_device_objects
 
     rhi::descriptor_set_layout op_set_layout;
     rhi::pipeline_layout op_pipeline_layout, empty_pipeline_layout;
-    rhi::render_pass_desc render_to_rg_float16_pass;
-    rhi::render_pass_desc render_to_rgba_float16_pass;
     rhi::pipeline compute_brdf_integral_image_pipeline;
     rhi::pipeline copy_cubemap_from_spheremap_pipeline;
     rhi::pipeline compute_irradiance_cubemap_pipeline;
@@ -82,12 +80,15 @@ struct standard_device_objects
         return dev->create_pipeline({pipeline_layout, {render_cubemap_vertex::get_binding(0)}, {render_cubemap_vertex_shader, fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false});
     }
 
-    template<class F> void render_to_image(rhi::image target_image, int mip, const int2 & dimensions, const rhi::render_pass_desc & render_pass, bool generate_mips, F bind_pipeline)
+    template<class F> void render_to_image(rhi::image target_image, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
     {
         std::vector<rhi::framebuffer> framebuffers;
         gfx::command_buffer cmd {*dev};
         rhi::framebuffer fb = dev->create_framebuffer({dimensions, {{target_image,mip,0}}});
-        cmd.begin_render_pass(render_pass, fb);
+
+        rhi::render_pass_desc pass;
+        pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::shader_read_only_optimal}}};
+        cmd.begin_render_pass(pass, fb);
         bind_pipeline(cmd);
         cmd.bind_vertex_buffer(0, {render_image_vertex_buffer, 0, sizeof(render_image_vertex)*6});
         cmd.draw(0, 6);
@@ -100,21 +101,23 @@ struct standard_device_objects
     rhi::image create_brdf_integral_image(gfx::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer)
     {
         auto target = dev->create_image({rhi::image_shape::_2d, {512,512,1}, 1, rhi::image_format::rg_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
-        render_to_image(target, 0, {512,512}, render_to_rg_float16_pass, false, [&](gfx::command_buffer & cmd)
+        render_to_image(target, 0, {512,512}, false, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(compute_brdf_integral_image_pipeline);
         });
         return target;
     }
 
-    template<class F> void render_to_cubemap(rhi::image target_cube_map, int mip, const int2 & dimensions, const rhi::render_pass_desc & render_pass, bool generate_mips, F bind_pipeline)
+    template<class F> void render_to_cubemap(rhi::image target_cube_map, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
     {
         std::vector<rhi::framebuffer> framebuffers;
         gfx::command_buffer cmd {*dev};
         for(int i=0; i<6; ++i)
         {
             rhi::framebuffer fb = dev->create_framebuffer({dimensions, {{target_cube_map,mip,i}}});
-            cmd.begin_render_pass(render_pass, fb);
+            rhi::render_pass_desc pass;
+            pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::shader_read_only_optimal}}};
+            cmd.begin_render_pass(pass, fb);
             bind_pipeline(cmd);
             cmd.bind_vertex_buffer(0, {render_cubemap_vertex_buffer, exactly(sizeof(render_cubemap_vertex)*6*i), sizeof(render_cubemap_vertex)*6});
             cmd.draw(0, 6);
@@ -132,7 +135,7 @@ struct standard_device_objects
         auto set = desc_pool.alloc(op_set_layout);
         set.write(0, uniform_buffer, make_transform_4x4(preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward}));
         set.write(1, spheremap_sampler, spheremap);
-        render_to_cubemap(target, 0, {width,width}, render_to_rgba_float16_pass, true, [&](gfx::command_buffer & cmd)
+        render_to_cubemap(target, 0, {width,width}, true, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(copy_cubemap_from_spheremap_pipeline);
             cmd.bind_descriptor_set(op_pipeline_layout, 0, set);
@@ -147,7 +150,7 @@ struct standard_device_objects
         auto set = desc_pool.alloc(op_set_layout);
         set.write(0, uniform_buffer, empty);
         set.write(1, cubemap_sampler, cubemap);
-        render_to_cubemap(target, 0, {width,width}, render_to_rgba_float16_pass, false, [&](gfx::command_buffer & cmd)
+        render_to_cubemap(target, 0, {width,width}, false, [&](gfx::command_buffer & cmd)
         {
             cmd.bind_pipeline(compute_irradiance_cubemap_pipeline);
             cmd.bind_descriptor_set(op_pipeline_layout, 0, set);  
@@ -164,7 +167,7 @@ struct standard_device_objects
             auto set = desc_pool.alloc(op_set_layout);
             set.write(0, uniform_buffer, roughness);
             set.write(1, cubemap_sampler, cubemap);
-            render_to_cubemap(target, mip, {width,width}, render_to_rgba_float16_pass, false, [&](gfx::command_buffer & cmd)
+            render_to_cubemap(target, mip, {width,width}, false, [&](gfx::command_buffer & cmd)
             {
                 cmd.bind_pipeline(compute_reflectance_cubemap_pipeline);
                 cmd.bind_descriptor_set(op_pipeline_layout, 0, set);  

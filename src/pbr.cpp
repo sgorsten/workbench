@@ -229,9 +229,6 @@ standard_device_objects::standard_device_objects(std::shared_ptr<rhi::device> de
     op_pipeline_layout = dev->create_pipeline_layout({op_set_layout});
     empty_pipeline_layout = dev->create_pipeline_layout({});
 
-    render_to_rg_float16_pass.color_attachments.push_back({rhi::clear_color{}, rhi::store{rhi::layout::shader_read_only_optimal}});
-    render_to_rgba_float16_pass.color_attachments.push_back({rhi::clear_color{}, rhi::store{rhi::layout::shader_read_only_optimal}});
-
     compute_brdf_integral_image_pipeline = create_image_pipeline(empty_pipeline_layout, compute_brdf_integral_image_fragment_shader);
     copy_cubemap_from_spheremap_pipeline = create_cubemap_pipeline(op_pipeline_layout, copy_cubemap_from_spheremap_fragment_shader);
     compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(op_pipeline_layout, compute_irradiance_cubemap_fragment_shader);

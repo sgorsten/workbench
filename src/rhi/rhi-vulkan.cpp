@@ -136,8 +136,6 @@ namespace rhi
     {
         render_pass_desc desc;
         VkRenderPass pass_object;
-        size_t num_color_clears;
-        bool has_depth_clear;
     };
 
     struct vk_framebuffer
@@ -220,7 +218,7 @@ namespace rhi
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
         uint64_t submit(const VkSubmitInfo & submit_info);
         template<class F> void schedule(F f) { scheduled_actions.push({submitted_index, f}); }
-        const vk_render_pass & get_render_pass(const render_pass_desc & desc, const std::vector<VkFormat> & color_formats, std::optional<VkFormat> depth_format);
+        const vk_render_pass & get_render_pass(framebuffer framebuffer, const render_pass_desc & desc);
         VkPipeline get_pipeline(rhi::pipeline pipe, VkRenderPass pass);
 
         // info
@@ -443,6 +441,7 @@ vk_device::~vk_device()
     // Flush our queue
     wait_until_complete(submitted_index);
     for(auto & fence : ring_fences) vkDestroyFence(dev, fence, nullptr);
+    for(auto & pair : render_passes) vkDestroyRenderPass(dev, pair.second.pass_object, nullptr);
 
     // NOTE: We expect the higher level software layer to ensure that all API objects have been destroyed by this point
     vkDestroyCommandPool(dev, staging_pool, nullptr);
@@ -720,9 +719,9 @@ static VkImageView get_mip_and_layer_view(VkDevice dev, VkImageViewCreateInfo in
     return view;
 }
 
-const vk_render_pass & vk_device::get_render_pass(const render_pass_desc & desc, const std::vector<VkFormat> & color_formats, std::optional<VkFormat> depth_format)
+const vk_render_pass & vk_device::get_render_pass(framebuffer framebuffer, const render_pass_desc & desc)
 {
-    vk_render_pass_desc dd {desc, color_formats, depth_format};
+    vk_render_pass_desc dd {desc, objects[framebuffer].color_formats, objects[framebuffer].depth_format};
     auto & pass = render_passes[dd];
     if(!pass.pass_object)
     {
@@ -741,45 +740,32 @@ const vk_render_pass & vk_device::get_render_pass(const render_pass_desc & desc,
         render_pass_info.pSubpasses = &subpass_desc;
 
         check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass.pass_object));
-        for(auto ref : dd.color_refs) if(dd.attachments[ref.attachment].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) ++pass.num_color_clears;
-        pass.has_depth_clear = dd.depth_ref && dd.attachments[dd.depth_ref->attachment].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
     }
     return pass;
 }
 
 framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
 {
-    rhi::render_pass_desc pass_desc;
-    std::vector<VkFormat> color_formats;
-    std::optional<VkFormat> depth_format;
-    for(auto & color_attachment : desc.color_attachments) 
-    {
-        color_formats.push_back(get_vk_format(objects[color_attachment.image].desc.format));
-        pass_desc.color_attachments.push_back({dont_care{}, dont_care{}});
-    }
-    if(desc.depth_attachment) 
-    {
-        depth_format = get_vk_format(objects[desc.depth_attachment->image].desc.format);
-        pass_desc.depth_attachment = {dont_care{}, dont_care{}};
-    }
-    auto pass = get_render_pass(pass_desc, color_formats, depth_format).pass_object;
-
     auto [handle, fb] = objects.create<framebuffer>();
     fb.dims = desc.dimensions;
     fb.framebuffers.push_back(VK_NULL_HANDLE);
-    for(auto attachment : desc.color_attachments) 
+    rhi::render_pass_desc pass_desc;
+    for(auto & color_attachment : desc.color_attachments) 
     {
-        fb.color_formats.push_back(objects[attachment.image].view_info.format);
-        fb.views.push_back(get_mip_and_layer_view(dev, objects[attachment.image].view_info, attachment.mip, attachment.layer));
+        fb.color_formats.push_back(get_vk_format(objects[color_attachment.image].desc.format));
+        fb.views.push_back(get_mip_and_layer_view(dev, objects[color_attachment.image].view_info, color_attachment.mip, color_attachment.layer));
+        pass_desc.color_attachments.push_back({dont_care{}, dont_care{}});
+        
     }
     if(desc.depth_attachment) 
     {
-        fb.depth_format = objects[desc.depth_attachment->image].view_info.format;
+        fb.depth_format = get_vk_format(objects[desc.depth_attachment->image].desc.format);
         fb.views.push_back(get_mip_and_layer_view(dev, objects[desc.depth_attachment->image].view_info, desc.depth_attachment->mip, desc.depth_attachment->layer));
+        pass_desc.depth_attachment = {dont_care{}, dont_care{}};
     }
     
     VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    framebuffer_info.renderPass = pass;
+    framebuffer_info.renderPass = get_render_pass(handle, pass_desc).pass_object;
     framebuffer_info.attachmentCount = exactly(fb.views.size());
     framebuffer_info.pAttachments = fb.views.data();
     framebuffer_info.width = exactly(desc.dimensions.x);
@@ -1142,12 +1128,10 @@ window vk_device::create_window(const int2 & dimensions, std::string_view title)
     auto [fb_handle, fb] = objects.create<framebuffer>();
     fb.dims = dimensions;
     fb.framebuffers.resize(win.swapchain_image_views.size());
-    win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
-
     fb.color_formats = {get_vk_format(format)};
     fb.depth_format = get_vk_format(rhi::image_format::depth_float32);
-
-    auto render_pass = get_render_pass({{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}}, fb.color_formats, fb.depth_format);
+    win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
+    auto render_pass = get_render_pass(fb_handle, {{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}});
     for(size_t i=0; i<win.swapchain_image_views.size(); ++i)
     {
         std::vector<VkImageView> attachments {win.swapchain_image_views[i], objects[win.depth_image].image_view};
@@ -1251,29 +1235,26 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
 
 void vk_device::begin_render_pass(command_buffer cmd, const render_pass_desc & pass_desc, framebuffer framebuffer)
 {
-    auto & fb = objects[framebuffer];
-    auto & pass = get_render_pass(pass_desc, fb.color_formats, fb.depth_format);
-
+    auto & pass = get_render_pass(framebuffer, pass_desc);
     std::vector<VkClearValue> clear_values;
-    for(auto & a : pass_desc.color_attachments)
+    for(size_t i=0; i<pass_desc.color_attachments.size(); ++i)
     {
-        if(auto op = std::get_if<clear_color>(&a.load_op))
+        if(auto op = std::get_if<clear_color>(&pass_desc.color_attachments[i].load_op))
         {
-            VkClearValue clear;
-            clear.color = {op->r, op->g, op->b, op->a};
-            clear_values.push_back(clear);
+            clear_values.resize(i+1);
+            clear_values[i].color = {op->r, op->g, op->b, op->a};
         }
     }
     if(pass_desc.depth_attachment)
     {
         if(auto op = std::get_if<clear_depth>(&pass_desc.depth_attachment->load_op))
         {
-            VkClearValue clear;
-            clear.depthStencil = {op->depth, op->stencil};
-            clear_values.push_back(clear);
+            clear_values.resize(pass_desc.color_attachments.size()+1);
+            clear_values.back().depthStencil = {op->depth, op->stencil};
         }
     }
 
+    auto & fb = objects[framebuffer];
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     pass_begin_info.renderPass = pass.pass_object;
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];

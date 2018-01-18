@@ -241,7 +241,6 @@ class device_session
     rhi::descriptor_set_layout per_scene_view_layout, per_object_layout, skybox_per_object_layout;
     rhi::pipeline_layout pipe_layout, skybox_pipe_layout;
 
-    rhi::render_pass_desc pass;
     rhi::shader vs, fs, fs_unlit, skybox_vs, skybox_fs_cubemap;
     rhi::pipeline wire_pipe, solid_pipe, skybox_pipe_cubemap;
 
@@ -282,9 +281,6 @@ public:
         });
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
         skybox_pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, skybox_per_object_layout});
-
-        pass.color_attachments.push_back({rhi::clear_color{}, rhi::store{rhi::layout::present_src}});
-        pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
 
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
@@ -366,6 +362,9 @@ public:
         gfx::command_buffer cmd {*dev};
 
         // Draw objects to our primary framebuffer
+        rhi::render_pass_desc pass;
+        pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::present_src}}};
+        pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()));
 
         // Draw skybox
