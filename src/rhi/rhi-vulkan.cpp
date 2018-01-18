@@ -1,11 +1,16 @@
 #include "rhi-internal.h"
 #include <sstream>
+#include <map>
 
 #define GLFW_INCLUDE_NONE
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #pragma comment(lib, "vulkan-1.lib")
 #include <queue>
+
+auto get_tuple(const VkAttachmentDescription & desc) { return std::tie(desc.flags, desc.format, desc.samples, desc.loadOp, desc.storeOp, desc.stencilLoadOp, desc.stencilStoreOp, desc.initialLayout, desc.finalLayout); }
+bool operator < (const VkAttachmentDescription & a, const VkAttachmentDescription & b) { return get_tuple(a) < get_tuple(b); }
+bool operator < (const VkAttachmentReference & a, const VkAttachmentReference & b) { return std::tie(a.attachment, a.layout) < std::tie(b.attachment, b.layout); }
 
 namespace rhi
 {
@@ -19,6 +24,62 @@ namespace rhi
         default: fail_fast();
         }
     }
+
+    static VkAttachmentDescription make_attachment_description(const rhi::attachment_desc & desc)
+    {
+        auto convert_layout = [](rhi::layout layout)
+        {
+            switch(layout)
+            {
+            case rhi::layout::color_attachment_optimal: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            case rhi::layout::depth_stencil_attachment_optimal: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            case rhi::layout::transfer_src_optimal: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            case rhi::layout::transfer_dst_optimal: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            case rhi::layout::present_src: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            default: fail_fast();
+            }
+        };
+        VkAttachmentDescription attachment {0, get_vk_format(desc.format), VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_UNDEFINED};
+        switch(get_attachment_type(desc.format))
+        {
+        case rhi::attachment_type::color: attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case rhi::attachment_type::depth_stencil: attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        }
+        std::visit(overload(
+            [](dont_care) {},
+            [&](clear) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
+            [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
+        ), desc.load_op);
+        std::visit(overload(
+            [](dont_care) {},
+            [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
+        ), desc.store_op);
+        return attachment;
+    }
+
+    struct vk_render_pass_desc
+    {
+        std::vector<VkAttachmentDescription> attachments;
+        std::vector<VkAttachmentReference> color_refs;
+        std::optional<VkAttachmentReference> depth_ref;
+
+        vk_render_pass_desc() {}
+        vk_render_pass_desc(const render_pass_desc & desc)
+        {
+            for(auto & a : desc.color_attachments)
+            {
+                color_refs.push_back({exactly(attachments.size()), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+                attachments.push_back(make_attachment_description(a));
+            }
+            if(desc.depth_attachment)
+            {
+                depth_ref = {exactly(attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+                attachments.push_back(make_attachment_description(*desc.depth_attachment));
+            }
+        }
+    };
+    bool operator < (const vk_render_pass_desc & a, const vk_render_pass_desc & b) { return std::tie(a.attachments, a.color_refs, a.depth_ref) < std::tie(b.attachments, b.color_refs, b.depth_ref); }
 
     struct physical_device_selection
     {
@@ -39,6 +100,7 @@ namespace rhi
 
     struct vk_image
     {
+        image_desc desc;
         VkDeviceMemory device_memory;
         VkImage image_object;
         VkImageView image_view;
@@ -55,7 +117,7 @@ namespace rhi
     struct vk_pipeline
     {
         pipeline_desc desc;
-        VkPipeline pipeline_object;
+        std::unordered_map<VkRenderPass, VkPipeline> pipeline_objects;
     };
 
     struct vk_render_pass
@@ -85,6 +147,12 @@ namespace rhi
         uint2 dims;
         image depth_image;
         framebuffer swapchain_framebuffer;
+    };
+
+    struct vk_command_buffer
+    {
+        VkCommandBuffer cmd;
+        VkRenderPass current_pass;
     };
 
     struct vk_device : device
@@ -118,7 +186,6 @@ namespace rhi
         template<> struct traits<buffer> { using type = vk_buffer; };
         template<> struct traits<image> { using type = vk_image; };
         template<> struct traits<sampler> { using type = VkSampler; };
-        template<> struct traits<render_pass> { using type = vk_render_pass; };
         template<> struct traits<framebuffer> { using type = vk_framebuffer; };
         template<> struct traits<descriptor_pool> { using type = VkDescriptorPool; };
         template<> struct traits<descriptor_set_layout> { using type = VkDescriptorSetLayout; };
@@ -126,10 +193,11 @@ namespace rhi
         template<> struct traits<pipeline_layout> { using type = VkPipelineLayout; };
         template<> struct traits<shader> { using type = vk_shader; }; 
         template<> struct traits<pipeline> { using type = vk_pipeline; };
-        template<> struct traits<command_buffer> { using type = VkCommandBuffer; };
+        template<> struct traits<command_buffer> { using type = vk_command_buffer; };
         template<> struct traits<window> { using type = vk_window; };
-        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, descriptor_pool, descriptor_set_layout, descriptor_set, 
+        heterogeneous_object_set<traits, buffer, image, sampler, framebuffer, descriptor_pool, descriptor_set_layout, descriptor_set, 
             pipeline_layout, shader, pipeline, window, command_buffer> objects;
+        std::map<vk_render_pass_desc, vk_render_pass> render_passes;
 
         vk_device(std::function<void(const char *)> debug_callback);
         ~vk_device();
@@ -138,6 +206,8 @@ namespace rhi
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
         uint64_t submit(const VkSubmitInfo & submit_info);
         template<class F> void schedule(F f) { scheduled_actions.push({submitted_index, f}); }
+        const vk_render_pass & get_render_pass(const render_pass_desc & desc);
+        VkPipeline get_pipeline(rhi::pipeline pipe, VkRenderPass pass);
 
         // info
         device_info get_info() const override { return {linalg::zero_to_one, false}; }
@@ -166,9 +236,6 @@ namespace rhi
         void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) override;
 
         // framebuffers
-        render_pass create_render_pass(const render_pass_desc & desc) override;
-        void destroy_render_pass(render_pass pass) override;
-
         framebuffer create_framebuffer(const framebuffer_desc & desc) override;
         coord_system get_ndc_coords(framebuffer framebuffer) override { return {coord_axis::right, coord_axis::down, coord_axis::forward}; }
         void destroy_framebuffer(framebuffer framebuffer) override;
@@ -184,7 +251,7 @@ namespace rhi
         void destroy_pipeline(pipeline pipeline) override;
 
         // windows
-        window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override;
+        window create_window(const int2 & dimensions, std::string_view title) override;
         GLFWwindow * get_glfw_window(window window) override { return objects[window].glfw_window; }
         framebuffer get_swapchain_framebuffer(window window) override { return objects[window].swapchain_framebuffer; }
         void destroy_window(window window) override;
@@ -192,7 +259,7 @@ namespace rhi
         // rendering
         command_buffer start_command_buffer() override;
         void generate_mipmaps(command_buffer cmd, image image) override;
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override;
+        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer, const clear_values & clear) override;
         void bind_pipeline(command_buffer cmd, pipeline pipe) override;
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override;
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override;
@@ -427,7 +494,7 @@ buffer vk_device::create_buffer(const buffer_desc & desc, const void * initial_d
         memcpy(mapped_staging_memory, initial_data, desc.size);
         auto cmd = start_command_buffer();
         const VkBufferCopy copy {0, 0, desc.size};
-        vkCmdCopyBuffer(objects[cmd], staging_buffer, b.buffer_object, 1, &copy);
+        vkCmdCopyBuffer(objects[cmd].cmd, staging_buffer, b.buffer_object, 1, &copy);
         submit(cmd);
     }
 
@@ -464,6 +531,8 @@ static void transition_image(VkCommandBuffer command_buffer, VkImage image, uint
 image vk_device::create_image(const image_desc & desc, std::vector<const void *> initial_data)
 {
     auto [handle, im] = objects.create<image>();
+    im.desc = desc;
+
     VkImageCreateInfo image_info {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     image_info.arrayLayers = 1;
     VkImageViewType view_type;
@@ -519,16 +588,16 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
             auto cmd = start_command_buffer();
 
             // Must transition to transfer_dst_optimal before any transfers occur
-            transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            transition_image(objects[cmd].cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
             // Copy to the image
             VkBufferImageCopy copy_region {};
             copy_region.imageSubresource = layers;
             copy_region.imageExtent = image_info.extent;
-            vkCmdCopyBufferToImage(objects[cmd], staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+            vkCmdCopyBufferToImage(objects[cmd].cmd, staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
             // After transfer finishes, transition to shader_read_only_optimal, and complete that before any shaders execute
-            transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+            transition_image(objects[cmd].cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
             submit(cmd);
@@ -619,80 +688,6 @@ void vk_device::destroy_sampler(sampler sampler)
     objects.destroy(sampler);
 }
 
-static VkAttachmentDescription make_attachment_description(const rhi::attachment_desc & desc)
-{
-    auto convert_layout = [](rhi::layout layout)
-    {
-        switch(layout)
-        {
-        case rhi::layout::color_attachment_optimal: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        case rhi::layout::depth_stencil_attachment_optimal: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        case rhi::layout::transfer_src_optimal: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        case rhi::layout::transfer_dst_optimal: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        case rhi::layout::present_src: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        default: fail_fast();
-        }
-    };
-    VkAttachmentDescription attachment {0, get_vk_format(desc.format), VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_UNDEFINED};
-    switch(get_attachment_type(desc.format))
-    {
-    case rhi::attachment_type::color: attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    case rhi::attachment_type::depth_stencil: attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    }
-    std::visit(overload(
-        [](dont_care) {},
-        [&](clear) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
-        [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
-    ), desc.load_op);
-    std::visit(overload(
-        [](dont_care) {},
-        [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
-    ), desc.store_op);
-    return attachment;
-}
-render_pass vk_device::create_render_pass(const render_pass_desc & desc) 
-{
-    auto [handle, pass] = objects.create<render_pass>();
-    pass.desc = desc;
-
-    std::vector<VkAttachmentDescription> attachments;
-    std::vector<VkAttachmentReference> color_refs;
-    for(auto & color_attachment : desc.color_attachments)
-    {
-        color_refs.push_back({exactly(attachments.size()), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
-        attachments.push_back(make_attachment_description(color_attachment));
-    }
-    VkAttachmentReference depth_ref {};
-    if(desc.depth_attachment)
-    {
-        depth_ref = {exactly(attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-        attachments.push_back(make_attachment_description(*desc.depth_attachment));
-    }
-
-    VkSubpassDescription subpass_desc {};
-    subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass_desc.colorAttachmentCount = exactly(countof(color_refs));
-    subpass_desc.pColorAttachments = color_refs.data();
-    subpass_desc.pDepthStencilAttachment = desc.depth_attachment ? &depth_ref : nullptr;
-    
-    VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-    render_pass_info.attachmentCount = exactly(countof(attachments));
-    render_pass_info.pAttachments = attachments.data();
-    render_pass_info.subpassCount = 1;
-    render_pass_info.pSubpasses = &subpass_desc;
-
-    check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass.pass_object));
-    for(size_t i=0; i<desc.color_attachments.size(); ++i) if(attachments[i].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) ++pass.num_color_clears;
-    pass.has_depth_clear = desc.depth_attachment && attachments.back().loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
-    return handle;
-}
-void vk_device::destroy_render_pass(render_pass pass)
-{ 
-    schedule([obj = objects[pass]](VkDevice dev) { vkDestroyRenderPass(dev, obj.pass_object, nullptr); });
-    objects.destroy(pass); 
-}
-
 static VkImageView get_mip_and_layer_view(VkDevice dev, VkImageViewCreateInfo info, int mip, int layer)
 {
     switch(info.viewType)
@@ -711,8 +706,40 @@ static VkImageView get_mip_and_layer_view(VkDevice dev, VkImageViewCreateInfo in
     return view;
 }
 
+const vk_render_pass & vk_device::get_render_pass(const render_pass_desc & desc)
+{
+    vk_render_pass_desc dd {desc};
+    auto & pass = render_passes[dd];
+    if(!pass.pass_object)
+    {
+        pass.desc = desc;
+
+        VkSubpassDescription subpass_desc {};
+        subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass_desc.colorAttachmentCount = exactly(countof(dd.color_refs));
+        subpass_desc.pColorAttachments = dd.color_refs.data();
+        subpass_desc.pDepthStencilAttachment = dd.depth_ref ? &*dd.depth_ref : nullptr;
+    
+        VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        render_pass_info.attachmentCount = exactly(countof(dd.attachments));
+        render_pass_info.pAttachments = dd.attachments.data();
+        render_pass_info.subpassCount = 1;
+        render_pass_info.pSubpasses = &subpass_desc;
+
+        check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass.pass_object));
+        for(auto ref : dd.color_refs) if(dd.attachments[ref.attachment].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR) ++pass.num_color_clears;
+        pass.has_depth_clear = dd.depth_ref && dd.attachments[dd.depth_ref->attachment].loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
+    }
+    return pass;
+}
+
 framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
 {
+    rhi::render_pass_desc pass_desc;
+    for(auto & color_attachment : desc.color_attachments) pass_desc.color_attachments.push_back({objects[color_attachment.image].desc.format, dont_care{}, dont_care{}});
+    if(desc.depth_attachment) pass_desc.depth_attachment = {objects[desc.depth_attachment->image].desc.format, dont_care{}, dont_care{}};
+    auto pass = get_render_pass(pass_desc).pass_object;
+
     auto [handle, fb] = objects.create<framebuffer>();
     fb.dims = desc.dimensions;
     fb.framebuffers.push_back(VK_NULL_HANDLE);
@@ -720,7 +747,7 @@ framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
     if(desc.depth_attachment) fb.views.push_back(get_mip_and_layer_view(dev, objects[desc.depth_attachment->image].view_info, desc.depth_attachment->mip, desc.depth_attachment->layer));
     
     VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    framebuffer_info.renderPass = objects[desc.pass].pass_object;
+    framebuffer_info.renderPass = pass;
     framebuffer_info.attachmentCount = exactly(fb.views.size());
     framebuffer_info.pAttachments = fb.views.data();
     framebuffer_info.width = exactly(desc.dimensions.x);
@@ -862,6 +889,17 @@ void vk_device::destroy_shader(shader shader)
 
 pipeline vk_device::create_pipeline(const pipeline_desc & desc)
 {
+    auto [handle, pipe] = objects.create<pipeline>();
+    pipe.desc = desc;
+    return handle;
+}
+
+VkPipeline vk_device::get_pipeline(rhi::pipeline pipeline, VkRenderPass render_pass)
+{
+    auto & pipe = objects[pipeline].pipeline_objects[render_pass];
+    if(pipe) return pipe;
+
+    const auto & desc = objects[pipeline].desc;
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     switch(desc.topology)
     {
@@ -981,19 +1019,22 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = objects[desc.layout];
-    pipelineInfo.renderPass = objects[desc.pass].pass_object;
+    pipelineInfo.renderPass = render_pass;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
     pipelineInfo.basePipelineIndex = -1; // Optional
-
-    auto [handle, pipe] = objects.create<pipeline>();
-    pipe.desc = desc;
-    check("vkCreateGraphicsPipelines", vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipe.pipeline_object));
-    return handle;
+    check("vkCreateGraphicsPipelines", vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipe));
+    return pipe;
 }
 void vk_device::destroy_pipeline(pipeline pipeline)
 {
-    schedule([obj = objects[pipeline]](VkDevice dev) { vkDestroyPipeline(dev, obj.pipeline_object, nullptr); });
+    schedule([obj = objects[pipeline]](VkDevice dev) 
+    { 
+        for(auto & pass_to_pipe : obj.pipeline_objects)
+        {
+            vkDestroyPipeline(dev, pass_to_pipe.second, nullptr); 
+        }
+    });
     objects.destroy(pipeline); 
 }
 
@@ -1001,10 +1042,9 @@ void vk_device::destroy_pipeline(pipeline pipeline)
 // vk_device windows //
 ////////////////////////
 
-window vk_device::create_window(render_pass pass, const int2 & dimensions, std::string_view title) 
+window vk_device::create_window(const int2 & dimensions, std::string_view title) 
 {
-    if(objects[pass].desc.color_attachments.size() != 1) throw std::logic_error("create_window(...) requires render pass with exactly one color attachment");
-    const VkFormat format = get_vk_format(objects[pass].desc.color_attachments[0].format);
+    auto format = rhi::image_format::rgba_srgb8;
 
     const std::string buffer {begin(title), end(title)};
     auto [handle, win] = objects.create<window>();
@@ -1029,7 +1069,7 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
     VkSwapchainCreateInfoKHR swapchain_info {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     swapchain_info.surface = win.surface;
     swapchain_info.minImageCount = selection.swap_image_count;
-    swapchain_info.imageFormat = format;
+    swapchain_info.imageFormat = get_vk_format(format);
     swapchain_info.imageColorSpace = VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; //selection.surface_format.colorSpace;
     swapchain_info.imageExtent = swap_extent;
     swapchain_info.imageArrayLayers = 1;
@@ -1053,7 +1093,7 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
         VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view_info.image = win.swapchain_images[i];
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format = format;
+        view_info.format = get_vk_format(format);
         view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info.subresourceRange.baseMipLevel = 0;
         view_info.subresourceRange.levelCount = 1;
@@ -1071,11 +1111,15 @@ window vk_device::create_window(render_pass pass, const int2 & dimensions, std::
     fb.dims = dimensions;
     fb.framebuffers.resize(win.swapchain_image_views.size());
     win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
+    auto render_pass = get_render_pass({
+        {{format, dont_care{}, dont_care{}}},
+        attachment_desc{rhi::image_format::depth_float32, dont_care{}, dont_care{}}
+    });
     for(size_t i=0; i<win.swapchain_image_views.size(); ++i)
     {
         std::vector<VkImageView> attachments {win.swapchain_image_views[i], objects[win.depth_image].image_view};
         VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        framebuffer_info.renderPass = objects[pass].pass_object;
+        framebuffer_info.renderPass = render_pass.pass_object;
         framebuffer_info.attachmentCount = exactly(attachments.size());
         framebuffer_info.pAttachments = attachments.data();
         framebuffer_info.width = dimensions.x;
@@ -1120,12 +1164,12 @@ command_buffer vk_device::start_command_buffer()
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandPool = staging_pool;
     alloc_info.commandBufferCount = 1;
-    check("vkAllocateCommandBuffers", vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
+    check("vkAllocateCommandBuffers", vkAllocateCommandBuffers(dev, &alloc_info, &cmd.cmd));
 
     VkCommandBufferBeginInfo begin_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    check("vkBeginCommandBuffer", vkBeginCommandBuffer(cmd, &begin_info));
+    check("vkBeginCommandBuffer", vkBeginCommandBuffer(cmd.cmd, &begin_info));
 
     return handle;
 }
@@ -1141,7 +1185,7 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
         layers.layerCount = 1;
         VkOffset3D dims {exactly(im.image_info.extent.width), exactly(im.image_info.extent.height), exactly(im.image_info.extent.depth)};
         
-        transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        transition_image(objects[cmd].cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
         for(uint32_t i=1; i<im.image_info.mipLevels; ++i)
@@ -1158,76 +1202,80 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
             blit.dstSubresource.mipLevel = i;
             blit.dstOffsets[1] = dims;
 
-            transition_image(objects[cmd], im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, 
+            transition_image(objects[cmd].cmd, im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, 
                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            vkCmdBlitImage(objects[cmd], im.image_object, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-            transition_image(objects[cmd], im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            vkCmdBlitImage(objects[cmd].cmd, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+            transition_image(objects[cmd].cmd, im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         }
         for(uint32_t i=1; i<im.image_info.mipLevels; ++i)
         {
-            transition_image(objects[cmd], im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            transition_image(objects[cmd].cmd, im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
     }
 }
 
-void vk_device::begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear)
+void vk_device::begin_render_pass(command_buffer cmd, const render_pass_desc & pass_desc, framebuffer framebuffer, const clear_values & clear)
 {
+    auto & pass = get_render_pass(pass_desc);
+
     VkClearValue clear_color, clear_depth_stencil;
     clear_color.color = {clear.color[0], clear.color[1], clear.color[2], clear.color[3]};
     clear_depth_stencil.depthStencil = {clear.depth, clear.stencil};
-    std::vector<VkClearValue> clear_values {objects[pass].num_color_clears, clear_color};
-    if(objects[pass].has_depth_clear) clear_values.push_back(clear_depth_stencil);
+    std::vector<VkClearValue> clear_values {pass.num_color_clears, clear_color};
+    if(pass.has_depth_clear) clear_values.push_back(clear_depth_stencil);
 
     auto & fb = objects[framebuffer];
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass_begin_info.renderPass = objects[pass].pass_object;
+    pass_begin_info.renderPass = pass.pass_object;
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
     pass_begin_info.renderArea = {{0,0},{exactly(fb.dims.x),exactly(fb.dims.y)}};
     pass_begin_info.clearValueCount = exactly(countof(clear_values));
     pass_begin_info.pClearValues = clear_values.data();
-
-    vkCmdBeginRenderPass(objects[cmd], &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+    
+    vkCmdBeginRenderPass(objects[cmd].cmd, &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
     const VkViewport viewports[] {{0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1}};
-    vkCmdSetViewport(objects[cmd], 0, exactly(countof(viewports)), viewports);
-    vkCmdSetScissor(objects[cmd], 0, 1, &pass_begin_info.renderArea);    
+    vkCmdSetViewport(objects[cmd].cmd, 0, exactly(countof(viewports)), viewports);
+    vkCmdSetScissor(objects[cmd].cmd, 0, 1, &pass_begin_info.renderArea);    
+    objects[cmd].current_pass = pass_begin_info.renderPass;
 }
 
 void vk_device::bind_pipeline(command_buffer cmd, pipeline pipe)
 {
-    vkCmdBindPipeline(objects[cmd], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[pipe].pipeline_object);
+    vkCmdBindPipeline(objects[cmd].cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, get_pipeline(pipe, objects[cmd].current_pass));
 }
 
 void vk_device::bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set)
 {
-    vkCmdBindDescriptorSets(objects[cmd], VK_PIPELINE_BIND_POINT_GRAPHICS, objects[layout], set_index, 1, &objects[set], 0, nullptr);
+    vkCmdBindDescriptorSets(objects[cmd].cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, objects[layout], set_index, 1, &objects[set], 0, nullptr);
 }
 
 void vk_device::bind_vertex_buffer(command_buffer cmd, int index, buffer_range range)
 {
     VkDeviceSize offset = range.offset;
-    vkCmdBindVertexBuffers(objects[cmd], index, 1, &objects[range.buffer].buffer_object, &offset);
+    vkCmdBindVertexBuffers(objects[cmd].cmd, index, 1, &objects[range.buffer].buffer_object, &offset);
 }
 
 void vk_device::bind_index_buffer(command_buffer cmd, buffer_range range)
 {
-    vkCmdBindIndexBuffer(objects[cmd], objects[range.buffer].buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(objects[cmd].cmd, objects[range.buffer].buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
 }
 
 void vk_device::draw(command_buffer cmd, int first_vertex, int vertex_count)
 {
-    vkCmdDraw(objects[cmd], vertex_count, 1, first_vertex, 0);
+    vkCmdDraw(objects[cmd].cmd, vertex_count, 1, first_vertex, 0);
 }
 
 void vk_device::draw_indexed(command_buffer cmd, int first_index, int index_count)
 {
-    vkCmdDrawIndexed(objects[cmd], index_count, 1, first_index, 0, 0);
+    vkCmdDrawIndexed(objects[cmd].cmd, index_count, 1, first_index, 0, 0);
 }
 
 void vk_device::end_render_pass(command_buffer cmd)
 {
-    vkCmdEndRenderPass(objects[cmd]);
+    vkCmdEndRenderPass(objects[cmd].cmd);
+    objects[cmd].current_pass = 0;
 }
 
 uint64_t vk_device::submit(const VkSubmitInfo & submit_info)
@@ -1257,10 +1305,10 @@ void vk_device::wait_until_complete(uint64_t submission_index)
 
 uint64_t vk_device::submit(command_buffer cmd)
 {
-    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd]));
+    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd].cmd));
     VkSubmitInfo submit_info {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &objects[cmd];
+    submit_info.pCommandBuffers = &objects[cmd].cmd;
     submit(submit_info);
     objects.destroy(cmd);
     return submitted_index;
@@ -1268,7 +1316,7 @@ uint64_t vk_device::submit(command_buffer cmd)
 
 uint64_t vk_device::acquire_and_submit_and_present(command_buffer cmd, window window)
 {
-    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd])); 
+    check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd].cmd)); 
 
     auto & win = objects[window];
 
@@ -1278,7 +1326,7 @@ uint64_t vk_device::acquire_and_submit_and_present(command_buffer cmd, window wi
     submit_info.pWaitSemaphores = &win.image_available;
     submit_info.pWaitDstStageMask = wait_stages;
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &objects[cmd];
+    submit_info.pCommandBuffers = &objects[cmd].cmd;
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &win.render_finished;
     submit(submit_info);

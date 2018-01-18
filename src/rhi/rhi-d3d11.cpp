@@ -57,11 +57,6 @@ namespace rhi
         ID3D11SamplerState * sampler_state;
     };
 
-    struct d3d_render_pass
-    {
-        rhi::render_pass_desc desc;
-    };
-
     struct d3d_framebuffer
     {
         int2 dims;
@@ -107,12 +102,11 @@ namespace rhi
         template<> struct traits<buffer> { using type = d3d_buffer; };
         template<> struct traits<image> { using type = d3d_image; };
         template<> struct traits<sampler> { using type = d3d_sampler; };
-        template<> struct traits<render_pass> { using type = d3d_render_pass; };
         template<> struct traits<framebuffer> { using type = d3d_framebuffer; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = d3d_pipeline; };
         template<> struct traits<window> { using type = d3d_window; };
-        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -250,14 +244,6 @@ namespace rhi
         }
         void destroy_sampler(sampler sampler) override { objects.destroy(sampler); }
 
-        render_pass create_render_pass(const render_pass_desc & desc) override 
-        {
-            auto [handle, pass] = objects.create<render_pass>();
-            pass.desc = desc;
-            return handle;
-        }
-        void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
-
         ID3D11RenderTargetView * create_render_target_view(ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
         {
             D3D11_RENDER_TARGET_VIEW_DESC view_desc {get_dx_format(format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
@@ -291,12 +277,8 @@ namespace rhi
         coord_system get_ndc_coords(framebuffer framebuffer) override { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
         void destroy_framebuffer(framebuffer framebuffer) override { objects.destroy(framebuffer); }
 
-        window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
+        window create_window(const int2 & dimensions, std::string_view title) override
         {
-            // Validate render pass description
-            auto & pass_desc = objects[pass].desc;
-            if(pass_desc.color_attachments.size() != 1) throw std::logic_error("window render pass must have exactly one color attachment");
-
             // Create the window
             auto [handle, win] = objects.create<window>();
             const std::string buffer {begin(title), end(title)};
@@ -308,7 +290,7 @@ namespace rhi
             // Create swapchain and render target view for this window
             DXGI_SWAP_CHAIN_DESC scd {};
             scd.BufferCount = 3;
-            scd.BufferDesc.Format = get_dx_format(pass_desc.color_attachments[0].format);
+            scd.BufferDesc.Format = get_dx_format(image_format::rgba_srgb8);
             scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
             scd.OutputWindow = glfwGetWin32Window(win.w);
             scd.SampleDesc.Count = 1;
@@ -325,11 +307,8 @@ namespace rhi
             win.fb = fb_handle;
 
             // If render pass specifies a depth attachment, create a depth buffer specifically for this window
-            if(pass_desc.depth_attachment)
-            {
-                win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, pass_desc.depth_attachment->format, rhi::depth_attachment_bit}, {});
-                fb.depth_stencil_view = create_depth_stencil_view(objects[win.depth_image].resource, pass_desc.depth_attachment->format, 0, 0);
-            }
+            win.depth_image = create_image({rhi::image_shape::_2d, {dimensions,1}, 1, image_format::depth_float32, rhi::depth_attachment_bit}, {});
+            fb.depth_stencil_view = create_depth_stencil_view(objects[win.depth_image].resource, image_format::depth_float32, 0, 0);
 
             return {handle};
         }
@@ -444,12 +423,7 @@ namespace rhi
 
         command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
         void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
-        { 
-            if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");
-            if(objects[pass].desc.depth_attachment && !objects[framebuffer].depth_stencil_view) throw std::logic_error("depth attachment count mismatch");
-            cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); 
-        }
+        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
@@ -469,20 +443,20 @@ namespace rhi
                 },
                 [this,&current_pipeline](const begin_render_pass_command & c)
                 {
-                    auto & pass = objects[c.pass];
+                    auto & pass = c.pass;
                     auto & fb = objects[c.framebuffer];
 
                     // Clear render targets if specified by render pass
-                    for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
+                    for(size_t i=0; i<pass.color_attachments.size(); ++i)
                     {
-                        if(std::holds_alternative<clear>(pass.desc.color_attachments[i].load_op))
+                        if(std::holds_alternative<clear>(pass.color_attachments[i].load_op))
                         {
                             ctx->ClearRenderTargetView(fb.render_target_views[i], &c.clear.color[0]);
                         }
                     }
-                    if(pass.desc.depth_attachment)
+                    if(pass.depth_attachment)
                     {
-                        if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
+                        if(std::holds_alternative<clear>(pass.depth_attachment->load_op))
                         {
                             ctx->ClearDepthStencilView(fb.depth_stencil_view, D3D11_CLEAR_DEPTH|D3D11_CLEAR_DEPTH, c.clear.depth, c.clear.stencil);
                         }

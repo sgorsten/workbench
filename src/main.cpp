@@ -241,7 +241,7 @@ class device_session
     rhi::descriptor_set_layout per_scene_view_layout, per_object_layout, skybox_per_object_layout;
     rhi::pipeline_layout pipe_layout, skybox_pipe_layout;
 
-    rhi::render_pass pass;
+    rhi::render_pass_desc pass;
     rhi::shader vs, fs, fs_unlit, skybox_vs, skybox_fs_cubemap;
     rhi::pipeline wire_pipe, solid_pipe, skybox_pipe_cubemap;
 
@@ -283,10 +283,8 @@ public:
         pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
         skybox_pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, skybox_per_object_layout});
 
-        rhi::render_pass_desc pass_desc;
-        pass_desc.color_attachments.push_back({rhi::image_format::rgba_srgb8, rhi::clear{}, rhi::store{rhi::layout::present_src}});
-        pass_desc.depth_attachment = {rhi::image_format::depth_float32, rhi::clear{}, rhi::dont_care{}};
-        pass = dev->create_render_pass(pass_desc);
+        pass.color_attachments.push_back({rhi::image_format::rgba_srgb8, rhi::clear{}, rhi::store{rhi::layout::present_src}});
+        pass.depth_attachment = {rhi::image_format::depth_float32, rhi::clear{}, rhi::dont_care{}};
 
         vs = dev->create_shader(assets.vs);
         fs = dev->create_shader(assets.fs);
@@ -294,9 +292,9 @@ public:
         skybox_vs = dev->create_shader(assets.skybox_vs);
         skybox_fs_cubemap = dev->create_shader(assets.skybox_fs_cubemap);
 
-        wire_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
-        solid_pipe = dev->create_pipeline({pass, pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
-        skybox_pipe_cubemap = dev->create_pipeline({pass, skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
+        wire_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
+        solid_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
+        skybox_pipe_cubemap = dev->create_pipeline({skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
 
@@ -309,7 +307,7 @@ public:
         brdf_integral = standard.create_brdf_integral_image(desc_pool, uniform_buffer);
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
-        gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
+        gwindow = std::make_unique<gfx::window>(dev, int2{512,512}, ss.str());
         gwindow->set_pos(window_pos); 
     }
 
@@ -323,7 +321,6 @@ public:
         for(auto layout : {per_scene_view_layout, per_object_layout, skybox_per_object_layout}) dev->destroy_descriptor_set_layout(layout);
         for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2, env_cubemap3, brdf_integral}) dev->destroy_image(image);
         for(auto sampler : {nearest}) dev->destroy_sampler(sampler);
-        dev->destroy_render_pass(pass);
     }
 
     bool update(camera & cam, float timestep)

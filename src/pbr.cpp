@@ -229,13 +229,13 @@ standard_device_objects::standard_device_objects(std::shared_ptr<rhi::device> de
     op_pipeline_layout = dev->create_pipeline_layout({op_set_layout});
     empty_pipeline_layout = dev->create_pipeline_layout({});
 
-    render_to_rg_float16_pass = dev->create_render_pass({{{rhi::image_format::rg_float16, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}}}});
-    render_to_rgba_float16_pass = dev->create_render_pass({{{rhi::image_format::rgba_float16, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}}}});
+    render_to_rg_float16_pass.color_attachments.push_back({rhi::image_format::rg_float16, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}});
+    render_to_rgba_float16_pass.color_attachments.push_back({rhi::image_format::rgba_float16, rhi::clear{}, rhi::store{rhi::layout::shader_read_only_optimal}});
 
-    compute_brdf_integral_image_pipeline = create_image_pipeline(render_to_rg_float16_pass, empty_pipeline_layout, compute_brdf_integral_image_fragment_shader);
-    copy_cubemap_from_spheremap_pipeline = create_cubemap_pipeline(render_to_rgba_float16_pass, op_pipeline_layout, copy_cubemap_from_spheremap_fragment_shader);
-    compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(render_to_rgba_float16_pass, op_pipeline_layout, compute_irradiance_cubemap_fragment_shader);
-    compute_reflectance_cubemap_pipeline = create_cubemap_pipeline(render_to_rgba_float16_pass, op_pipeline_layout, compute_reflectance_cubemap_fragment_shader);    
+    compute_brdf_integral_image_pipeline = create_image_pipeline(empty_pipeline_layout, compute_brdf_integral_image_fragment_shader);
+    copy_cubemap_from_spheremap_pipeline = create_cubemap_pipeline(op_pipeline_layout, copy_cubemap_from_spheremap_fragment_shader);
+    compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(op_pipeline_layout, compute_irradiance_cubemap_fragment_shader);
+    compute_reflectance_cubemap_pipeline = create_cubemap_pipeline(op_pipeline_layout, compute_reflectance_cubemap_fragment_shader);    
 }
 
 standard_device_objects::~standard_device_objects()
@@ -244,8 +244,6 @@ standard_device_objects::~standard_device_objects()
     dev->destroy_pipeline(compute_irradiance_cubemap_pipeline);
     dev->destroy_pipeline(copy_cubemap_from_spheremap_pipeline);
     dev->destroy_pipeline(compute_brdf_integral_image_pipeline);
-    dev->destroy_render_pass(render_to_rgba_float16_pass);
-    dev->destroy_render_pass(render_to_rg_float16_pass);
     dev->destroy_pipeline_layout(empty_pipeline_layout);
     dev->destroy_pipeline_layout(op_pipeline_layout);
     dev->destroy_descriptor_set_layout(op_set_layout);

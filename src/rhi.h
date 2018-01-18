@@ -22,7 +22,6 @@ namespace rhi
     using buffer = handle<struct buffer_tag>;
     using image = handle<struct image_tag>;
     using sampler = handle<struct sampler_tag>;
-    using render_pass = handle<struct render_pass_tag>;
     using framebuffer = handle<struct framebuffer_tag>;
     using descriptor_pool = handle<struct descriptor_pool_tag>;
     using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
@@ -131,7 +130,6 @@ namespace rhi
     struct framebuffer_desc
     {
         int2 dimensions;
-        render_pass pass;
         std::vector<framebuffer_attachment_desc> color_attachments;
         std::optional<framebuffer_attachment_desc> depth_attachment;
     };
@@ -152,7 +150,6 @@ namespace rhi
     enum class cull_mode { none, back, front };
     struct pipeline_desc
     {
-        render_pass pass;
         pipeline_layout layout;                 // descriptors
         std::vector<vertex_binding_desc> input; // input state
         std::vector<shader> stages;             // programmable stages
@@ -208,9 +205,6 @@ namespace rhi
         // framebuffers //
         //////////////////
 
-        virtual render_pass create_render_pass(const render_pass_desc & desc) = 0;
-        virtual void destroy_render_pass(render_pass pass) = 0;
-
         virtual framebuffer create_framebuffer(const framebuffer_desc & desc) = 0;
         virtual coord_system get_ndc_coords(framebuffer framebuffer) = 0;
         virtual void destroy_framebuffer(framebuffer framebuffer) = 0;
@@ -232,7 +226,7 @@ namespace rhi
         // windows //
         /////////////
 
-        virtual window create_window(render_pass pass, const int2 & dimensions, std::string_view title) = 0;
+        virtual window create_window(const int2 & dimensions, std::string_view title) = 0;
         virtual GLFWwindow * get_glfw_window(window window) = 0;
         virtual framebuffer get_swapchain_framebuffer(window window) = 0;
         virtual void destroy_window(window window) = 0;
@@ -244,7 +238,7 @@ namespace rhi
         virtual command_buffer start_command_buffer() = 0;
 
         virtual void generate_mipmaps(command_buffer cmd, image image) = 0;
-        virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) = 0;
+        virtual void begin_render_pass(command_buffer cmd, const render_pass_desc & desc, framebuffer framebuffer, const clear_values & clear) = 0;
         virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;
         virtual void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) = 0;
         virtual void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) = 0;

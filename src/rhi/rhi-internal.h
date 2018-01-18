@@ -131,7 +131,7 @@ namespace rhi
     };
 
     struct generate_mipmaps_command { image im; };
-    struct begin_render_pass_command { render_pass pass; framebuffer framebuffer; clear_values clear; };
+    struct begin_render_pass_command { render_pass_desc pass; framebuffer framebuffer; clear_values clear; };
     struct bind_pipeline_command { pipeline pipe; };
     struct bind_descriptor_set_command { pipeline_layout layout; int set_index; descriptor_set set; };
     struct bind_vertex_buffer_command { int index; buffer_range range; };
@@ -147,7 +147,7 @@ namespace rhi
     public:
         command_buffer start_command_buffer() { return std::get<command_buffer>(buffers.create()); }
         void generate_mipmaps(command_buffer cmd, image image) { buffers[cmd].commands.push_back(generate_mipmaps_command{image}); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer, clear}); }
+        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer, const clear_values & clear) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer, clear}); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) { buffers[cmd].commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) { buffers[cmd].commands.push_back(bind_vertex_buffer_command{index, range}); }

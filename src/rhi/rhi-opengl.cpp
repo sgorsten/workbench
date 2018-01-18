@@ -32,11 +32,6 @@ namespace rhi
         GLuint texture_object;
     };
 
-    struct gl_render_pass
-    {
-        render_pass_desc desc;
-    };
-
     struct gl_framebuffer
     {
         GLFWwindow * context;
@@ -97,12 +92,11 @@ namespace rhi
         template<> struct traits<buffer> { using type = gl_buffer; };
         template<> struct traits<image> { using type = gl_image; };
         template<> struct traits<sampler> { using type = GLuint; };
-        template<> struct traits<render_pass> { using type = gl_render_pass; };
         template<> struct traits<framebuffer> { using type = gl_framebuffer; };
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = gl_pipeline; };
         template<> struct traits<window> { using type = gl_window; };
-        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -227,15 +221,7 @@ namespace rhi
             return handle;        
         }
         void destroy_sampler(sampler sampler) override { objects.destroy(sampler); }
-
-        render_pass create_render_pass(const render_pass_desc & desc) override 
-        {
-            auto [handle, pass] = objects.create<render_pass>();
-            pass.desc = desc;
-            return handle;
-        }
-        void destroy_render_pass(render_pass pass) override { objects.destroy(pass); }
-
+        
         framebuffer create_framebuffer(const framebuffer_desc & desc) override
         {
             auto [handle, fb] = objects.create<framebuffer>();
@@ -268,7 +254,7 @@ namespace rhi
         void write_descriptor(descriptor_set set, int binding, buffer_range range) override { desc_emulator.write_descriptor(set, binding, range); }
         void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) override { desc_emulator.write_descriptor(set, binding, sampler, image); }
 
-        window create_window(render_pass pass, const int2 & dimensions, std::string_view title) override
+        window create_window(const int2 & dimensions, std::string_view title) override
         {
             const std::string buffer {begin(title), end(title)};
             glfwDefaultWindowHints();
@@ -388,7 +374,7 @@ namespace rhi
 
         command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
         void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
+        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
         void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
@@ -407,7 +393,7 @@ namespace rhi
                 },
                 [this, &context](const begin_render_pass_command & c)
                 {
-                    auto & pass = objects[c.pass];
+                    auto & pass = c.pass;
                     auto & fb = objects[c.framebuffer];
                     context = fb.context;
                     glfwMakeContextCurrent(fb.context);
@@ -420,16 +406,16 @@ namespace rhi
                     glClearStencil(c.clear.stencil);
 
                     // Clear render targets if specified by render pass
-                    for(size_t i=0; i<pass.desc.color_attachments.size(); ++i)
+                    for(size_t i=0; i<pass.color_attachments.size(); ++i)
                     {
-                        if(std::holds_alternative<clear>(pass.desc.color_attachments[i].load_op))
+                        if(std::holds_alternative<clear>(pass.color_attachments[i].load_op))
                         {
                             glClear(GL_COLOR_BUFFER_BIT); // TODO: Use glClearTexImage(...) when we use multiple color attachments                            
                         }
                     }
-                    if(pass.desc.depth_attachment)
+                    if(pass.depth_attachment)
                     {
-                        if(std::holds_alternative<clear>(pass.desc.depth_attachment->load_op))
+                        if(std::holds_alternative<clear>(pass.depth_attachment->load_op))
                         {
                             glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
                         }
