@@ -519,11 +519,7 @@ namespace rhi
             ));
         }
 
-        command_pool create_command_pool() override { return cmd_emulator.create_command_pool(); }
-        void destroy_command_pool(command_pool pool) override { return cmd_emulator.destroy_command_pool(pool); }
-        void reset_command_pool(command_pool pool) override { return cmd_emulator.reset_command_pool(pool); }
-        command_buffer start_command_buffer(command_pool pool) override { return cmd_emulator.start_command_buffer(pool); }
-
+        command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
         void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
@@ -534,10 +530,9 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void submit_and_wait(command_buffer submit, fence fence) override
+        void submit(command_buffer submit) override
         {
             submit_command_buffer(submit);
-            if(fence) objects[fence].sync_object = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         }
         void acquire_and_submit_and_present(command_buffer submit, window window, fence fence) override
         {

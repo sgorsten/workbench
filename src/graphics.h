@@ -83,6 +83,7 @@ namespace gfx
         rhi::device & dev;
         rhi::command_buffer cmd;
 
+        command_buffer(rhi::device & dev) : dev{dev}, cmd{dev.start_command_buffer()} {}
         void begin_render_pass(rhi::render_pass pass, rhi::framebuffer framebuffer, const rhi::clear_values & clear) { dev.begin_render_pass(cmd, pass, framebuffer, clear); }
         void bind_pipeline(rhi::pipeline pipe) { dev.bind_pipeline(cmd, pipe); }
         void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) { dev.bind_descriptor_set(cmd, layout, set_index, set); }
@@ -92,6 +93,8 @@ namespace gfx
         void draw(int first_vertex, int vertex_count) { dev.draw(cmd, first_vertex, vertex_count); }
         void draw_indexed(int first_index, int index_count)  { dev.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass() { dev.end_render_pass(cmd); }
+        void generate_mipmaps(rhi::image image) { dev.generate_mipmaps(cmd, image); }
+        void submit() { dev.submit(cmd); }
     };
 
     class window

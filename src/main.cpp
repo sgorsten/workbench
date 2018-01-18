@@ -232,7 +232,6 @@ class device_session
     std::shared_ptr<rhi::device> dev;
     standard_device_objects standard;
     rhi::device_info info;
-    rhi::command_pool cmd_pool;
     gfx::descriptor_pool desc_pool;
     gfx::dynamic_buffer uniform_buffer;
     rhi::fence transient_resource_fence;
@@ -258,8 +257,7 @@ class device_session
     double2 last_cursor;
 public:
     device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) :
-        dev{dev}, standard{dev, assets.standard}, info{dev->get_info()}, 
-        cmd_pool{dev->create_command_pool()},
+        dev{dev}, standard{dev, assets.standard}, info{dev->get_info()},
         desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
         transient_resource_fence{dev->create_fence(true)},
         basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
@@ -306,10 +304,10 @@ public:
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
         env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
-        env_cubemap = standard.create_cubemap_from_spheremap(512, cmd_pool, desc_pool, uniform_buffer, env_spheremap, assets.game_coords);
-        env_cubemap2 = standard.create_irradiance_cubemap(32, cmd_pool, desc_pool, uniform_buffer, env_cubemap);
-        env_cubemap3 = standard.create_reflectance_cubemap(128, cmd_pool, desc_pool, uniform_buffer, env_cubemap);
-        brdf_integral = standard.create_brdf_integral_image(cmd_pool, desc_pool, uniform_buffer);
+        env_cubemap = standard.create_cubemap_from_spheremap(512, desc_pool, uniform_buffer, env_spheremap, assets.game_coords);
+        env_cubemap2 = standard.create_irradiance_cubemap(32, desc_pool, uniform_buffer, env_cubemap);
+        env_cubemap3 = standard.create_reflectance_cubemap(128, desc_pool, uniform_buffer, env_cubemap);
+        brdf_integral = standard.create_brdf_integral_image(desc_pool, uniform_buffer);
         dev->wait_idle();
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
@@ -328,7 +326,6 @@ public:
         for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2, env_cubemap3, brdf_integral}) dev->destroy_image(image);
         for(auto sampler : {nearest}) dev->destroy_sampler(sampler);
         dev->destroy_render_pass(pass);
-        dev->destroy_command_pool(cmd_pool);
         dev->destroy_fence(transient_resource_fence);
     }
 
@@ -355,7 +352,6 @@ public:
     {       
         // Reset resources
         dev->wait_for_fence(transient_resource_fence);
-        dev->reset_command_pool(cmd_pool);
         desc_pool.reset();
         uniform_buffer.reset();
 
@@ -373,7 +369,7 @@ public:
         per_scene_view_set.write(2, standard.cubemap_sampler, env_cubemap3);
         per_scene_view_set.write(3, uniform_buffer.write(per_view_uniforms));
 
-        gfx::command_buffer cmd {*dev, dev->start_command_buffer(cmd_pool)};
+        gfx::command_buffer cmd {*dev};
 
         // Draw objects to our primary framebuffer
         cmd.begin_render_pass(pass, dev->get_swapchain_framebuffer(gwindow->get_rhi_window()), {{0,0,0,1},1.0f,0});

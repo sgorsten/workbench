@@ -31,7 +31,6 @@ namespace rhi
     using pipeline_layout = handle<struct pipeline_layout_tag>;
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;
-    using command_pool = handle<struct command_pool_tag>;
     using command_buffer = handle<struct command_buffer_tag>;
     using window = handle<struct window_tag>;
     
@@ -247,10 +246,7 @@ namespace rhi
         // rendering //
         ///////////////
 
-        virtual command_pool create_command_pool() = 0;
-        virtual void destroy_command_pool(command_pool pool) = 0;
-        virtual void reset_command_pool(command_pool pool) = 0;
-        virtual command_buffer start_command_buffer(command_pool pool) = 0;
+        virtual command_buffer start_command_buffer() = 0;
 
         virtual void generate_mipmaps(command_buffer cmd, image image) = 0;
         virtual void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) = 0;
@@ -262,7 +258,7 @@ namespace rhi
         virtual void draw_indexed(command_buffer cmd, int first_index, int index_count) = 0;
         virtual void end_render_pass(command_buffer cmd) = 0;
 
-        virtual void submit_and_wait(command_buffer cmd, fence fence) = 0; // Submit commands to execute immediately, then wait for completion
+        virtual void submit(command_buffer cmd) = 0;
         virtual void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence) = 0; // Submit commands to execute when the next frame is available, followed by a present
         virtual void wait_idle() = 0;
     };

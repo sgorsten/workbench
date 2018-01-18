@@ -550,11 +550,7 @@ namespace rhi
             ));
         }
 
-        command_pool create_command_pool() override { return cmd_emulator.create_command_pool(); }
-        void destroy_command_pool(command_pool pool) override { return cmd_emulator.destroy_command_pool(pool); }
-        void reset_command_pool(command_pool pool) override { return cmd_emulator.reset_command_pool(pool); }
-        command_buffer start_command_buffer(command_pool pool) override { return cmd_emulator.start_command_buffer(pool); }
-
+        command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
         void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
         { 
@@ -570,12 +566,11 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
 
-        void submit_and_wait(command_buffer cmd, fence fence)
+        void submit(command_buffer cmd) override
         {
             submit_command_buffer(cmd);
-            if(fence) check("ID3D11DeviceContext4::Signal", ctx->Signal(objects[fence].fence, ++objects[fence].value));
         }
-        void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence)
+        void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence) override
         {
             submit_command_buffer(cmd);
             objects[window].swap_chain->Present(1, 0);

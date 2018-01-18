@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #pragma comment(lib, "vulkan-1.lib")
+#include <queue>
 
 namespace rhi
 {
@@ -105,9 +106,16 @@ namespace rhi
         void * mapped_staging_memory {};
         VkCommandPool staging_pool {};
 
+        // Scheduling
+        constexpr static int fence_ring_size = 256, fence_ring_mask = 0xFF;
+        VkFence ring_fences[fence_ring_size];
+        uint64_t submitted_index, completed_index;
+        struct scheduled_action { uint64_t after_completion_index; std::function<void(VkDevice)> execute; };
+        std::queue<scheduled_action> scheduled_actions;
+
         // Objects
         template<class T> struct traits;
-        template<> struct traits<fence> { using type = VkFence; };
+        template<> struct traits<fence> { using type = uint64_t; };
         template<> struct traits<buffer> { using type = vk_buffer; };
         template<> struct traits<image> { using type = vk_image; };
         template<> struct traits<sampler> { using type = VkSampler; };
@@ -119,19 +127,18 @@ namespace rhi
         template<> struct traits<pipeline_layout> { using type = VkPipelineLayout; };
         template<> struct traits<shader> { using type = vk_shader; }; 
         template<> struct traits<pipeline> { using type = vk_pipeline; };
-        template<> struct traits<command_pool> { using type = VkCommandPool; };
         template<> struct traits<command_buffer> { using type = VkCommandBuffer; };
         template<> struct traits<window> { using type = vk_window; };
         heterogeneous_object_set<traits, fence, buffer, image, sampler, render_pass, framebuffer, descriptor_pool, descriptor_set_layout, descriptor_set, 
-            pipeline_layout, shader, pipeline, window, command_pool, command_buffer> objects;
+            pipeline_layout, shader, pipeline, window, command_buffer> objects;
 
         vk_device(std::function<void(const char *)> debug_callback);
         ~vk_device();
 
         // Core helper functions
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
-        VkCommandBuffer begin_transient();
-        void end_transient(VkCommandBuffer command_buffer);
+        uint64_t submit(const VkSubmitInfo & submit_info);
+        void wait_until(uint64_t submission_index);
 
         // info
         device_info get_info() const override { return {linalg::zero_to_one, false}; }
@@ -188,11 +195,7 @@ namespace rhi
         void destroy_window(window window) override;
 
         // rendering
-        command_pool create_command_pool() override;
-        void destroy_command_pool(command_pool pool) override;
-        void reset_command_pool(command_pool pool) override;
-        command_buffer start_command_buffer(command_pool pool) override;
-
+        command_buffer start_command_buffer() override;
         void generate_mipmaps(command_buffer cmd, image image) override;
         void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override;
         void bind_pipeline(command_buffer cmd, pipeline pipe) override;
@@ -203,7 +206,7 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override;
         void end_render_pass(command_buffer cmd) override;
 
-        void submit_and_wait(command_buffer cmd, fence fence) override;
+        void submit(command_buffer cmd) override;
         void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence) override;
         void wait_idle() override;
     };
@@ -349,14 +352,22 @@ vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_c
     check("vkMapMemory", vkMapMemory(dev, staging_memory, 0, buffer_info.size, 0, &mapped_staging_memory));
         
     VkCommandPoolCreateInfo command_pool_info {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_pool_info.queueFamilyIndex = selection.queue_family; // TODO: Could use an explicit transfer queue
     command_pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     check("vkCreateCommandPool", vkCreateCommandPool(dev, &command_pool_info, nullptr, &staging_pool));
+
+    // Initialize fence ring
+    const VkFenceCreateInfo fence_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    for(auto & fence : ring_fences) check("vkCreateFence", vkCreateFence(dev, &fence_info, nullptr, &fence));
+    submitted_index = completed_index = 0;
 }
 
 vk_device::~vk_device()
 {
+    // Flush our queue
+    wait_until(submitted_index);
+    for(auto & fence : ring_fences) vkDestroyFence(dev, fence, nullptr);
+
     // NOTE: We expect the higher level software layer to ensure that all API objects have been destroyed by this point
     vkDestroyCommandPool(dev, staging_pool, nullptr);
     vkDestroyBuffer(dev, staging_buffer, nullptr);
@@ -387,35 +398,6 @@ VkDeviceMemory vk_device::allocate(const VkMemoryRequirements & reqs, VkMemoryPr
     throw std::runtime_error("no suitable memory type");
 }
 
-VkCommandBuffer vk_device::begin_transient() 
-{
-    VkCommandBufferAllocateInfo alloc_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_info.commandPool = staging_pool;
-    alloc_info.commandBufferCount = 1;
-    VkCommandBuffer command_buffer;
-    check("vkAllocateCommandBuffers", vkAllocateCommandBuffers(dev, &alloc_info, &command_buffer));
-
-    VkCommandBufferBeginInfo begin_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    check("vkBeginCommandBuffer", vkBeginCommandBuffer(command_buffer, &begin_info));
-
-    return command_buffer;
-}
-
-void vk_device::end_transient(VkCommandBuffer command_buffer) 
-{
-    check("vkEndCommandBuffer", vkEndCommandBuffer(command_buffer));
-    VkSubmitInfo submitInfo {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &command_buffer;
-    check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-    check("vkQueueWaitIdle", vkQueueWaitIdle(queue)); // TODO: Do something with fences instead
-    vkFreeCommandBuffers(dev, staging_pool, 1, &command_buffer);
-}
-
 /////////////////////////
 // vk_device resources //
 /////////////////////////
@@ -424,17 +406,15 @@ fence vk_device::create_fence(bool signaled)
 {
     const VkFenceCreateInfo create_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0, signaled ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{0}};
     auto [handle, f] = objects.create<fence>();
-    check("vkCreateFence", vkCreateFence(dev, &create_info, nullptr, &f));
+    f = 0;
     return handle; 
 }
 void vk_device::wait_for_fence(fence fence) 
 { 
-    if(vkWaitForFences(dev, 1, &objects[fence], VK_TRUE, std::numeric_limits<uint64_t>::max()) != VK_SUCCESS) throw std::runtime_error("vkWaitForFences(...) failed");
-    vkResetFences(dev, 1, &objects[fence]);
+    wait_until(objects[fence]);
 }
 void vk_device::destroy_fence(fence fence)
 {
-    vkDestroyFence(dev, objects[fence], nullptr);
     objects.destroy(fence);
 }
 
@@ -466,10 +446,10 @@ buffer vk_device::create_buffer(const buffer_desc & desc, const void * initial_d
     if(initial_data)
     {
         memcpy(mapped_staging_memory, initial_data, desc.size);
-        auto cmd = begin_transient();
+        auto cmd = start_command_buffer();
         const VkBufferCopy copy {0, 0, desc.size};
-        vkCmdCopyBuffer(cmd, staging_buffer, b.buffer_object, 1, &copy);
-        end_transient(cmd);
+        vkCmdCopyBuffer(objects[cmd], staging_buffer, b.buffer_object, 1, &copy);
+        submit(cmd);
     }
 
     // Map memory if requested to do so
@@ -554,22 +534,22 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
             layers.layerCount = 1;
 
             // Copy image contents from staging buffer into mip level zero
-            auto cmd = begin_transient();
+            auto cmd = start_command_buffer();
 
             // Must transition to transfer_dst_optimal before any transfers occur
-            transition_image(cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
             // Copy to the image
             VkBufferImageCopy copy_region {};
             copy_region.imageSubresource = layers;
             copy_region.imageExtent = image_info.extent;
-            vkCmdCopyBufferToImage(cmd, staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+            vkCmdCopyBufferToImage(objects[cmd], staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
             // After transfer finishes, transition to shader_read_only_optimal, and complete that before any shaders execute
-            transition_image(cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+            transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-            end_transient(cmd);
+            submit(cmd);
         }
     }
 
@@ -593,9 +573,12 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
 
 void vk_device::destroy_image(image image)
 {
-    vkDestroyImageView(dev, objects[image].image_view, nullptr);
-    vkDestroyImage(dev, objects[image].image_object, nullptr);
-    vkFreeMemory(dev, objects[image].device_memory, nullptr);
+    scheduled_actions.push({submitted_index, [obj = objects[image]](VkDevice dev)
+    {
+        vkDestroyImageView(dev, obj.image_view, nullptr);
+        vkDestroyImage(dev, obj.image_object, nullptr);
+        vkFreeMemory(dev, obj.device_memory, nullptr);
+    }});
     objects.destroy(image); 
 }
 
@@ -766,8 +749,11 @@ framebuffer vk_device::create_framebuffer(const framebuffer_desc & desc)
 }
 void vk_device::destroy_framebuffer(framebuffer framebuffer)
 {
-    for(auto fb : objects[framebuffer].framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
-    for(auto view : objects[framebuffer].views) vkDestroyImageView(dev, view, nullptr);
+    scheduled_actions.push({submitted_index, [dev = dev, obj = objects[framebuffer]](VkDevice dev)
+    {
+        for(auto fb : obj.framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
+        for(auto view : obj.views) vkDestroyImageView(dev, view, nullptr);
+    }});
     objects.destroy(framebuffer);
 }
 
@@ -1127,6 +1113,7 @@ void vk_device::destroy_window(window window)
     auto & win = objects[window];
     destroy_framebuffer(win.swapchain_framebuffer);
     destroy_image(win.depth_image);
+    wait_until(submitted_index);
     vkDestroySemaphore(dev, win.render_finished, nullptr);
     vkDestroySemaphore(dev, win.image_available, nullptr);
     for(auto view : win.swapchain_image_views) vkDestroyImageView(dev, view, nullptr);
@@ -1140,35 +1127,14 @@ void vk_device::destroy_window(window window)
 // vk_device rendering //
 //////////////////////////
 
-command_pool vk_device::create_command_pool()
-{
-    VkCommandPoolCreateInfo command_pool_info {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    command_pool_info.queueFamilyIndex = selection.queue_family;
-    command_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-    auto [handle, pool] = objects.create<command_pool>();
-    check("vkCreateCommandPool", vkCreateCommandPool(dev, &command_pool_info, nullptr, &pool));
-    return handle;
-}
-
-void vk_device::destroy_command_pool(command_pool pool)
-{
-    vkDestroyCommandPool(dev, objects[pool], nullptr);
-}
-
-void vk_device::reset_command_pool(command_pool pool)
-{
-    check("vkResetCommandPool", vkResetCommandPool(dev, objects[pool], 0));
-}
-
-command_buffer vk_device::start_command_buffer(command_pool pool)
+command_buffer vk_device::start_command_buffer()
 {
     auto [handle, cmd] = objects.create<command_buffer>();
-
+    
     VkCommandBufferAllocateInfo alloc_info {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_info.commandPool = objects[pool];
+    alloc_info.commandPool = staging_pool;
     alloc_info.commandBufferCount = 1;
     check("vkAllocateCommandBuffers", vkAllocateCommandBuffers(dev, &alloc_info, &cmd));
 
@@ -1280,13 +1246,38 @@ void vk_device::end_render_pass(command_buffer cmd)
     vkCmdEndRenderPass(objects[cmd]);
 }
 
-void vk_device::submit_and_wait(command_buffer cmd, fence fence)
+uint64_t vk_device::submit(const VkSubmitInfo & submit_info)
+{
+    if(completed_index + fence_ring_size == submitted_index) wait_until(submitted_index - fence_ring_mask);
+    check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submit_info, ring_fences[submitted_index & fence_ring_mask]));
+    ++submitted_index;
+    for(uint32_t i=0; i<submit_info.commandBufferCount; ++i) scheduled_actions.push({submitted_index, [this, cmd=submit_info.pCommandBuffers[i]](VkDevice dev) { vkFreeCommandBuffers(dev, staging_pool, 1, &cmd); }});
+    return submitted_index;
+}
+
+void vk_device::wait_until(uint64_t submission_index)
+{
+    while(completed_index < submission_index)
+    {
+        check("vkWaitForFences", vkWaitForFences(dev, 1, &ring_fences[completed_index & fence_ring_mask], VK_TRUE, std::numeric_limits<uint64_t>::max()));
+        check("vkResetFences", vkResetFences(dev, 1, &ring_fences[completed_index & fence_ring_mask]));
+        ++completed_index;
+    }
+
+    while(!scheduled_actions.empty() && completed_index >= scheduled_actions.front().after_completion_index)
+    {
+        scheduled_actions.front().execute(dev);
+        scheduled_actions.pop();
+    }
+}
+
+void vk_device::submit(command_buffer cmd)
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd]));
-    VkSubmitInfo submitInfo {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &objects[cmd];
-    check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submitInfo, fence ? objects[fence] : VK_NULL_HANDLE));
+    VkSubmitInfo submit_info {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &objects[cmd];
+    submit(submit_info);
     objects.destroy(cmd);
 }
 
@@ -1305,7 +1296,8 @@ void vk_device::acquire_and_submit_and_present(command_buffer cmd, window window
     submit_info.pCommandBuffers = &objects[cmd];
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &win.render_finished;
-    check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submit_info, fence ? objects[fence] : VK_NULL_HANDLE));
+    submit(submit_info);
+    if(fence) objects[fence] = submitted_index;
     objects.destroy(cmd);
 
     VkPresentInfoKHR present_info {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
