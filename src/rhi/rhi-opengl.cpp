@@ -1,5 +1,6 @@
 #include "rhi-internal.h"
 
+#include <map>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include "../../dep/SPIRV-Cross/spirv_glsl.hpp"
@@ -18,11 +19,6 @@ namespace rhi
         default: fail_fast();
         }
     }
-
-    struct gl_fence
-    {
-        GLsync sync_object = 0;
-    };
 
     struct gl_buffer
     {
@@ -93,9 +89,11 @@ namespace rhi
         GLFWwindow * hidden_window;
         gl_pipeline * current_pipeline=0;
         size_t index_buffer_offset=0;
+        
+        std::map<uint64_t, GLsync> sync_objects;
+        uint64_t submitted_index=0;
 
         template<class T> struct traits;
-        template<> struct traits<fence> { using type = gl_fence; };
         template<> struct traits<buffer> { using type = gl_buffer; };
         template<> struct traits<image> { using type = gl_image; };
         template<> struct traits<sampler> { using type = GLuint; };
@@ -104,7 +102,7 @@ namespace rhi
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = gl_pipeline; };
         template<> struct traits<window> { using type = gl_window; };
-        heterogeneous_object_set<traits, fence, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -147,28 +145,6 @@ namespace rhi
         }
         
         device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
-
-        
-        fence create_fence(bool signaled) override
-        {
-            auto [handle, f] = objects.create<fence>();
-            if(signaled) f.sync_object = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-            return handle;
-        }
-        void wait_for_fence(fence fence) override 
-        { 
-            auto & f = objects[fence];
-            switch(glClientWaitSync(f.sync_object, 0, GL_TIMEOUT_IGNORED))
-            {
-            case GL_TIMEOUT_EXPIRED: case GL_WAIT_FAILED: throw std::runtime_error("glClientWaitSync(...) failed");
-            }
-            glDeleteSync(f.sync_object);
-            f.sync_object = nullptr;
-        }
-        void destroy_fence(fence fence) override 
-        {
-            objects.destroy(fence);
-        }
 
         image create_image(const image_desc & desc, std::vector<const void *> initial_data) override
         {
@@ -410,7 +386,18 @@ namespace rhi
         void destroy_pipeline(pipeline pipeline)  override { objects.destroy(pipeline); }       
         void destroy_window(window window) override { objects.destroy(window); }
 
-        void submit_command_buffer(command_buffer cmd)
+        command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
+        void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
+        void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
+        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
+        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
+        void bind_index_buffer(command_buffer cmd, buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
+        void draw(command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
+        void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
+        void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
+
+        uint64_t submit(command_buffer cmd) override
         {
             GLFWwindow * context = hidden_window;
             cmd_emulator.execute(cmd, overload(
@@ -517,31 +504,28 @@ namespace rhi
                 },
                 [this](const end_render_pass_command &) {}
             ));
+            sync_objects[++submitted_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            return submitted_index;
         }
-
-        command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
-        void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override { cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); }
-        void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
-        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
-        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
-        void bind_index_buffer(command_buffer cmd, buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
-        void draw(command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
-        void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
-        void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
-
-        void submit(command_buffer submit) override
+        uint64_t acquire_and_submit_and_present(command_buffer cmd, window window) override
         {
-            submit_command_buffer(submit);
-        }
-        void acquire_and_submit_and_present(command_buffer submit, window window, fence fence) override
-        {
-            submit_command_buffer(submit);
+            submit(cmd);
             glfwSwapBuffers(objects[window].w);
-            if(fence) objects[fence].sync_object = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            return submitted_index;
         }
 
-        void wait_idle() override { glFlush(); }
+        void wait_until_complete(uint64_t submit_id) override
+        {
+            for(auto it = sync_objects.begin(); it != sync_objects.end(); it = sync_objects.erase(it))
+            {
+                if(submit_id < it->first) return;
+                switch(glClientWaitSync(it->second, 0, GL_TIMEOUT_IGNORED))
+                {
+                case GL_TIMEOUT_EXPIRED: case GL_WAIT_FAILED: throw std::runtime_error("glClientWaitSync(...) failed");
+                }
+                glDeleteSync(it->second);
+            }
+        }
     };
 
     autoregister_backend<gl_device> autoregister_gl_backend {"OpenGL 4.5 Core"};

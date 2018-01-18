@@ -93,7 +93,7 @@ struct standard_device_objects
         cmd.draw(0, 6);
         cmd.end_render_pass();
         if(generate_mips) cmd.generate_mipmaps(target_image);
-        cmd.submit();
+        dev->wait_until_complete(cmd.submit());
         dev->destroy_framebuffer(fb);
     }
 
@@ -122,7 +122,7 @@ struct standard_device_objects
             framebuffers.push_back(fb);
         }
         if(generate_mips) cmd.generate_mipmaps(target_cube_map);
-        cmd.submit();
+        dev->wait_until_complete(cmd.submit());
         for(auto fb : framebuffers) dev->destroy_framebuffer(fb);
     }
 

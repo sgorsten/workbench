@@ -19,7 +19,6 @@ namespace rhi
     template<class T> bool operator != (const handle<T> & a, const handle<T> & b) { return a.id != b.id; }
 
     // Object types
-    using fence = handle<struct fence_tag>;
     using buffer = handle<struct buffer_tag>;
     using image = handle<struct image_tag>;
     using sampler = handle<struct sampler_tag>;
@@ -180,10 +179,6 @@ namespace rhi
         // resources //
         ///////////////
 
-        virtual fence create_fence(bool signaled) = 0;
-        virtual void wait_for_fence(fence fence) = 0;
-        virtual void destroy_fence(fence fence) = 0;
-
         virtual buffer create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
         virtual char * get_mapped_memory(buffer buffer) = 0;
         virtual void destroy_buffer(buffer buffer) = 0;
@@ -258,9 +253,9 @@ namespace rhi
         virtual void draw_indexed(command_buffer cmd, int first_index, int index_count) = 0;
         virtual void end_render_pass(command_buffer cmd) = 0;
 
-        virtual void submit(command_buffer cmd) = 0;
-        virtual void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence) = 0; // Submit commands to execute when the next frame is available, followed by a present
-        virtual void wait_idle() = 0;
+        virtual uint64_t submit(command_buffer cmd) = 0;
+        virtual uint64_t acquire_and_submit_and_present(command_buffer cmd, window window) = 0; // Submit commands to execute when the next frame is available, followed by a present
+        virtual void wait_until_complete(uint64_t submit_id) = 0;
     };
 
     struct backend_info

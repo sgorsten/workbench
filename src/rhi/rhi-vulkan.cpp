@@ -115,7 +115,6 @@ namespace rhi
 
         // Objects
         template<class T> struct traits;
-        template<> struct traits<fence> { using type = uint64_t; };
         template<> struct traits<buffer> { using type = vk_buffer; };
         template<> struct traits<image> { using type = vk_image; };
         template<> struct traits<sampler> { using type = VkSampler; };
@@ -129,7 +128,7 @@ namespace rhi
         template<> struct traits<pipeline> { using type = vk_pipeline; };
         template<> struct traits<command_buffer> { using type = VkCommandBuffer; };
         template<> struct traits<window> { using type = vk_window; };
-        heterogeneous_object_set<traits, fence, buffer, image, sampler, render_pass, framebuffer, descriptor_pool, descriptor_set_layout, descriptor_set, 
+        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, descriptor_pool, descriptor_set_layout, descriptor_set, 
             pipeline_layout, shader, pipeline, window, command_buffer> objects;
 
         vk_device(std::function<void(const char *)> debug_callback);
@@ -138,16 +137,12 @@ namespace rhi
         // Core helper functions
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
         uint64_t submit(const VkSubmitInfo & submit_info);
-        void wait_until(uint64_t submission_index);
+        template<class F> void schedule(F f) { scheduled_actions.push({submitted_index, f}); }
 
         // info
         device_info get_info() const override { return {linalg::zero_to_one, false}; }
 
         // resources
-        fence create_fence(bool signaled) override;
-        void wait_for_fence(fence fence) override;
-        void destroy_fence(fence fence) override;
-
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override;
         char * get_mapped_memory(buffer buffer) override { return objects[buffer].mapped; }
         void destroy_buffer(buffer buffer) override;
@@ -206,9 +201,9 @@ namespace rhi
         void draw_indexed(command_buffer cmd, int first_index, int index_count) override;
         void end_render_pass(command_buffer cmd) override;
 
-        void submit(command_buffer cmd) override;
-        void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence) override;
-        void wait_idle() override;
+        uint64_t submit(command_buffer cmd) override;
+        uint64_t acquire_and_submit_and_present(command_buffer cmd, window window) override;
+        void wait_until_complete(uint64_t submit_id) override;
     };
 
     autoregister_backend<vk_device> autoregister_vk_backend {"Vulkan 1.0"};
@@ -365,7 +360,7 @@ vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_c
 vk_device::~vk_device()
 {
     // Flush our queue
-    wait_until(submitted_index);
+    wait_until_complete(submitted_index);
     for(auto & fence : ring_fences) vkDestroyFence(dev, fence, nullptr);
 
     // NOTE: We expect the higher level software layer to ensure that all API objects have been destroyed by this point
@@ -401,22 +396,6 @@ VkDeviceMemory vk_device::allocate(const VkMemoryRequirements & reqs, VkMemoryPr
 /////////////////////////
 // vk_device resources //
 /////////////////////////
-
-fence vk_device::create_fence(bool signaled) 
-{
-    const VkFenceCreateInfo create_info {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0, signaled ? VK_FENCE_CREATE_SIGNALED_BIT : VkFenceCreateFlags{0}};
-    auto [handle, f] = objects.create<fence>();
-    f = 0;
-    return handle; 
-}
-void vk_device::wait_for_fence(fence fence) 
-{ 
-    wait_until(objects[fence]);
-}
-void vk_device::destroy_fence(fence fence)
-{
-    objects.destroy(fence);
-}
 
 buffer vk_device::create_buffer(const buffer_desc & desc, const void * initial_data)
 {
@@ -463,9 +442,12 @@ buffer vk_device::create_buffer(const buffer_desc & desc, const void * initial_d
 
 void vk_device::destroy_buffer(buffer buffer)
 {
-    vkDestroyBuffer(dev, objects[buffer].buffer_object, nullptr);
-    if(objects[buffer].mapped) vkUnmapMemory(dev, objects[buffer].memory_object);
-    vkFreeMemory(dev, objects[buffer].memory_object, nullptr);
+    schedule([obj = objects[buffer]](VkDevice dev)
+    {
+        vkDestroyBuffer(dev, obj.buffer_object, nullptr);
+        if(obj.mapped) vkUnmapMemory(dev, obj.memory_object);
+        vkFreeMemory(dev, obj.memory_object, nullptr);
+    });
     objects.destroy(buffer); 
 }
 
@@ -476,7 +458,7 @@ static void transition_image(VkCommandBuffer command_buffer, VkImage image, uint
     const VkImageMemoryBarrier barriers[] {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0, 
         src_access_mask, dst_access_mask, old_layout, new_layout, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, 
         image, {VK_IMAGE_ASPECT_COLOR_BIT, mip_level, 1, array_layer, 1}};
-    vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr, countof(barriers), barriers);
+    vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr, exactly(countof(barriers)), barriers);
 }
 
 image vk_device::create_image(const image_desc & desc, std::vector<const void *> initial_data)
@@ -573,12 +555,12 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
 
 void vk_device::destroy_image(image image)
 {
-    scheduled_actions.push({submitted_index, [obj = objects[image]](VkDevice dev)
+    schedule([obj = objects[image]](VkDevice dev)
     {
         vkDestroyImageView(dev, obj.image_view, nullptr);
         vkDestroyImage(dev, obj.image_object, nullptr);
         vkFreeMemory(dev, obj.device_memory, nullptr);
-    }});
+    });
     objects.destroy(image); 
 }
 
@@ -633,7 +615,7 @@ sampler vk_device::create_sampler(const sampler_desc & desc)
 }
 void vk_device::destroy_sampler(sampler sampler)
 {
-    vkDestroySampler(dev, objects[sampler], nullptr);
+    schedule([obj = objects[sampler]](VkDevice dev) { vkDestroySampler(dev, obj, nullptr); });
     objects.destroy(sampler);
 }
 
@@ -707,7 +689,7 @@ render_pass vk_device::create_render_pass(const render_pass_desc & desc)
 }
 void vk_device::destroy_render_pass(render_pass pass)
 { 
-    vkDestroyRenderPass(dev, objects[pass].pass_object, nullptr);
+    schedule([obj = objects[pass]](VkDevice dev) { vkDestroyRenderPass(dev, obj.pass_object, nullptr); });
     objects.destroy(pass); 
 }
 
@@ -775,7 +757,7 @@ descriptor_pool vk_device::create_descriptor_pool()
 }
 void vk_device::destroy_descriptor_pool(descriptor_pool pool)
 {
-    vkDestroyDescriptorPool(dev, objects[pool], nullptr);
+    schedule([obj = objects[pool]](VkDevice dev) { vkDestroyDescriptorPool(dev, obj, nullptr); });
     objects.destroy(pool); 
 }
 
@@ -804,7 +786,7 @@ descriptor_set_layout vk_device::create_descriptor_set_layout(const std::vector<
 }
 void vk_device::destroy_descriptor_set_layout(descriptor_set_layout layout) 
 { 
-    vkDestroyDescriptorSetLayout(dev, objects[layout], nullptr);
+    schedule([obj = objects[layout]](VkDevice dev) { vkDestroyDescriptorSetLayout(dev, obj, nullptr); });
     objects.destroy(layout); 
 }
 
@@ -858,7 +840,7 @@ pipeline_layout vk_device::create_pipeline_layout(const std::vector<descriptor_s
 }
 void vk_device::destroy_pipeline_layout(pipeline_layout layout)
 {
-    vkDestroyPipelineLayout(dev, objects[layout], nullptr);
+    schedule([obj = objects[layout]](VkDevice dev) { vkDestroyPipelineLayout(dev, obj, nullptr); });
     objects.destroy(layout); 
 }
 
@@ -874,7 +856,7 @@ shader vk_device::create_shader(const shader_module & module)
 }
 void vk_device::destroy_shader(shader shader)
 {
-    vkDestroyShaderModule(dev, objects[shader].module, nullptr);
+    schedule([obj = objects[shader]](VkDevice dev) { vkDestroyShaderModule(dev, obj.module, nullptr); });
     objects.destroy(shader); 
 }
 
@@ -1011,7 +993,7 @@ pipeline vk_device::create_pipeline(const pipeline_desc & desc)
 }
 void vk_device::destroy_pipeline(pipeline pipeline)
 {
-    vkDestroyPipeline(dev, objects[pipeline].pipeline_object, nullptr);
+    schedule([obj = objects[pipeline]](VkDevice dev) { vkDestroyPipeline(dev, obj.pipeline_object, nullptr); });
     objects.destroy(pipeline); 
 }
 
@@ -1113,13 +1095,15 @@ void vk_device::destroy_window(window window)
     auto & win = objects[window];
     destroy_framebuffer(win.swapchain_framebuffer);
     destroy_image(win.depth_image);
-    wait_until(submitted_index);
-    vkDestroySemaphore(dev, win.render_finished, nullptr);
-    vkDestroySemaphore(dev, win.image_available, nullptr);
-    for(auto view : win.swapchain_image_views) vkDestroyImageView(dev, view, nullptr);
-    vkDestroySwapchainKHR(dev, win.swapchain, nullptr);
-    vkDestroySurfaceKHR(instance, win.surface, nullptr);
-    glfwDestroyWindow(win.glfw_window);
+    schedule([this, obj = objects[window]](VkDevice dev) 
+    { 
+        vkDestroySemaphore(dev, obj.render_finished, nullptr);
+        vkDestroySemaphore(dev, obj.image_available, nullptr);
+        for(auto view : obj.swapchain_image_views) vkDestroyImageView(dev, view, nullptr);
+        vkDestroySwapchainKHR(dev, obj.swapchain, nullptr);
+        vkDestroySurfaceKHR(instance, obj.surface, nullptr);
+        glfwDestroyWindow(obj.glfw_window);
+    });
     objects.destroy(window);
 }
 
@@ -1155,7 +1139,7 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
         layers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         layers.baseArrayLayer = exactly(layer);
         layers.layerCount = 1;
-        VkOffset3D dims {im.image_info.extent.width, im.image_info.extent.height, im.image_info.extent.depth};
+        VkOffset3D dims {exactly(im.image_info.extent.width), exactly(im.image_info.extent.height), exactly(im.image_info.extent.depth)};
         
         transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -1248,14 +1232,14 @@ void vk_device::end_render_pass(command_buffer cmd)
 
 uint64_t vk_device::submit(const VkSubmitInfo & submit_info)
 {
-    if(completed_index + fence_ring_size == submitted_index) wait_until(submitted_index - fence_ring_mask);
+    if(completed_index + fence_ring_size == submitted_index) wait_until_complete(submitted_index - fence_ring_mask);
     check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submit_info, ring_fences[submitted_index & fence_ring_mask]));
     ++submitted_index;
     for(uint32_t i=0; i<submit_info.commandBufferCount; ++i) scheduled_actions.push({submitted_index, [this, cmd=submit_info.pCommandBuffers[i]](VkDevice dev) { vkFreeCommandBuffers(dev, staging_pool, 1, &cmd); }});
     return submitted_index;
 }
 
-void vk_device::wait_until(uint64_t submission_index)
+void vk_device::wait_until_complete(uint64_t submission_index)
 {
     while(completed_index < submission_index)
     {
@@ -1271,7 +1255,7 @@ void vk_device::wait_until(uint64_t submission_index)
     }
 }
 
-void vk_device::submit(command_buffer cmd)
+uint64_t vk_device::submit(command_buffer cmd)
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd]));
     VkSubmitInfo submit_info {VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -1279,9 +1263,10 @@ void vk_device::submit(command_buffer cmd)
     submit_info.pCommandBuffers = &objects[cmd];
     submit(submit_info);
     objects.destroy(cmd);
+    return submitted_index;
 }
 
-void vk_device::acquire_and_submit_and_present(command_buffer cmd, window window, fence fence)
+uint64_t vk_device::acquire_and_submit_and_present(command_buffer cmd, window window)
 {
     check("vkEndCommandBuffer", vkEndCommandBuffer(objects[cmd])); 
 
@@ -1297,7 +1282,6 @@ void vk_device::acquire_and_submit_and_present(command_buffer cmd, window window
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &win.render_finished;
     submit(submit_info);
-    if(fence) objects[fence] = submitted_index;
     objects.destroy(cmd);
 
     VkPresentInfoKHR present_info {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
@@ -1310,9 +1294,5 @@ void vk_device::acquire_and_submit_and_present(command_buffer cmd, window window
 
     auto & fb = objects[win.swapchain_framebuffer];
     check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &fb.current_index));
-}
-
-void vk_device::wait_idle() 
-{
-    check("vkdeviceWaitIdle", vkDeviceWaitIdle(dev));
+    return submitted_index;
 }

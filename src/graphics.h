@@ -94,7 +94,7 @@ namespace gfx
         void draw_indexed(int first_index, int index_count)  { dev.draw_indexed(cmd, first_index, index_count); }
         void end_render_pass() { dev.end_render_pass(cmd); }
         void generate_mipmaps(rhi::image image) { dev.generate_mipmaps(cmd, image); }
-        void submit() { dev.submit(cmd); }
+        uint64_t submit() { return dev.submit(cmd); }
     };
 
     class window

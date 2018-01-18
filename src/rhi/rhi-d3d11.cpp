@@ -39,12 +39,6 @@ namespace rhi
         }
     }
 
-    struct d3d_fence
-    {
-        ID3D11Fence * fence;
-        UINT64 value = 0;
-    };
-
     struct d3d_buffer
     {
         ID3D11Buffer * buffer_object;
@@ -106,9 +100,10 @@ namespace rhi
         ID3D11Device5 * dev;
         ID3D11DeviceContext4 * ctx;
         IDXGIFactory * factory;
+        ID3D11Fence * fence;
+        uint64_t submitted_index = 0;
 
         template<class T> struct traits;
-        template<> struct traits<fence> { using type = d3d_fence; };
         template<> struct traits<buffer> { using type = d3d_buffer; };
         template<> struct traits<image> { using type = d3d_image; };
         template<> struct traits<sampler> { using type = d3d_sampler; };
@@ -117,7 +112,7 @@ namespace rhi
         template<> struct traits<shader> { using type = shader_module; }; 
         template<> struct traits<pipeline> { using type = d3d_pipeline; };
         template<> struct traits<window> { using type = d3d_window; };
-        heterogeneous_object_set<traits, fence, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
+        heterogeneous_object_set<traits, buffer, image, sampler, render_pass, framebuffer, shader, pipeline, window> objects;
         descriptor_emulator desc_emulator;
         command_emulator cmd_emulator;
 
@@ -135,22 +130,11 @@ namespace rhi
             IDXGIAdapter * adapter = nullptr;
             check("IDXGIDevice::GetAdapter", dxgi_dev->GetAdapter(&adapter));
             check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory));
+
+            check("ID3D11Device5::CreateFence", dev->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&fence));
         }
 
         device_info get_info() const override { return {linalg::zero_to_one, true}; }
-
-        fence create_fence(bool signaled) override 
-        { 
-            auto [handle, f] = objects.create<fence>();
-            check("ID3D11Device5::CreateFence", dev->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&f.fence));
-            if(signaled) check("ID3D11DeviceContext4::Signal", ctx->Signal(f.fence, ++f.value));
-            return handle;
-        }
-        void wait_for_fence(fence fence) override 
-        { 
-            check("ID3D11DeviceContext4::Wait", ctx->Wait(objects[fence].fence, objects[fence].value));
-        }
-        void destroy_fence(fence fence) override { objects.destroy(fence); }
 
         buffer create_buffer(const buffer_desc & desc, const void * initial_data) override
         {
@@ -457,8 +441,24 @@ namespace rhi
         void destroy_shader(shader shader) override { objects.destroy(shader); }
         void destroy_pipeline(pipeline pipeline)  override { objects.destroy(pipeline); }        
         void destroy_window(window window) override { objects.destroy(window); }
-        
-        void submit_command_buffer(command_buffer cmd)
+
+        command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
+        void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
+        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
+        { 
+            if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");
+            if(objects[pass].desc.depth_attachment && !objects[framebuffer].depth_stencil_view) throw std::logic_error("depth attachment count mismatch");
+            cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); 
+        }
+        void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
+        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
+        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
+        void bind_index_buffer(command_buffer cmd, buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
+        void draw(command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
+        void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
+        void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
+
+        uint64_t submit(command_buffer cmd) override
         {
             d3d_pipeline * current_pipeline = 0;
             ctx->ClearState();
@@ -548,36 +548,16 @@ namespace rhi
                 },
                 [this](const end_render_pass_command &) {}
             ));
+            if(fence) check("ID3D11DeviceContext4::Signal", ctx->Signal(fence, ++submitted_index));
+            return submitted_index;
         }
-
-        command_buffer start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
-        void generate_mipmaps(command_buffer cmd, image image) override { cmd_emulator.generate_mipmaps(cmd, image); }
-        void begin_render_pass(command_buffer cmd, render_pass pass, framebuffer framebuffer, const clear_values & clear) override 
-        { 
-            if(objects[pass].desc.color_attachments.size() > objects[framebuffer].render_target_views.size()) throw std::logic_error("color attachment count mismatch");
-            if(objects[pass].desc.depth_attachment && !objects[framebuffer].depth_stencil_view) throw std::logic_error("depth attachment count mismatch");
-            cmd_emulator.begin_render_pass(cmd, pass, framebuffer, clear); 
-        }
-        void bind_pipeline(command_buffer cmd, pipeline pipe) override { return cmd_emulator.bind_pipeline(cmd, pipe); }
-        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) override { return cmd_emulator.bind_descriptor_set(cmd, layout, set_index, set); }
-        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) override { return cmd_emulator.bind_vertex_buffer(cmd, index, range); }
-        void bind_index_buffer(command_buffer cmd, buffer_range range) override { return cmd_emulator.bind_index_buffer(cmd, range); }
-        void draw(command_buffer cmd, int first_vertex, int vertex_count) override { return cmd_emulator.draw(cmd, first_vertex, vertex_count); }
-        void draw_indexed(command_buffer cmd, int first_index, int index_count) override { return cmd_emulator.draw_indexed(cmd, first_index, index_count); }
-        void end_render_pass(command_buffer cmd) override { return cmd_emulator.end_render_pass(cmd); }
-
-        void submit(command_buffer cmd) override
+        uint64_t acquire_and_submit_and_present(command_buffer cmd, window window) override
         {
-            submit_command_buffer(cmd);
-        }
-        void acquire_and_submit_and_present(command_buffer cmd, window window, fence fence) override
-        {
-            submit_command_buffer(cmd);
+            submit(cmd);
             objects[window].swap_chain->Present(1, 0);
-            if(fence) check("ID3D11DeviceContext4::Signal", ctx->Signal(objects[fence].fence, ++objects[fence].value));
+            return submitted_index;
         }
-
-        void wait_idle() override { ctx->Flush(); }
+        void wait_until_complete(uint64_t submit_id) override { check("ID3D11DeviceContext4::Wait", ctx->Wait(fence, submitted_index)); }
     };
 
     autoregister_backend<d3d_device> autoregister_d3d_backend {"Direct3D 11.1"};

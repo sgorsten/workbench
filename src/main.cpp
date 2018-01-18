@@ -234,7 +234,7 @@ class device_session
     rhi::device_info info;
     gfx::descriptor_pool desc_pool;
     gfx::dynamic_buffer uniform_buffer;
-    rhi::fence transient_resource_fence;
+    uint64_t transient_resource_fence;
 
     gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer, sphere_vertex_buffer, sphere_index_buffer;
 
@@ -259,7 +259,6 @@ public:
     device_session(const common_assets & assets, const std::string & name, std::shared_ptr<rhi::device> dev, const int2 & window_pos) :
         dev{dev}, standard{dev, assets.standard}, info{dev->get_info()},
         desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
-        transient_resource_fence{dev->create_fence(true)},
         basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
         ground_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
         box_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
@@ -308,7 +307,6 @@ public:
         env_cubemap2 = standard.create_irradiance_cubemap(32, desc_pool, uniform_buffer, env_cubemap);
         env_cubemap3 = standard.create_reflectance_cubemap(128, desc_pool, uniform_buffer, env_cubemap);
         brdf_integral = standard.create_brdf_integral_image(desc_pool, uniform_buffer);
-        dev->wait_idle();
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, pass, int2{512,512}, ss.str());
@@ -317,7 +315,7 @@ public:
 
     ~device_session()
     {
-        dev->wait_for_fence(transient_resource_fence);
+        dev->wait_until_complete(transient_resource_fence);
         gwindow.reset();
         for(auto pipeline : {skybox_pipe_cubemap, solid_pipe, wire_pipe}) dev->destroy_pipeline(pipeline);
         for(auto shader : {skybox_vs, vs, skybox_fs_cubemap, fs, fs_unlit}) dev->destroy_shader(shader);
@@ -326,7 +324,6 @@ public:
         for(auto image : {checkerboard, env_spheremap, env_cubemap, env_cubemap2, env_cubemap3, brdf_integral}) dev->destroy_image(image);
         for(auto sampler : {nearest}) dev->destroy_sampler(sampler);
         dev->destroy_render_pass(pass);
-        dev->destroy_fence(transient_resource_fence);
     }
 
     bool update(camera & cam, float timestep)
@@ -351,7 +348,7 @@ public:
     void render_frame(const camera & cam)
     {       
         // Reset resources
-        dev->wait_for_fence(transient_resource_fence);
+        dev->wait_until_complete(transient_resource_fence);
         desc_pool.reset();
         uniform_buffer.reset();
 
@@ -418,7 +415,7 @@ public:
             }
         }
         cmd.end_render_pass();
-        dev->acquire_and_submit_and_present(cmd.cmd, gwindow->get_rhi_window(), transient_resource_fence);
+        transient_resource_fence = dev->acquire_and_submit_and_present(cmd.cmd, gwindow->get_rhi_window());
     }
 };
 
