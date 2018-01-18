@@ -489,41 +489,14 @@ void vk_device::destroy_buffer(buffer buffer)
     objects.destroy(buffer); 
 }
 
-static void transition_layout(VkCommandBuffer command_buffer, VkImage image, uint32_t mip_level, uint32_t array_layer, VkImageLayout old_layout, VkImageLayout new_layout)
+static void transition_image(VkCommandBuffer command_buffer, VkImage image, uint32_t mip_level, uint32_t array_layer, 
+    VkPipelineStageFlags src_stage_mask, VkAccessFlags src_access_mask, VkImageLayout old_layout,
+    VkPipelineStageFlags dst_stage_mask, VkAccessFlags dst_access_mask, VkImageLayout new_layout)
 {
-    VkPipelineStageFlags src_stage_mask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    VkPipelineStageFlags dst_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkImageMemoryBarrier barrier {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.oldLayout = old_layout;
-    barrier.newLayout = new_layout;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = mip_level;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = array_layer;
-    barrier.subresourceRange.layerCount = 1;
-    switch(old_layout)
-    {
-    case VK_IMAGE_LAYOUT_UNDEFINED: break; // No need to wait for anything, contents can be discarded
-    case VK_IMAGE_LAYOUT_PREINITIALIZED: barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT; break; // Wait for host writes to complete before changing layout    
-    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT; break; // Wait for transfer reads to complete before changing layout
-    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; break; // Wait for transfer writes to complete before changing layout
-    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; break; // Wait for color attachment writes to complete before changing layout
-    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT; break; // Wait for shader reads to complete before changing layout
-    default: throw std::logic_error("unsupported layout transition");
-    }
-    switch(new_layout)
-    {
-    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT; break; // Transfer reads should wait for layout change to complete
-    case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; break; // Transfer writes should wait for layout change to complete
-    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; break; // Writes to color attachments should wait for layout change to complete
-    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT; break; // Shader reads should wait for layout change to complete
-    case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT; break; // Memory reads should wait for layout change to complete
-    default: throw std::logic_error("unsupported layout transition");
-    }
-    vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    const VkImageMemoryBarrier barriers[] {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, 0, 
+        src_access_mask, dst_access_mask, old_layout, new_layout, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, 
+        image, {VK_IMAGE_ASPECT_COLOR_BIT, mip_level, 1, array_layer, 1}};
+    vkCmdPipelineBarrier(command_buffer, src_stage_mask, dst_stage_mask, 0, 0, nullptr, 0, nullptr, countof(barriers), barriers);
 }
 
 image vk_device::create_image(const image_desc & desc, std::vector<const void *> initial_data)
@@ -582,12 +555,20 @@ image vk_device::create_image(const image_desc & desc, std::vector<const void *>
 
             // Copy image contents from staging buffer into mip level zero
             auto cmd = begin_transient();
-            transition_layout(cmd, im.image_object, 0, exactly(layer), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            // Must transition to transfer_dst_optimal before any transfers occur
+            transition_image(cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            // Copy to the image
             VkBufferImageCopy copy_region {};
             copy_region.imageSubresource = layers;
             copy_region.imageExtent = image_info.extent;
             vkCmdCopyBufferToImage(cmd, staging_buffer, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
-            transition_layout(cmd, im.image_object, 0, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            // After transfer finishes, transition to shader_read_only_optimal, and complete that before any shaders execute
+            transition_image(cmd, im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
             end_transient(cmd);
         }
     }
@@ -657,6 +638,7 @@ sampler vk_device::create_sampler(const sampler_desc & desc)
     sampler_info.addressModeW = convert_mode(desc.wrap_r);
     sampler_info.magFilter = convert_filter(desc.mag_filter);
     sampler_info.minFilter = convert_filter(desc.min_filter);
+    sampler_info.maxAnisotropy = 1.0;
     if(desc.mip_filter)
     {
         sampler_info.maxLod = 1000;
@@ -688,6 +670,11 @@ static VkAttachmentDescription make_attachment_description(const rhi::attachment
         }
     };
     VkAttachmentDescription attachment {0, get_vk_format(desc.format), VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_UNDEFINED};
+    switch(get_attachment_type(desc.format))
+    {
+    case rhi::attachment_type::color: attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    case rhi::attachment_type::depth_stencil: attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
     std::visit(overload(
         [](dont_care) {},
         [&](clear) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
@@ -1204,7 +1191,9 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
         layers.layerCount = 1;
         VkOffset3D dims {im.image_info.extent.width, im.image_info.extent.height, im.image_info.extent.depth};
         
-        transition_layout(objects[cmd], im.image_object, 0, exactly(layer), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        transition_image(objects[cmd], im.image_object, 0, exactly(layer), VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
         for(uint32_t i=1; i<im.image_info.mipLevels; ++i)
         {
             VkImageBlit blit {};
@@ -1219,12 +1208,17 @@ void vk_device::generate_mipmaps(command_buffer cmd, image image)
             blit.dstSubresource.mipLevel = i;
             blit.dstOffsets[1] = dims;
 
-            transition_layout(objects[cmd], im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-            transition_layout(objects[cmd], im.image_object, i, exactly(layer), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            transition_image(objects[cmd], im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, 
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             vkCmdBlitImage(objects[cmd], im.image_object, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, im.image_object, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-            transition_layout(objects[cmd], im.image_object, i-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            transition_image(objects[cmd], im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         }
-        transition_layout(objects[cmd], im.image_object, im.image_info.mipLevels-1, exactly(layer), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        for(uint32_t i=1; i<im.image_info.mipLevels; ++i)
+        {
+            transition_image(objects[cmd], im.image_object, i, exactly(layer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
     }
 }
 

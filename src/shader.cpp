@@ -1,5 +1,9 @@
 #include "shader.h"
 #include <map>
+#include "../dep/glslang/glslang/Public/ShaderLang.h"
+#include "../dep/glslang/SPIRV/GlslangToSpv.h"
+#include "../dep/glslang/StandAlone/ResourceLimits.h"
+#include "../dep/glslang/SPIRV/spirv.hpp"
 
 std::ostream & operator << (std::ostream & out, const shader_module::scalar_type & s)
 {
@@ -51,7 +55,6 @@ std::ostream & operator << (std::ostream & out, const shader_module::structure &
 }
 std::ostream & operator << (std::ostream & out, const shader_module::type & t) { return std::visit([&out](const auto & val) -> std::ostream & { return out << val; }, t.contents); }
 
-#include <vulkan/spirv.hpp>
 struct spirv_parser
 {
     struct type { spv::Op op; std::vector<uint32_t> contents; };
@@ -185,10 +188,6 @@ struct spirv_parser
         return get_type(types[id].contents[1], std::nullopt);
     }
 };
-
-#include "../dep/glslang/glslang/Public/ShaderLang.h"
-#include "../dep/glslang/SPIRV/GlslangToSpv.h"
-#include "../dep/glslang/StandAlone/ResourceLimits.h"
 
 shader_compiler::shader_compiler()
 {
