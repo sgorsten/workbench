@@ -32,8 +32,6 @@ namespace rhi
         VkSurfaceTransformFlagBitsKHR surface_transform;
     };
 
-    //using device_object = std::variant<VkRenderPass, VkBuffer, VkSampler, VkImage, VkImageView, VkFramebuffer, VkDescriptorSetLayout, VkPipelineLayout, VkPipeline, VkDescriptorPool, VkSurfaceKHR, VkSwapchainKHR, GLFWwindow *>;
-
     struct vk_device : device
     {
         // Core Vulkan objects
@@ -245,6 +243,7 @@ namespace rhi
     {
         ptr<vk_device> device;
         VkDescriptorPool pool;
+        std::vector<VkDescriptorSet> sets;
 
         vk_descriptor_pool(vk_device * device);
         ~vk_descriptor_pool();
@@ -447,8 +446,8 @@ vk_device::~vk_device()
 {
     // Flush our queue
     wait_until_complete(submitted_index);
-    for(auto & fence : ring_fences) vkDestroyFence(dev, fence, nullptr);
-    for(auto & pair : render_passes) vkDestroyRenderPass(dev, pair.second, nullptr);
+    for(auto & fence : ring_fences) destroy_immediate(fence);
+    for(auto & pair : render_passes) destroy_immediate(pair.second);
 
     // NOTE: We expect the higher level software layer to ensure that all API objects have been destroyed by this point
     vkDestroyCommandPool(dev, staging_pool, nullptr);
@@ -1127,7 +1126,9 @@ vk_descriptor_pool::~vk_descriptor_pool()
 
 void vk_descriptor_pool::reset()
 {
+    vkFreeDescriptorSets(device->dev, pool, exactly(sets.size()), sets.data());
     vkResetDescriptorPool(device->dev, pool, 0);
+    sets.clear();
 }
 ptr<descriptor_set> vk_descriptor_pool::alloc(descriptor_set_layout & layout) 
 { 
@@ -1137,6 +1138,7 @@ ptr<descriptor_set> vk_descriptor_pool::alloc(descriptor_set_layout & layout)
     alloc_info.pSetLayouts = &static_cast<vk_descriptor_set_layout &>(layout).layout;
     VkDescriptorSet set;
     check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(device->dev, &alloc_info, &set));
+    sets.push_back(set);
     return new delete_when_unreferenced<vk_descriptor_set>{device, set};
 }
 
