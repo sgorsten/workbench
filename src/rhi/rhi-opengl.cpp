@@ -28,8 +28,6 @@ namespace rhi
         std::map<uint64_t, GLsync> sync_objects;
         uint64_t submitted_index=0;
 
-        command_emulator cmd_emulator;
-
         void enable_debug_callback(GLFWwindow * window)
         {
             glfwMakeContextCurrent(window);
@@ -83,7 +81,7 @@ namespace rhi
 
         ptr<descriptor_pool> create_descriptor_pool() override { return descriptor_emulator::create_descriptor_pool(); }
 
-        ptr<command_buffer> start_command_buffer() override { return cmd_emulator.start_command_buffer(); }
+        ptr<command_buffer> start_command_buffer() override { return command_emulator::start_command_buffer(); }
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
         void wait_until_complete(uint64_t submit_id) override;
@@ -369,7 +367,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
     gl_pipeline * current_pipeline = nullptr;
     size_t index_buffer_offset = 0;
     glfwMakeContextCurrent(context);
-    cmd_emulator.execute(cmd, overload(
+    command_emulator::execute(cmd, overload(
         [](const generate_mipmaps_command & c)
         {
             glGenerateTextureMipmap(static_cast<gl_image &>(*c.im).texture_object);

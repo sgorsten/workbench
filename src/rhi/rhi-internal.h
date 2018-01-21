@@ -111,9 +111,9 @@ namespace rhi
             void end_render_pass() { commands.push_back(end_render_pass_command{}); }
         };
     public:
-        ptr<command_buffer> start_command_buffer() { return new delete_when_unreferenced<emulated_command_buffer>{}; }
+        static ptr<command_buffer> start_command_buffer() { return new delete_when_unreferenced<emulated_command_buffer>{}; }
 
-        template<class ExecuteCommandFunction> void execute(command_buffer & cmd, ExecuteCommandFunction execute_command) 
+        template<class ExecuteCommandFunction> static void execute(command_buffer & cmd, ExecuteCommandFunction execute_command) 
         { 
             auto & buf = static_cast<emulated_command_buffer &>(cmd);
             for(auto & command : buf.commands) std::visit(execute_command, command);
