@@ -52,21 +52,18 @@ namespace rhi
     struct shader : object {};
     struct pipeline : object {};
 
-    // Simple handle type used to refer to device objects
-    template<class T> struct handle 
-    { 
-        int id;                                             // A handle is simply a strongly typed int
-        handle() : id{0} {}                                 // Handles automatically default to zero, and are considered 'null'
-        explicit handle(int id) : id{id} {}                 // Handles cannot be implicitly constructed from int
-        explicit operator bool () const { return id != 0; } // A handle evaluates to true if it is not null
+    struct buffer_range { buffer * buffer; size_t offset, size; };
+    struct descriptor_set : object 
+    {
+        virtual void write(int binding, buffer_range range) = 0;
+        virtual void write(int binding, sampler & sampler, image & image) = 0;    
     };
-    template<class T> bool operator == (const handle<T> & a, const handle<T> & b) { return a.id == b.id; } // Handles of the same type can be compared for equality
-    template<class T> bool operator != (const handle<T> & a, const handle<T> & b) { return a.id != b.id; }
+    struct descriptor_pool : object 
+    {
+        virtual void reset() = 0;
+        virtual ptr<descriptor_set> alloc(descriptor_set_layout & layout) = 0;
+    };
 
-    // Object types
-    using descriptor_pool = handle<struct descriptor_pool_tag>;
-    using descriptor_set = handle<struct descriptor_set_tag>;
-    
     // Render pass creation info
     enum class layout { color_attachment_optimal, depth_stencil_attachment_optimal, shader_read_only_optimal, transfer_src_optimal, transfer_dst_optimal, present_src };
     struct dont_care {};
@@ -81,13 +78,12 @@ namespace rhi
         std::vector<color_attachment_desc> color_attachments;
         std::optional<depth_attachment_desc> depth_attachment;
     };
-    struct buffer_range { buffer * buffer; size_t offset, size; };
     struct command_buffer : object
     {
         virtual void generate_mipmaps(image & image) = 0;
         virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
         virtual void bind_pipeline(pipeline & pipe) = 0;
-        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set set) = 0;
+        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) = 0;
         virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
         virtual void bind_index_buffer(buffer_range range) = 0;
         virtual void draw(int first_vertex, int vertex_count) = 0;
@@ -235,17 +231,7 @@ namespace rhi
         virtual ptr<shader> create_shader(const shader_module & module) = 0;
         virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
 
-        /////////////////
-        // descriptors //
-        /////////////////
-
-        virtual descriptor_pool create_descriptor_pool() = 0;
-        virtual void destroy_descriptor_pool(descriptor_pool pool) = 0;
-
-        virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
-        virtual descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout & layout) = 0;
-        virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
-        virtual void write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image) = 0;
+        virtual ptr<descriptor_pool> create_descriptor_pool() = 0;
 
         ///////////////
         // rendering //

@@ -53,8 +53,3 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
     compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *compute_irradiance_cubemap_fragment_shader);
     compute_reflectance_cubemap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *compute_reflectance_cubemap_fragment_shader);    
 }
-
-standard_device_objects::~standard_device_objects()
-{
-
-}

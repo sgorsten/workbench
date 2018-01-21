@@ -20,61 +20,9 @@ namespace rhi
     enum attachment_type { color, depth_stencil };
     attachment_type get_attachment_type(image_format format);
 
-    template<class Handle, class Type> class object_set
-    {
-        std::unordered_map<int, Type> objects;
-        int next_id = 1;
-    public:
-        const Type & operator[] (Handle h) const
-        { 
-            const auto it = objects.find(h.id);
-            if(it == objects.end()) throw std::logic_error("invalid handle");
-            return it->second;
-        }
-
-        Type & operator[] (Handle h) 
-        { 
-            const auto it = objects.find(h.id);
-            if(it == objects.end()) throw std::logic_error("invalid handle");
-            return it->second;
-        }
-
-        std::tuple<Handle, Type &> create() 
-        { 
-            const int id = next_id++;
-            return {Handle{id}, objects[id]};
-        }
-
-        void destroy(Handle h)
-        {
-            auto it = objects.find(h.id);
-            if(it == objects.end()) throw std::logic_error("invalid handle");
-            objects.erase(it);
-        }
-    };
-
-    template<template<class> class Traits, class... Classes> class heterogeneous_object_set
-    {
-        template<class T> using set_t = object_set<T, typename Traits<T>::type>;
-        std::tuple<set_t<Classes>...> objects;
-    public:
-        template<class T> auto & operator[] (T handle) const { return std::get<set_t<T>>(objects)[handle]; }
-        template<class T> auto & operator[] (T handle) { return std::get<set_t<T>>(objects)[handle]; }
-        template<class T> auto create() { return std::get<set_t<T>>(objects).create(); }    
-        template<class T> void destroy(T handle) { return std::get<set_t<T>>(objects).destroy(handle); }
-    };
-
     class descriptor_emulator
     {
         struct sampled_image { ptr<sampler> sampler; ptr<image> image; };
-
-        struct emulated_descriptor_pool
-        {
-            std::vector<buffer_range> buffer_bindings;
-            std::vector<sampled_image> image_bindings;
-            std::vector<descriptor_set> sets;
-            size_t used_sets=0;
-        };
 
         struct emulated_descriptor_set_layout : descriptor_set_layout
         {
@@ -84,13 +32,6 @@ namespace rhi
             size_t num_buffers=0, num_images=0;
         };
 
-        struct emulated_descriptor_set
-        {
-            descriptor_pool pool;
-            ptr<emulated_descriptor_set_layout> layout;
-            size_t buffer_offset, image_offset;
-        };
-
         struct emulated_pipeline_layout : pipeline_layout
         {
             struct set { ptr<descriptor_set_layout> layout; size_t buffer_offset, image_offset; };
@@ -98,28 +39,37 @@ namespace rhi
             size_t num_buffers=0, num_images=0;
         };
 
-        template<class T> struct traits;
-        template<> struct traits<descriptor_pool> { using type = emulated_descriptor_pool; };
-        template<> struct traits<descriptor_set> { using type = emulated_descriptor_set; };
-        heterogeneous_object_set<traits, descriptor_pool, descriptor_set> objects;
+        struct emulated_descriptor_pool : descriptor_pool
+        {
+            std::vector<buffer_range> buffer_bindings;
+            std::vector<sampled_image> image_bindings;
+
+            void reset() override;
+            ptr<descriptor_set> alloc(descriptor_set_layout & layout) override;
+        };
+
+        struct emulated_descriptor_set : descriptor_set
+        {
+            ptr<emulated_descriptor_pool> pool;
+            ptr<emulated_descriptor_set_layout> layout;
+            size_t buffer_offset, image_offset;
+
+            void write(int binding, buffer_range range) override;
+            void write(int binding, sampler & sampler, image & image) override;
+        };
     public:
         size_t get_flat_buffer_binding(pipeline_layout & layout, int set, int binding) const;
         size_t get_flat_image_binding(pipeline_layout & layout, int set, int binding) const;
 
         ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings);
         ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets);
-        descriptor_pool create_descriptor_pool();
-
-        void reset_descriptor_pool(descriptor_pool pool);
-        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout & layout);
-        void write_descriptor(descriptor_set set, int binding, buffer_range range);
-        void write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image);
+        ptr<descriptor_pool> create_descriptor_pool();
 
         template<class BindBufferFunction, class BindImageFunction>
-        void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
+        void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
         {
-            const auto & pipeline_layout = objects[layout];
-            const auto & descriptor_set = objects[set];
+            const auto & pipeline_layout = static_cast<emulated_pipeline_layout &>(layout);
+            const auto & descriptor_set = static_cast<emulated_descriptor_set &>(set);
             if(descriptor_set.layout != pipeline_layout.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
 
             const auto & descriptor_pool = objects[descriptor_set.pool];
@@ -131,15 +81,12 @@ namespace rhi
                 bind_image(pipeline_layout.sets[set_index].image_offset + i, binding.sampler, binding.image);
             }
         }
-
-        // TODO: Check for dependencies before wiping out
-        void destroy(descriptor_pool pool) { objects.destroy(pool); }
     };
 
     struct generate_mipmaps_command { ptr<image> im; };
     struct begin_render_pass_command { render_pass_desc pass; ptr<framebuffer> framebuffer; };
     struct bind_pipeline_command { ptr<pipeline> pipe; };
-    struct bind_descriptor_set_command { ptr<pipeline_layout> layout; int set_index; descriptor_set set; };
+    struct bind_descriptor_set_command { ptr<pipeline_layout> layout; int set_index; ptr<descriptor_set> set; };
     struct bind_vertex_buffer_command { int index; buffer_range range; };
     struct bind_index_buffer_command { buffer_range range; };
     struct draw_command { int first_vertex, vertex_count; };
@@ -156,7 +103,7 @@ namespace rhi
             void generate_mipmaps(image & image) { commands.push_back(generate_mipmaps_command{&image}); }
             void begin_render_pass(const render_pass_desc & pass, framebuffer & framebuffer) { commands.push_back(begin_render_pass_command{pass, &framebuffer}); }
             void bind_pipeline(pipeline & pipe) { commands.push_back(bind_pipeline_command{&pipe}); }
-            void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set set) { commands.push_back(bind_descriptor_set_command{&layout, set_index, set}); }
+            void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }
             void bind_vertex_buffer(int index, buffer_range range) { commands.push_back(bind_vertex_buffer_command{index, range}); }
             void bind_index_buffer(buffer_range range) { commands.push_back(bind_index_buffer_command{range}); }
             void draw(int first_vertex, int vertex_count) { commands.push_back(draw_command{first_vertex, vertex_count}); }

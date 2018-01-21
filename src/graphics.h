@@ -52,28 +52,6 @@ namespace gfx
         }
     };
 
-    struct descriptor_set
-    {
-        rhi::device & dev;
-        rhi::descriptor_set set;
-
-        descriptor_set write(int binding, rhi::buffer_range range) { dev.write_descriptor(set, binding, range); return *this; }
-        descriptor_set write(int binding, dynamic_buffer & buffer, binary_view data) { return write(binding, buffer.write(data)); }
-        descriptor_set write(int binding, rhi::sampler & sampler, rhi::image & image) { dev.write_descriptor(set, binding, sampler, image); return *this; }
-    };
-
-    struct descriptor_pool
-    {
-        rhi::ptr<rhi::device> dev;
-        rhi::descriptor_pool pool;
-    public:
-        descriptor_pool(rhi::ptr<rhi::device> dev) : dev{dev}, pool{dev->create_descriptor_pool()} {}
-        ~descriptor_pool() { dev->destroy_descriptor_pool(pool); }
-
-        void reset() { dev->reset_descriptor_pool(pool); }
-        descriptor_set alloc(rhi::descriptor_set_layout & layout) { return{*dev, dev->alloc_descriptor_set(pool, layout)}; }
-    };
-
     class window
     {
         struct ignore { template<class... T> operator std::function<void(T...)>() const { return [](T...) {}; } };

@@ -167,7 +167,7 @@ class device_session
     rhi::ptr<rhi::device> dev;
     standard_device_objects standard;
     rhi::device_info info;
-    gfx::descriptor_pool desc_pool;
+    rhi::ptr<rhi::descriptor_pool> desc_pool;
     gfx::dynamic_buffer uniform_buffer;
     uint64_t transient_resource_fence=0;
 
@@ -189,7 +189,7 @@ class device_session
 public:
     device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) :
         dev{dev}, standard{dev, assets.standard}, info{dev->get_info()},
-        desc_pool{dev}, uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
+        uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
         basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
         ground_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
         box_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
@@ -198,6 +198,8 @@ public:
         box_index_buffer{dev, rhi::buffer_usage::index, assets.box_mesh.triangles},
         sphere_index_buffer{dev, rhi::buffer_usage::index, assets.sphere_mesh.triangles}
     {
+        desc_pool = dev->create_descriptor_pool();
+
         per_scene_view_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::combined_image_sampler, 1},
             {1, rhi::descriptor_type::combined_image_sampler, 1},
@@ -229,10 +231,10 @@ public:
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
         auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
-        env_cubemap = standard.create_cubemap_from_spheremap(512, desc_pool, uniform_buffer, *env_spheremap, assets.game_coords);
-        env_cubemap2 = standard.create_irradiance_cubemap(32, desc_pool, uniform_buffer, *env_cubemap);
-        env_cubemap3 = standard.create_reflectance_cubemap(128, desc_pool, uniform_buffer, *env_cubemap);
-        brdf_integral = standard.create_brdf_integral_image(desc_pool, uniform_buffer);
+        env_cubemap = standard.create_cubemap_from_spheremap(512, *desc_pool, uniform_buffer, *env_spheremap, assets.game_coords);
+        env_cubemap2 = standard.create_irradiance_cubemap(32, *desc_pool, uniform_buffer, *env_cubemap);
+        env_cubemap3 = standard.create_reflectance_cubemap(128, *desc_pool, uniform_buffer, *env_cubemap);
+        brdf_integral = standard.create_brdf_integral_image(*desc_pool, uniform_buffer);
 
         std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
         gwindow = std::make_unique<gfx::window>(dev, int2{512,512}, ss.str());
@@ -268,7 +270,7 @@ public:
     {       
         // Reset resources
         dev->wait_until_complete(transient_resource_fence);
-        desc_pool.reset();
+        desc_pool->reset();
         uniform_buffer.reset();
 
         // Set up per scene and per view uniforms
@@ -278,11 +280,11 @@ public:
         per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, fb.get_ndc_coords()), cam.get_view_matrix());
         per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, fb.get_ndc_coords()), cam.get_skybox_view_matrix());
         per_view_uniforms.eye_position = cam.position;
-        auto per_scene_view_set = desc_pool.alloc(*per_scene_view_layout);
-        per_scene_view_set.write(0, *standard.image_sampler, *brdf_integral);
-        per_scene_view_set.write(1, *standard.cubemap_sampler, *env_cubemap2);
-        per_scene_view_set.write(2, *standard.cubemap_sampler, *env_cubemap3);
-        per_scene_view_set.write(3, uniform_buffer.write(per_view_uniforms));
+        auto per_scene_view_set = desc_pool->alloc(*per_scene_view_layout);
+        per_scene_view_set->write(0, *standard.image_sampler, *brdf_integral);
+        per_scene_view_set->write(1, *standard.cubemap_sampler, *env_cubemap2);
+        per_scene_view_set->write(2, *standard.cubemap_sampler, *env_cubemap3);
+        per_scene_view_set->write(3, uniform_buffer.write(per_view_uniforms));
 
         auto cmd = dev->start_command_buffer();
 
@@ -294,16 +296,20 @@ public:
 
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe_cubemap);
-        cmd->bind_descriptor_set(*skybox_pipe_layout, 0, per_scene_view_set.set);
-        cmd->bind_descriptor_set(*skybox_pipe_layout, 1, desc_pool.alloc(*skybox_per_object_layout).write(0, *standard.cubemap_sampler, *env_cubemap).set);
+        cmd->bind_descriptor_set(*skybox_pipe_layout, 0, *per_scene_view_set);
+        auto skybox_set = desc_pool->alloc(*skybox_per_object_layout);
+        skybox_set->write(0, *standard.cubemap_sampler, *env_cubemap);
+        cmd->bind_descriptor_set(*skybox_pipe_layout, 1, *skybox_set);
         cmd->bind_vertex_buffer(0, box_vertex_buffer);
         cmd->bind_index_buffer(box_index_buffer);
         cmd->draw_indexed(0, 36);
 
         // Draw basis
         cmd->bind_pipeline(*wire_pipe);
-        cmd->bind_descriptor_set(*pipe_layout, 1, desc_pool.alloc(*per_object_layout).write(0, uniform_buffer, float4x4{linalg::identity})
-                                                                                     .write(1, *nearest, *checkerboard).set);
+        auto basis_set = desc_pool->alloc(*per_object_layout);
+        basis_set->write(0, uniform_buffer.write(float4x4{linalg::identity}));
+        basis_set->write(1, *nearest, *checkerboard);
+        cmd->bind_descriptor_set(*pipe_layout, 1, *basis_set);
         cmd->bind_vertex_buffer(0, basis_vertex_buffer);
         cmd->draw(0, 6);
 
@@ -314,13 +320,15 @@ public:
         per_object.model_matrix = translation_matrix(cam.coords(coord_axis::down)*0.5f);
         per_object.roughness = 0.5f;
         per_object.metalness = 0.0f;
-        cmd->bind_descriptor_set(*pipe_layout, 1, desc_pool.alloc(*per_object_layout).write(0, uniform_buffer, per_object)
-                                                                                     .write(1, *nearest, *checkerboard).set);
+        auto ground_set = desc_pool->alloc(*per_object_layout);
+        ground_set->write(0, uniform_buffer.write(per_object));
+        ground_set->write(1, *nearest, *checkerboard);
+        cmd->bind_descriptor_set(*pipe_layout, 1, *ground_set);
         cmd->bind_vertex_buffer(0, ground_vertex_buffer);
         cmd->bind_index_buffer(ground_index_buffer);
         cmd->draw_indexed(0, 6);
 
-        // Draw a bunch of boxes
+        // Draw a bunch of spheres
         cmd->bind_vertex_buffer(0, sphere_vertex_buffer);
         cmd->bind_index_buffer(sphere_index_buffer);
         for(int i=0; i<6; ++i)
@@ -330,8 +338,10 @@ public:
                 per_object.model_matrix = translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f));
                 per_object.roughness = (j+0.5f)/6;
                 per_object.metalness = (i+0.5f)/6;
-                cmd->bind_descriptor_set(*pipe_layout, 1, desc_pool.alloc(*per_object_layout).write(0, uniform_buffer, per_object)
-                                                                                             .write(1, *nearest, *checkerboard).set);
+                auto sphere_set =  desc_pool->alloc(*per_object_layout);
+                sphere_set->write(0, uniform_buffer.write(per_object));
+                sphere_set->write(1, *nearest, *checkerboard);
+                cmd->bind_descriptor_set(*pipe_layout, 1, *sphere_set);                      
                 cmd->draw_indexed(0, 32*32*6);
             }
         }

@@ -137,10 +137,6 @@ namespace rhi
         std::queue<scheduled_action> scheduled_actions;
 
         // Objects
-        template<class T> struct traits;
-        template<> struct traits<descriptor_pool> { using type = VkDescriptorPool; };
-        template<> struct traits<descriptor_set> { using type = VkDescriptorSet; };
-        heterogeneous_object_set<traits, descriptor_pool, descriptor_set> objects;
         std::map<vk_render_pass_desc, vk_render_pass> render_passes;
 
         vk_device(std::function<void(const char *)> debug_callback);
@@ -167,14 +163,7 @@ namespace rhi
         ptr<shader> create_shader(const shader_module & module) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;        
 
-        // descriptors
-        descriptor_pool create_descriptor_pool() override;
-        void destroy_descriptor_pool(descriptor_pool pool) override;
-
-        void reset_descriptor_pool(descriptor_pool pool) override;
-        descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout & layout) override;
-        void write_descriptor(descriptor_set set, int binding, buffer_range range) override;
-        void write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image) override;
+        ptr<descriptor_pool> create_descriptor_pool() override;
 
         // rendering
         ptr<command_buffer> start_command_buffer() override;
@@ -300,6 +289,27 @@ namespace rhi
         VkPipeline get_pipeline(VkRenderPass render_pass);
     };
 
+    struct vk_descriptor_set : descriptor_set 
+    {
+        ptr<vk_device> device;
+        VkDescriptorSet set;
+        vk_descriptor_set(vk_device * device, VkDescriptorSet set) : device{device}, set{set} {}
+
+        void write(int binding, buffer_range range) override;
+        void write(int binding, sampler & sampler, image & image) override;
+    };
+    struct vk_descriptor_pool : descriptor_pool 
+    {
+        ptr<vk_device> device;
+        VkDescriptorPool pool;
+
+        vk_descriptor_pool(vk_device * device);
+        ~vk_descriptor_pool();
+
+        void reset() override;
+        ptr<descriptor_set> alloc(descriptor_set_layout & layout) override;
+    };
+
     struct vk_command_buffer : command_buffer
     {
         ptr<vk_device> device;
@@ -309,7 +319,7 @@ namespace rhi
         virtual void generate_mipmaps(image & image) override;
         virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
         virtual void bind_pipeline(pipeline & pipe) override;
-        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set set) override;
+        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) override;
         virtual void bind_vertex_buffer(int index, buffer_range range) override;
         virtual void bind_index_buffer(buffer_range range) override;
         virtual void draw(int first_vertex, int vertex_count) override;
@@ -327,6 +337,8 @@ namespace rhi
     ptr<pipeline_layout> vk_device::create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) { return new delete_when_unreferenced<vk_pipeline_layout>{this, sets}; }
     ptr<shader> vk_device::create_shader(const shader_module & module) { return new delete_when_unreferenced<vk_shader>{this, module}; }
     ptr<pipeline> vk_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<vk_pipeline>{this, desc}; }
+
+    ptr<descriptor_pool> vk_device::create_descriptor_pool() { return new delete_when_unreferenced<vk_descriptor_pool>{this}; }
 }
 
 namespace rhi
@@ -806,6 +818,107 @@ vk_framebuffer::~vk_framebuffer()
     });
 }
 
+vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string title) : device{device}
+{
+    auto format = rhi::image_format::rgba_srgb8;
+
+    const std::string buffer {begin(title), end(title)};
+    glfwDefaultWindowHints();
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfw_window = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
+
+    check("glfwCreateWindowSurface", glfwCreateWindowSurface(device->instance, glfw_window, nullptr, &surface));
+
+    VkBool32 present = VK_FALSE;
+    check("vkGetPhysicalDeviceSurfaceSupportKHR", vkGetPhysicalDeviceSurfaceSupportKHR(device->selection.physical_device, device->selection.queue_family, surface, &present));
+    if(!present) throw std::runtime_error("vkGetPhysicalDeviceSurfaceSupportKHR(...) inconsistent");
+
+    // Determine swap extent
+    VkExtent2D swap_extent {static_cast<uint32_t>(dimensions.x), static_cast<uint32_t>(dimensions.y)};
+    VkSurfaceCapabilitiesKHR surface_caps;
+    check("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->selection.physical_device, surface, &surface_caps));
+    swap_extent.width = std::min(std::max(swap_extent.width, surface_caps.minImageExtent.width), surface_caps.maxImageExtent.width);
+    swap_extent.height = std::min(std::max(swap_extent.height, surface_caps.minImageExtent.height), surface_caps.maxImageExtent.height);
+
+    VkSwapchainCreateInfoKHR swapchain_info {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    swapchain_info.surface = surface;
+    swapchain_info.minImageCount = device->selection.swap_image_count;
+    swapchain_info.imageFormat = get_vk_format(format);
+    swapchain_info.imageColorSpace = VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; //selection.surface_format.colorSpace;
+    swapchain_info.imageExtent = swap_extent;
+    swapchain_info.imageArrayLayers = 1;
+    swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchain_info.preTransform = device->selection.surface_transform;
+    swapchain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchain_info.presentMode = device->selection.present_mode;
+    swapchain_info.clipped = VK_TRUE;
+
+    check("vkCreateSwapchainKHR", vkCreateSwapchainKHR(device->dev, &swapchain_info, nullptr, &swapchain));    
+
+    uint32_t swapchain_image_count;    
+    check("vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR(device->dev, swapchain, &swapchain_image_count, nullptr));
+    swapchain_images.resize(swapchain_image_count);
+    check("vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR(device->dev, swapchain, &swapchain_image_count, swapchain_images.data()));
+
+    swapchain_image_views.resize(swapchain_image_count);
+    for(uint32_t i=0; i<swapchain_image_count; ++i)
+    {
+        VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        view_info.image = swapchain_images[i];
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format = get_vk_format(format);
+        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.baseMipLevel = 0;
+        view_info.subresourceRange.levelCount = 1;
+        view_info.subresourceRange.baseArrayLayer = 0;
+        view_info.subresourceRange.layerCount = 1;
+        check("vkCreateImageView", vkCreateImageView(device->dev, &view_info, nullptr, &swapchain_image_views[i]));
+    }
+
+    VkSemaphoreCreateInfo semaphore_info {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &image_available));
+    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &render_finished));
+    
+    // Create swapchain framebuffer
+    swapchain_framebuffer = new delete_when_unreferenced<vk_framebuffer>{device};
+    swapchain_framebuffer->dims = dimensions;
+    swapchain_framebuffer->framebuffers.resize(swapchain_image_views.size());
+    swapchain_framebuffer->color_formats = {get_vk_format(format)};
+    swapchain_framebuffer->depth_format = get_vk_format(rhi::image_format::depth_float32);
+    depth_image = device->create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
+    auto render_pass = device->get_render_pass(*swapchain_framebuffer, {{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}});
+    for(size_t i=0; i<swapchain_image_views.size(); ++i)
+    {
+        std::vector<VkImageView> attachments {swapchain_image_views[i], static_cast<vk_image &>(*depth_image).image_view};
+        VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        framebuffer_info.renderPass = render_pass.pass_object;
+        framebuffer_info.attachmentCount = exactly(attachments.size());
+        framebuffer_info.pAttachments = attachments.data();
+        framebuffer_info.width = dimensions.x;
+        framebuffer_info.height = dimensions.y;
+        framebuffer_info.layers = 1;
+        check("vkCreateFramebuffer", vkCreateFramebuffer(device->dev, &framebuffer_info, nullptr, &swapchain_framebuffer->framebuffers[i]));
+    }
+
+    // Acquire the first image
+    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(device->dev, swapchain, std::numeric_limits<uint64_t>::max(), image_available, VK_NULL_HANDLE, &swapchain_framebuffer->current_index));
+}
+vk_window::~vk_window()
+{ 
+    swapchain_framebuffer = nullptr;
+    device->schedule([rf=render_finished, ia=image_available, views=swapchain_image_views, swapchain=swapchain, surface=surface, w=glfw_window, inst=device->instance](VkDevice dev) 
+    { 
+        vkDestroySemaphore(dev, rf, nullptr);
+        vkDestroySemaphore(dev, ia, nullptr);
+        for(auto view : views) vkDestroyImageView(dev, view, nullptr);
+        vkDestroySwapchainKHR(dev, swapchain, nullptr);
+        vkDestroySurfaceKHR(inst, surface, nullptr);
+        glfwDestroyWindow(w);
+    });
+}
+
 vk_descriptor_set_layout::vk_descriptor_set_layout(vk_device * device, const std::vector<descriptor_binding> & bindings) : device{device}
 { 
     std::vector<VkDescriptorSetLayoutBinding> set_bindings(bindings.size());
@@ -1003,161 +1116,47 @@ vk_pipeline::~vk_pipeline()
     });
 }
 
-////////////////////////////
-// vk_device descriptors //
-////////////////////////////
+void vk_descriptor_set::write(int binding, buffer_range range) 
+{
+    VkDescriptorBufferInfo buffer_info { static_cast<vk_buffer *>(range.buffer)->buffer_object, range.offset, range.size };
+    VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
+    vkUpdateDescriptorSets(device->dev, 1, &write, 0, nullptr);
+}
+void vk_descriptor_set::write(int binding, sampler & sampler, image & image) 
+{
+    VkDescriptorImageInfo image_info {static_cast<vk_sampler &>(sampler).sampler, static_cast<vk_image &>(image).image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image_info, nullptr, nullptr};
+    vkUpdateDescriptorSets(device->dev, 1, &write, 0, nullptr);
+}
 
-descriptor_pool vk_device::create_descriptor_pool() 
+vk_descriptor_pool::vk_descriptor_pool(vk_device * device) : device{device}
 { 
-    auto [handle, pool] = objects.create<descriptor_pool>();
     const VkDescriptorPoolSize pool_sizes[] {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1024}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1024}};
     VkDescriptorPoolCreateInfo descriptor_pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     descriptor_pool_info.poolSizeCount = 2;
     descriptor_pool_info.pPoolSizes = pool_sizes;
     descriptor_pool_info.maxSets = 1024;
     descriptor_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    check("vkCreateDescriptorPool", vkCreateDescriptorPool(dev, &descriptor_pool_info, nullptr, &pool));
-    return handle;
+    check("vkCreateDescriptorPool", vkCreateDescriptorPool(device->dev, &descriptor_pool_info, nullptr, &pool));
 }
-void vk_device::destroy_descriptor_pool(descriptor_pool pool)
+vk_descriptor_pool::~vk_descriptor_pool()
 {
-    schedule([obj = objects[pool]](VkDevice dev) { vkDestroyDescriptorPool(dev, obj, nullptr); });
-    objects.destroy(pool); 
+    device->schedule([pool=pool](VkDevice dev) { vkDestroyDescriptorPool(dev, pool, nullptr); });
 }
 
-void vk_device::reset_descriptor_pool(descriptor_pool pool) 
+void vk_descriptor_pool::reset()
 {
-    vkResetDescriptorPool(dev, objects[pool], 0);
+    vkResetDescriptorPool(device->dev, pool, 0);
 }
-descriptor_set vk_device::alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout & layout) 
+ptr<descriptor_set> vk_descriptor_pool::alloc(descriptor_set_layout & layout) 
 { 
-    auto & p = objects[pool];
-
     VkDescriptorSetAllocateInfo alloc_info {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    alloc_info.descriptorPool = p;
+    alloc_info.descriptorPool = pool;
     alloc_info.descriptorSetCount = 1;
     alloc_info.pSetLayouts = &static_cast<vk_descriptor_set_layout &>(layout).layout;
-
-    auto [handle, set] = objects.create<descriptor_set>();
-    check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(dev, &alloc_info, &set));
-    return handle;
-}
-void vk_device::write_descriptor(descriptor_set set, int binding, buffer_range range) 
-{
-    VkDescriptorBufferInfo buffer_info { static_cast<vk_buffer *>(range.buffer)->buffer_object, range.offset, range.size };
-    VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
-    vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
-}
-void vk_device::write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image) 
-{
-    VkDescriptorImageInfo image_info {static_cast<vk_sampler &>(sampler).sampler, static_cast<vk_image &>(image).image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, objects[set], exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image_info, nullptr, nullptr};
-    vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
-}
-
-////////////////////////
-// vk_device windows //
-////////////////////////
-
-vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string title) : device{device}
-{
-    auto format = rhi::image_format::rgba_srgb8;
-
-    const std::string buffer {begin(title), end(title)};
-    glfwDefaultWindowHints();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfw_window = glfwCreateWindow(dimensions.x, dimensions.y, buffer.c_str(), nullptr, nullptr);
-
-    check("glfwCreateWindowSurface", glfwCreateWindowSurface(device->instance, glfw_window, nullptr, &surface));
-
-    VkBool32 present = VK_FALSE;
-    check("vkGetPhysicalDeviceSurfaceSupportKHR", vkGetPhysicalDeviceSurfaceSupportKHR(device->selection.physical_device, device->selection.queue_family, surface, &present));
-    if(!present) throw std::runtime_error("vkGetPhysicalDeviceSurfaceSupportKHR(...) inconsistent");
-
-    // Determine swap extent
-    VkExtent2D swap_extent {static_cast<uint32_t>(dimensions.x), static_cast<uint32_t>(dimensions.y)};
-    VkSurfaceCapabilitiesKHR surface_caps;
-    check("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->selection.physical_device, surface, &surface_caps));
-    swap_extent.width = std::min(std::max(swap_extent.width, surface_caps.minImageExtent.width), surface_caps.maxImageExtent.width);
-    swap_extent.height = std::min(std::max(swap_extent.height, surface_caps.minImageExtent.height), surface_caps.maxImageExtent.height);
-
-    VkSwapchainCreateInfoKHR swapchain_info {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-    swapchain_info.surface = surface;
-    swapchain_info.minImageCount = device->selection.swap_image_count;
-    swapchain_info.imageFormat = get_vk_format(format);
-    swapchain_info.imageColorSpace = VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; //selection.surface_format.colorSpace;
-    swapchain_info.imageExtent = swap_extent;
-    swapchain_info.imageArrayLayers = 1;
-    swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    swapchain_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swapchain_info.preTransform = device->selection.surface_transform;
-    swapchain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapchain_info.presentMode = device->selection.present_mode;
-    swapchain_info.clipped = VK_TRUE;
-
-    check("vkCreateSwapchainKHR", vkCreateSwapchainKHR(device->dev, &swapchain_info, nullptr, &swapchain));    
-
-    uint32_t swapchain_image_count;    
-    check("vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR(device->dev, swapchain, &swapchain_image_count, nullptr));
-    swapchain_images.resize(swapchain_image_count);
-    check("vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR(device->dev, swapchain, &swapchain_image_count, swapchain_images.data()));
-
-    swapchain_image_views.resize(swapchain_image_count);
-    for(uint32_t i=0; i<swapchain_image_count; ++i)
-    {
-        VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        view_info.image = swapchain_images[i];
-        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format = get_vk_format(format);
-        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_info.subresourceRange.baseMipLevel = 0;
-        view_info.subresourceRange.levelCount = 1;
-        view_info.subresourceRange.baseArrayLayer = 0;
-        view_info.subresourceRange.layerCount = 1;
-        check("vkCreateImageView", vkCreateImageView(device->dev, &view_info, nullptr, &swapchain_image_views[i]));
-    }
-
-    VkSemaphoreCreateInfo semaphore_info {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &image_available));
-    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &render_finished));
-    
-    // Create swapchain framebuffer
-    swapchain_framebuffer = new delete_when_unreferenced<vk_framebuffer>{device};
-    swapchain_framebuffer->dims = dimensions;
-    swapchain_framebuffer->framebuffers.resize(swapchain_image_views.size());
-    swapchain_framebuffer->color_formats = {get_vk_format(format)};
-    swapchain_framebuffer->depth_format = get_vk_format(rhi::image_format::depth_float32);
-    depth_image = device->create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
-    auto render_pass = device->get_render_pass(*swapchain_framebuffer, {{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}});
-    for(size_t i=0; i<swapchain_image_views.size(); ++i)
-    {
-        std::vector<VkImageView> attachments {swapchain_image_views[i], static_cast<vk_image &>(*depth_image).image_view};
-        VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        framebuffer_info.renderPass = render_pass.pass_object;
-        framebuffer_info.attachmentCount = exactly(attachments.size());
-        framebuffer_info.pAttachments = attachments.data();
-        framebuffer_info.width = dimensions.x;
-        framebuffer_info.height = dimensions.y;
-        framebuffer_info.layers = 1;
-        check("vkCreateFramebuffer", vkCreateFramebuffer(device->dev, &framebuffer_info, nullptr, &swapchain_framebuffer->framebuffers[i]));
-    }
-
-    // Acquire the first image
-    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(device->dev, swapchain, std::numeric_limits<uint64_t>::max(), image_available, VK_NULL_HANDLE, &swapchain_framebuffer->current_index));
-}
-vk_window::~vk_window()
-{ 
-    swapchain_framebuffer = nullptr;
-    device->schedule([rf=render_finished, ia=image_available, views=swapchain_image_views, swapchain=swapchain, surface=surface, w=glfw_window, inst=device->instance](VkDevice dev) 
-    { 
-        vkDestroySemaphore(dev, rf, nullptr);
-        vkDestroySemaphore(dev, ia, nullptr);
-        for(auto view : views) vkDestroyImageView(dev, view, nullptr);
-        vkDestroySwapchainKHR(dev, swapchain, nullptr);
-        vkDestroySurfaceKHR(inst, surface, nullptr);
-        glfwDestroyWindow(w);
-    });
+    VkDescriptorSet set;
+    check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(device->dev, &alloc_info, &set));
+    return new delete_when_unreferenced<vk_descriptor_set>{device, set};
 }
 
 //////////////////////////
@@ -1267,9 +1266,9 @@ void vk_command_buffer::bind_pipeline(pipeline & pipe)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline &>(pipe).get_pipeline(current_pass));
 }
 
-void vk_command_buffer::bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set set)
+void vk_command_buffer::bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set)
 {
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline_layout &>(layout).layout, set_index, 1, &device->objects[set], 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline_layout &>(layout).layout, set_index, 1, &static_cast<vk_descriptor_set &>(set).set, 0, nullptr);
 }
 
 void vk_command_buffer::bind_vertex_buffer(int index, buffer_range range)

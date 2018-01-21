@@ -80,51 +80,38 @@ ptr<pipeline_layout> descriptor_emulator::create_pipeline_layout(const std::vect
     return layout;
 }
 
-rhi::descriptor_pool descriptor_emulator::create_descriptor_pool()
+ptr<descriptor_pool> descriptor_emulator::create_descriptor_pool()
 {
-    return std::get<rhi::descriptor_pool>(objects.create<rhi::descriptor_pool>());
+    return new delete_when_unreferenced<emulated_descriptor_pool>{};
 }
 
-void descriptor_emulator::reset_descriptor_pool(rhi::descriptor_pool pool)
+void descriptor_emulator::emulated_descriptor_pool::reset()
 {
-    objects[pool].buffer_bindings.clear();
-    objects[pool].used_sets = 0;
+    buffer_bindings.clear();
+    image_bindings.clear();
 }
 
-descriptor_set descriptor_emulator::alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout & layout)
+ptr<descriptor_set> descriptor_emulator::emulated_descriptor_pool::alloc(descriptor_set_layout & layout)
 {
-    auto & dpool = objects[pool];
-    if(dpool.used_sets == dpool.sets.size())
-    {
-        auto [handle, set] = objects.create<rhi::descriptor_set>();
-        set.pool = pool;
-        dpool.sets.push_back(handle);
-    }
-
-    auto handle = dpool.sets[dpool.used_sets++];
-    auto & dset = objects[handle];
-    dset.layout = static_cast<emulated_descriptor_set_layout *>(&layout);
-    dset.buffer_offset = dpool.buffer_bindings.size();
-    dset.image_offset = dpool.image_bindings.size();
-    dpool.buffer_bindings.resize(dset.buffer_offset + dset.layout->num_buffers);
-    dpool.image_bindings.resize(dset.image_offset + dset.layout->num_images);
-    return handle;
+    ptr<emulated_descriptor_set> set {new delete_when_unreferenced<emulated_descriptor_set>{}};
+    set->layout = static_cast<emulated_descriptor_set_layout *>(&layout);
+    set->buffer_offset = buffer_bindings.size();
+    set->image_offset = image_bindings.size();
+    buffer_bindings.resize(set->buffer_offset + set->layout->num_buffers);
+    image_bindings.resize(set->image_offset + set->layout->num_images);
+    return set;
 }
 
-void descriptor_emulator::write_descriptor(descriptor_set set, int binding, buffer_range range)
+void descriptor_emulator::emulated_descriptor_set::write(int binding, buffer_range range)
 {
-    auto & dset = objects[set];
-    auto & dpool = objects[dset.pool];
-    auto it = dset.layout->buffer_offsets.find(binding);
-    if(it == dset.layout->buffer_offsets.end()) throw std::logic_error("invalid binding");
-    dpool.buffer_bindings[dset.buffer_offset + it->second] = range;
+    auto it = layout->buffer_offsets.find(binding);
+    if(it == layout->buffer_offsets.end()) throw std::logic_error("invalid binding");
+    pool->buffer_bindings[buffer_offset + it->second] = range;
 }
 
-void descriptor_emulator::write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image)
+void descriptor_emulator::emulated_descriptor_set::write(int binding, sampler & sampler, image & image)
 {
-    auto & dset = objects[set];
-    auto & dpool = objects[dset.pool];
-    auto it = dset.layout->image_offsets.find(binding);
-    if(it == dset.layout->image_offsets.end()) throw std::logic_error("invalid binding");
-    dpool.image_bindings[dset.image_offset + it->second] = {&sampler, &image};
+    auto it = layout->image_offsets.find(binding);
+    if(it == layout->image_offsets.end()) throw std::logic_error("invalid binding");
+    pool->image_bindings[image_offset + it->second] = {&sampler, &image};
 }

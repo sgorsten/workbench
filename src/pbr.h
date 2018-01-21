@@ -63,7 +63,6 @@ struct standard_device_objects
     rhi::ptr<rhi::pipeline> compute_reflectance_cubemap_pipeline;
 
     standard_device_objects(rhi::ptr<rhi::device> dev, const standard_shaders & standard);
-    ~standard_device_objects();
 
     rhi::ptr<rhi::pipeline> create_image_pipeline(rhi::pipeline_layout & pipeline_layout, rhi::shader & fragment_shader)
     {
@@ -90,7 +89,7 @@ struct standard_device_objects
         dev->wait_until_complete(dev->submit(*cmd));
     }
 
-    rhi::ptr<rhi::image> create_brdf_integral_image(gfx::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer)
+    rhi::ptr<rhi::image> create_brdf_integral_image(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer)
     {
         auto target = dev->create_image({rhi::image_shape::_2d, {512,512,1}, 1, rhi::image_format::rg_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
         render_to_image(*target, 0, {512,512}, false, [&](rhi::command_buffer & cmd)
@@ -120,48 +119,48 @@ struct standard_device_objects
         dev->wait_until_complete(dev->submit(*cmd));
     }
 
-    rhi::ptr<rhi::image> create_cubemap_from_spheremap(int width, gfx::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, const coord_system & preferred_coords)
+    rhi::ptr<rhi::image> create_cubemap_from_spheremap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, const coord_system & preferred_coords)
     {
         auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, exactly(std::ceil(std::log2(width)+1)), rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
         auto set = desc_pool.alloc(*op_set_layout);
-        set.write(0, uniform_buffer, make_transform_4x4(preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward}));
-        set.write(1, *spheremap_sampler, spheremap);
+        set->write(0, uniform_buffer.write(make_transform_4x4(preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward})));
+        set->write(1, *spheremap_sampler, spheremap);
         render_to_cubemap(*target, 0, {width,width}, true, [&](rhi::command_buffer & cmd)
         {
             cmd.bind_pipeline(*copy_cubemap_from_spheremap_pipeline);
-            cmd.bind_descriptor_set(*op_pipeline_layout, 0, set.set);
+            cmd.bind_descriptor_set(*op_pipeline_layout, 0, *set);
         });
         return target;
     }
 
-    rhi::ptr<rhi::image> create_irradiance_cubemap(int width, gfx::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
+    rhi::ptr<rhi::image> create_irradiance_cubemap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
     {
         auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, 1, rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
         struct {} empty;
         auto set = desc_pool.alloc(*op_set_layout);
-        set.write(0, uniform_buffer, empty);
-        set.write(1, *cubemap_sampler, cubemap);
+        set->write(0, uniform_buffer.write(empty));
+        set->write(1, *cubemap_sampler, cubemap);
         render_to_cubemap(*target, 0, {width,width}, false, [&](rhi::command_buffer & cmd)
         {
             cmd.bind_pipeline(*compute_irradiance_cubemap_pipeline);
-            cmd.bind_descriptor_set(*op_pipeline_layout, 0, set.set);  
+            cmd.bind_descriptor_set(*op_pipeline_layout, 0, *set);  
         });
         return target;
     }
 
-    rhi::ptr<rhi::image> create_reflectance_cubemap(int width, gfx::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
+    rhi::ptr<rhi::image> create_reflectance_cubemap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
     {
         auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, 5, rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
         for(int mip=0; mip<5; ++mip)
         {
             const float roughness = mip/4.0f;
             auto set = desc_pool.alloc(*op_set_layout);
-            set.write(0, uniform_buffer, roughness);
-            set.write(1, *cubemap_sampler, cubemap);
+            set->write(0, uniform_buffer.write(roughness));
+            set->write(1, *cubemap_sampler, cubemap);
             render_to_cubemap(*target, mip, {width,width}, false, [&](rhi::command_buffer & cmd)
             {
                 cmd.bind_pipeline(*compute_reflectance_cubemap_pipeline);
-                cmd.bind_descriptor_set(*op_pipeline_layout, 0, set.set);  
+                cmd.bind_descriptor_set(*op_pipeline_layout, 0, *set);  
             });
             width /= 2;
         }
