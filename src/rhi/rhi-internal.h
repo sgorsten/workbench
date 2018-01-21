@@ -58,27 +58,27 @@ namespace rhi
             void write(int binding, sampler & sampler, image & image) override;
         };
     public:
-        size_t get_flat_buffer_binding(pipeline_layout & layout, int set, int binding) const;
-        size_t get_flat_image_binding(pipeline_layout & layout, int set, int binding) const;
+        static size_t get_flat_buffer_binding(pipeline_layout & layout, int set, int binding);
+        static size_t get_flat_image_binding(pipeline_layout & layout, int set, int binding);
 
-        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings);
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets);
-        ptr<descriptor_pool> create_descriptor_pool();
+        static ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings);
+        static ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets);
+        static ptr<descriptor_pool> create_descriptor_pool();
 
         template<class BindBufferFunction, class BindImageFunction>
-        void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
+        static void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set, BindBufferFunction bind_buffer, BindImageFunction bind_image)
         {
             const auto & pipeline_layout = static_cast<emulated_pipeline_layout &>(layout);
             const auto & descriptor_set = static_cast<emulated_descriptor_set &>(set);
             if(descriptor_set.layout != pipeline_layout.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
 
-            const auto & descriptor_pool = objects[descriptor_set.pool];
-            const auto & descriptor_set_layout = objects[descriptor_set.layout];
+            const auto & descriptor_pool = *descriptor_set.pool;
+            const auto & descriptor_set_layout = *descriptor_set.layout;
             for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.sets[set_index].buffer_offset + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
             for(size_t i=0; i<descriptor_set_layout.num_images; ++i) 
             {
                 auto & binding = descriptor_pool.image_bindings[descriptor_set.image_offset + i];
-                bind_image(pipeline_layout.sets[set_index].image_offset + i, binding.sampler, binding.image);
+                bind_image(pipeline_layout.sets[set_index].image_offset + i, *binding.sampler, *binding.image);
             }
         }
     };
@@ -117,7 +117,6 @@ namespace rhi
         { 
             auto & buf = static_cast<emulated_command_buffer &>(cmd);
             for(auto & command : buf.commands) std::visit(execute_command, command);
-            buffers.destroy(cmd);
         }
     };
 }

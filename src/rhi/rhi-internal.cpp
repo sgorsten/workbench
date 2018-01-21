@@ -29,7 +29,7 @@ size_t rhi::get_pixel_size(image_format format)
     }
 }
 
-size_t descriptor_emulator::get_flat_buffer_binding(pipeline_layout & layout, int set, int binding) const
+size_t descriptor_emulator::get_flat_buffer_binding(pipeline_layout & layout, int set, int binding)
 {
     const auto & pipe_layout = static_cast<emulated_pipeline_layout &>(layout);
     const auto & set_layout = static_cast<emulated_descriptor_set_layout &>(*pipe_layout.sets[set].layout);
@@ -38,7 +38,7 @@ size_t descriptor_emulator::get_flat_buffer_binding(pipeline_layout & layout, in
     return pipe_layout.sets[set].buffer_offset + it->second;
 }
 
-size_t descriptor_emulator::get_flat_image_binding(pipeline_layout & layout, int set, int binding) const
+size_t descriptor_emulator::get_flat_image_binding(pipeline_layout & layout, int set, int binding)
 {
     const auto & pipe_layout = static_cast<emulated_pipeline_layout &>(layout);
     const auto & set_layout = static_cast<emulated_descriptor_set_layout &>(*pipe_layout.sets[set].layout);
@@ -94,6 +94,7 @@ void descriptor_emulator::emulated_descriptor_pool::reset()
 ptr<descriptor_set> descriptor_emulator::emulated_descriptor_pool::alloc(descriptor_set_layout & layout)
 {
     ptr<emulated_descriptor_set> set {new delete_when_unreferenced<emulated_descriptor_set>{}};
+    set->pool = this;
     set->layout = static_cast<emulated_descriptor_set_layout *>(&layout);
     set->buffer_offset = buffer_bindings.size();
     set->image_offset = image_bindings.size();
