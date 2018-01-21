@@ -73,8 +73,8 @@ namespace rhi
     struct gl_image : image
     {
         ptr<gl_device> device;
-        image_desc desc;
         GLuint texture_object = 0;
+        bool is_layered;
 
         gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data);
         ~gl_image();
@@ -112,9 +112,11 @@ namespace rhi
     struct gl_pipeline : pipeline
     {
         ptr<gl_device> device;
-        pipeline_desc desc;
         GLuint program_object = 0;
-    
+        std::vector<rhi::vertex_binding_desc> input;
+        std::vector<GLenum> enable, disable;
+        GLenum primitive_mode, front_face, cull_face, depth_func;
+        GLboolean depth_mask;
         gl_pipeline(gl_device * device, const pipeline_desc & desc);
         ~gl_pipeline();
     };
@@ -189,7 +191,7 @@ void gl_device::bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline)
     {
         // If vertex array object was not yet created in this context, go ahead and generate it
         glCreateVertexArrays(1, &vertex_array);
-        for(auto & buf : pipeline.desc.input)
+        for(auto & buf : pipeline.input)
         {
             for(auto & attrib : buf.attributes)
             {
@@ -220,7 +222,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
 {
     GLFWwindow * context = hidden_window;
     gl_pipeline * current_pipeline = nullptr;
-    size_t index_buffer_offset = 0;
+    const char * base_indices_pointer = 0;
     glfwMakeContextCurrent(context);
     command_emulator::execute(cmd, overload(
         [](const generate_mipmaps_command & c)
@@ -262,24 +264,12 @@ uint64_t gl_device::submit(command_buffer & cmd)
             bind_vertex_array(context, *current_pipeline);
             glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-            // Rasterizer state
-            switch(current_pipeline->desc.front_face)
-            {
-            case rhi::front_face::counter_clockwise: glFrontFace(GL_CCW); break;
-            case rhi::front_face::clockwise: glFrontFace(GL_CW); break;
-            }
-            switch(current_pipeline->desc.cull_mode)
-            {
-            case rhi::cull_mode::none: glDisable(GL_CULL_FACE); break;
-            case rhi::cull_mode::back: glEnable(GL_CULL_FACE); glCullFace(GL_BACK); break;
-            case rhi::cull_mode::front: glEnable(GL_CULL_FACE); glCullFace(GL_FRONT); break;
-            }                   
-
-            // Depth stencil state
-            (current_pipeline->desc.depth_test ? glEnable : glDisable)(GL_DEPTH_TEST);
-            if(current_pipeline->desc.depth_test) glDepthFunc(GL_NEVER | static_cast<int>(*current_pipeline->desc.depth_test));
-            glDepthMask(current_pipeline->desc.depth_write ? GL_TRUE : GL_FALSE);
-
+            for(auto cap : current_pipeline->enable) glEnable(cap);
+            for(auto cap : current_pipeline->disable) glDisable(cap);
+            glFrontFace(current_pipeline->front_face);
+            glCullFace(current_pipeline->cull_face);
+            glDepthFunc(current_pipeline->depth_func);
+            glDepthMask(current_pipeline->depth_mask);
         },
         [](const bind_descriptor_set_command & c)
         {
@@ -293,7 +283,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
         },
         [&](const bind_vertex_buffer_command & c)
         {
-            for(auto & buf : current_pipeline->desc.input)
+            for(auto & buf : current_pipeline->input)
             {
                 if(buf.index == c.index)
                 {
@@ -304,27 +294,10 @@ uint64_t gl_device::submit(command_buffer & cmd)
         [&](const bind_index_buffer_command & c)
         {
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<gl_buffer &>(*c.range.buffer).buffer_object);
-            index_buffer_offset = c.range.offset;
+            base_indices_pointer = (const char *)c.range.offset;
         },
-        [&](const draw_command & c)
-        {
-            switch(current_pipeline->desc.topology)
-            {
-            case primitive_topology::points: glDrawArrays(GL_POINTS, c.first_vertex, c.vertex_count); break;
-            case primitive_topology::lines: glDrawArrays(GL_LINES, c.first_vertex, c.vertex_count); break;
-            case primitive_topology::triangles: glDrawArrays(GL_TRIANGLES, c.first_vertex, c.vertex_count); break;
-            }
-        },
-        [&](const draw_indexed_command & c)
-        {
-            auto indices = (const void *)(index_buffer_offset + c.first_index*sizeof(uint32_t));
-            switch(current_pipeline->desc.topology)
-            {
-            case primitive_topology::points: glDrawElements(GL_POINTS, c.index_count, GL_UNSIGNED_INT, indices); break;
-            case primitive_topology::lines: glDrawElements(GL_LINES, c.index_count, GL_UNSIGNED_INT, indices); break;
-            case primitive_topology::triangles: glDrawElements(GL_TRIANGLES, c.index_count, GL_UNSIGNED_INT, indices); break;
-            }
-        },
+        [&](const draw_command & c) { glDrawArrays(current_pipeline->primitive_mode, c.first_vertex, c.vertex_count); },
+        [&](const draw_indexed_command & c) { glDrawElements(current_pipeline->primitive_mode, c.index_count, GL_UNSIGNED_INT, base_indices_pointer + c.first_index*sizeof(uint32_t)); },
         [](const end_render_pass_command &) {}
     ));
     sync_objects[++submitted_index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
@@ -419,7 +392,7 @@ static gl_format get_gl_format(image_format format)
     }
 }
 
-gl_image::gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data) : device{device}, desc{desc}
+gl_image::gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data) : device{device}, is_layered{desc.shape == rhi::image_shape::cube}
 {
     auto glf = get_gl_format(desc.format);
     switch(desc.shape)
@@ -466,14 +439,16 @@ gl_framebuffer::gl_framebuffer(gl_device * device, const framebuffer_desc & desc
     glCreateFramebuffers(1, &framebuffer_object);
     for(size_t i=0; i<desc.color_attachments.size(); ++i) 
     {
-        if(static_cast<gl_image &>(*desc.color_attachments[i].image).desc.shape == rhi::image_shape::cube) glNamedFramebufferTextureLayer(framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), static_cast<gl_image &>(*desc.color_attachments[i].image).texture_object, desc.color_attachments[i].mip, desc.color_attachments[i].layer);
-        else glNamedFramebufferTexture(framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), static_cast<gl_image &>(*desc.color_attachments[i].image).texture_object, desc.color_attachments[i].mip);
+        auto & im = static_cast<gl_image &>(*desc.color_attachments[i].image);
+        if(im.is_layered) glNamedFramebufferTextureLayer(framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), im.texture_object, desc.color_attachments[i].mip, desc.color_attachments[i].layer);
+        else glNamedFramebufferTexture(framebuffer_object, exactly(GL_COLOR_ATTACHMENT0+i), im.texture_object, desc.color_attachments[i].mip);
         draw_buffers.push_back(exactly(GL_COLOR_ATTACHMENT0+i));
     }
     if(desc.depth_attachment) 
     {
-        if(static_cast<gl_image &>(*desc.depth_attachment->image).desc.shape == rhi::image_shape::cube) glNamedFramebufferTextureLayer(framebuffer_object, GL_DEPTH_ATTACHMENT, static_cast<gl_image &>(*desc.depth_attachment->image).texture_object, desc.depth_attachment->mip, desc.depth_attachment->layer);
-        else glNamedFramebufferTexture(framebuffer_object, GL_DEPTH_ATTACHMENT, static_cast<gl_image &>(*desc.depth_attachment->image).texture_object, desc.depth_attachment->mip);
+        auto & im = static_cast<gl_image &>(*desc.depth_attachment->image);
+        if(im.is_layered) glNamedFramebufferTextureLayer(framebuffer_object, GL_DEPTH_ATTACHMENT, im.texture_object, desc.depth_attachment->mip, desc.depth_attachment->layer);
+        else glNamedFramebufferTexture(framebuffer_object, GL_DEPTH_ATTACHMENT, im.texture_object, desc.depth_attachment->mip);
     }
     glNamedFramebufferDrawBuffers(framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
 }
@@ -507,9 +482,9 @@ gl_window::gl_window(gl_device * device, const int2 & dimensions, std::string ti
     fb = new delete_when_unreferenced<gl_framebuffer>{device, dimensions, title};
 }
 
-gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : device{device}, desc{desc}
+gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : device{device}, input{desc.input}
 {
-    program_object = glCreateProgram();
+    std::vector<GLenum> shaders;
     for(auto s : desc.stages)
     {
         auto & shader = static_cast<gl_shader &>(*s);
@@ -537,11 +512,12 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
             {
             case shader_stage::vertex: return GL_VERTEX_SHADER;
             case shader_stage::fragment: return GL_FRAGMENT_SHADER;
-            default: throw std::logic_error("unsupported shader_stage");
+            default: fail_fast();
             }
         }());
         glShaderSource(shader_object, 1, &source, &length);
         glCompileShader(shader_object);
+        shaders.push_back(shader_object);
 
         GLint status;
         glGetShaderiv(shader_object, GL_COMPILE_STATUS, &status);
@@ -550,12 +526,14 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
             glGetShaderiv(shader_object, GL_INFO_LOG_LENGTH, &length);
             std::vector<char> buffer(length);
             glGetShaderInfoLog(shader_object, exactly(buffer.size()), &length, buffer.data());
+            for(auto shader : shaders) glDeleteShader(shader);
             throw std::runtime_error(buffer.data());
         }
-            
-        glAttachShader(program_object, shader_object);
     }
+    program_object = glCreateProgram();
+    for(auto shader : shaders) glAttachShader(program_object, shader);
     glLinkProgram(program_object);
+    for(auto shader : shaders) glDeleteShader(shader);
 
     GLint status, length;
     glGetProgramiv(program_object, GL_LINK_STATUS, &status);
@@ -564,8 +542,44 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
         glGetProgramiv(program_object, GL_INFO_LOG_LENGTH, &length);
         std::vector<char> buffer(length);
         glGetProgramInfoLog(program_object, exactly(buffer.size()), &length, buffer.data());
+        glDeleteProgram(program_object);
         throw std::runtime_error(buffer.data());
     }
+
+    // Rasterizer state
+    switch(desc.topology)
+    {
+    case primitive_topology::points: primitive_mode = GL_POINTS; break;
+    case primitive_topology::lines: primitive_mode = GL_LINES; break;
+    case primitive_topology::triangles: primitive_mode = GL_TRIANGLES; break;
+    default: fail_fast();
+    }
+    switch(desc.front_face)
+    {
+    case rhi::front_face::counter_clockwise: front_face = GL_CCW; break;
+    case rhi::front_face::clockwise: front_face = GL_CW; break;
+    default: fail_fast();
+    }
+    switch(desc.cull_mode)
+    {
+    case rhi::cull_mode::none: disable.push_back(GL_CULL_FACE); cull_face = GL_BACK; break;
+    case rhi::cull_mode::back: enable.push_back(GL_CULL_FACE); cull_face = GL_BACK; break;
+    case rhi::cull_mode::front: enable.push_back(GL_CULL_FACE); cull_face = GL_FRONT; break;
+    default: fail_fast();
+    }
+
+    // Depth stencil state
+    if(desc.depth_test)
+    {
+        enable.push_back(GL_DEPTH_TEST);
+        depth_func = GL_NEVER + static_cast<GLenum>(*desc.depth_test);
+    }
+    else
+    {
+        disable.push_back(GL_DEPTH_TEST);
+        depth_func = GL_ALWAYS;
+    }
+    depth_mask = desc.depth_write ? GL_TRUE : GL_FALSE;
 }
 gl_pipeline::~gl_pipeline()
 {
