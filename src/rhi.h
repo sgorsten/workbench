@@ -7,6 +7,34 @@ struct GLFWwindow;
 
 namespace rhi
 {
+    template<class T> class ptr
+    {
+        T * p {nullptr};
+    public:
+        ptr() = default;
+        ptr(T * p) : p{p} { if(p) p->add_ref(); }
+        ptr(const ptr & r) : ptr(r.p) {}
+        ptr(ptr && r) noexcept : p{r.p} { r.p = nullptr; }
+        ptr & operator = (const ptr & r) { return *this = handle(r); }
+        ptr & operator = (ptr && r) { std::swap(p, r.p); return *this; }
+        ~ptr() { if(p) p->release(); }
+
+        operator T * () const { return p; }
+        T & operator * () const { return *p; }
+        T * operator -> () const { return p; }
+    };
+
+    struct object
+    {
+        virtual void add_ref() = 0;
+        virtual void release() = 0;
+    };
+
+    struct buffer : object { virtual char * get_mapped_memory() = 0; };
+    struct sampler : object {};
+    struct image : object {};
+    struct framebuffer : object { virtual coord_system get_ndc_coords() const = 0; };
+
     // Simple handle type used to refer to device objects
     template<class T> struct handle 
     { 
@@ -19,19 +47,16 @@ namespace rhi
     template<class T> bool operator != (const handle<T> & a, const handle<T> & b) { return a.id != b.id; }
 
     // Object types
-    using buffer = handle<struct buffer_tag>;
-    using image = handle<struct image_tag>;
-    using sampler = handle<struct sampler_tag>;
-    using framebuffer = handle<struct framebuffer_tag>;
     using descriptor_pool = handle<struct descriptor_pool_tag>;
     using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
     using descriptor_set = handle<struct descriptor_set_tag>;
     using pipeline_layout = handle<struct pipeline_layout_tag>;
     using shader = handle<struct shader_tag>;
     using pipeline = handle<struct pipeline_tag>;
-    using command_buffer = handle<struct command_buffer_tag>;
     using window = handle<struct window_tag>;
     
+
+
     // Buffer creation info
     enum class buffer_usage { vertex, index, uniform, storage };
     struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
@@ -128,7 +153,7 @@ namespace rhi
     };
 
     // Framebuffer creation info
-    struct framebuffer_attachment_desc { image image; int mip, layer; };
+    struct framebuffer_attachment_desc { ptr<image> image; int mip, layer; };
     struct framebuffer_desc
     {
         int2 dimensions;
@@ -163,9 +188,22 @@ namespace rhi
     };
 
     struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
-    struct buffer_range { buffer buffer; size_t offset, size; };
+    struct buffer_range { buffer * buffer; size_t offset, size; };
 
-    struct device
+    struct command_buffer : object
+    {
+        virtual void generate_mipmaps(image & image) = 0;
+        virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
+        virtual void bind_pipeline(pipeline pipe) = 0;
+        virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
+        virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
+        virtual void bind_index_buffer(buffer_range range) = 0;
+        virtual void draw(int first_vertex, int vertex_count) = 0;
+        virtual void draw_indexed(int first_index, int index_count) = 0;
+        virtual void end_render_pass() = 0;
+    };
+
+    struct device : object
     {
         //////////
         // info //
@@ -177,15 +215,10 @@ namespace rhi
         // resources //
         ///////////////
 
-        virtual buffer create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
-        virtual char * get_mapped_memory(buffer buffer) = 0;
-        virtual void destroy_buffer(buffer buffer) = 0;
-
-        virtual image create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0; // one ptr for non-cube, six ptrs in +x,-x,+y,-y,+z,-z order for cube
-        virtual void destroy_image(image image) = 0;
-
-        virtual sampler create_sampler(const sampler_desc & desc) = 0;
-        virtual void destroy_sampler(sampler sampler) = 0;
+        virtual ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
+        virtual ptr<sampler> create_sampler(const sampler_desc & desc) = 0;
+        virtual ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0; // one ptr for non-cube, six ptrs in +x,-x,+y,-y,+z,-z order for cube
+        virtual ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) = 0;
 
         /////////////////
         // descriptors //
@@ -200,15 +233,7 @@ namespace rhi
         virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
         virtual descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
-        virtual void write_descriptor(descriptor_set set, int binding, sampler sampler, image image) = 0;
-
-        //////////////////
-        // framebuffers //
-        //////////////////
-
-        virtual framebuffer create_framebuffer(const framebuffer_desc & desc) = 0;
-        virtual coord_system get_ndc_coords(framebuffer framebuffer) = 0;
-        virtual void destroy_framebuffer(framebuffer framebuffer) = 0;
+        virtual void write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image) = 0;
 
         ///////////////
         // pipelines //
@@ -229,34 +254,23 @@ namespace rhi
 
         virtual window create_window(const int2 & dimensions, std::string_view title) = 0;
         virtual GLFWwindow * get_glfw_window(window window) = 0;
-        virtual framebuffer get_swapchain_framebuffer(window window) = 0;
+        virtual framebuffer * get_swapchain_framebuffer(window window) = 0;
         virtual void destroy_window(window window) = 0;
 
         ///////////////
         // rendering //
         ///////////////
 
-        virtual command_buffer start_command_buffer() = 0;
-
-        virtual void generate_mipmaps(command_buffer cmd, image image) = 0;
-        virtual void begin_render_pass(command_buffer cmd, const render_pass_desc & desc, framebuffer framebuffer) = 0;
-        virtual void bind_pipeline(command_buffer cmd, pipeline pipe) = 0;
-        virtual void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) = 0;
-        virtual void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) = 0;
-        virtual void bind_index_buffer(command_buffer cmd, buffer_range range) = 0;
-        virtual void draw(command_buffer cmd, int first_vertex, int vertex_count) = 0;
-        virtual void draw_indexed(command_buffer cmd, int first_index, int index_count) = 0;
-        virtual void end_render_pass(command_buffer cmd) = 0;
-
-        virtual uint64_t submit(command_buffer cmd) = 0;
-        virtual uint64_t acquire_and_submit_and_present(command_buffer cmd, window window) = 0; // Submit commands to execute when the next frame is available, followed by a present
+        virtual ptr<command_buffer> start_command_buffer() = 0;
+        virtual uint64_t submit(command_buffer & cmd) = 0;
+        virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window window) = 0; // Submit commands to execute when the next frame is available, followed by a present
         virtual void wait_until_complete(uint64_t submit_id) = 0;
     };
 
     struct backend_info
     {
         std::string name;
-        std::function<std::shared_ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
+        std::function<rhi::ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
     };
 
     size_t get_pixel_size(image_format format);

@@ -13,13 +13,13 @@ standard_shaders standard_shaders::compile(shader_compiler & compiler)
     return standard;
 }
 
-standard_device_objects::standard_device_objects(std::shared_ptr<rhi::device> dev, const standard_shaders & standard) : dev{dev}
+standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, const standard_shaders & standard) : dev{dev}
 {
     image_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::clamp_to_edge});
     spheremap_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::repeat, rhi::address_mode::clamp_to_edge});
     cubemap_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, rhi::filter::linear, rhi::address_mode::clamp_to_edge, rhi::address_mode::clamp_to_edge, rhi::address_mode::clamp_to_edge});
 
-    const float y = dev->get_info().inverted_framebuffers ? -1 : 1;
+    const float y = dev->get_info().inverted_framebuffers ? -1.0f : 1.0f;
     const render_image_vertex image_vertices[] {{{-1,-y},{0,0}}, {{+1,-y},{1,0}}, {{+1,+y},{1,1}}, {{-1,-y},{0,0}}, {{+1,+y},{1,1}}, {{-1,+y},{0,1}}};
     const render_cubemap_vertex cubemap_vertices[]
     {
@@ -69,9 +69,4 @@ standard_device_objects::~standard_device_objects()
     dev->destroy_shader(render_cubemap_vertex_shader);
     dev->destroy_shader(compute_brdf_integral_image_fragment_shader);
     dev->destroy_shader(render_image_vertex_shader);
-    dev->destroy_sampler(spheremap_sampler);
-    dev->destroy_sampler(cubemap_sampler);
-    dev->destroy_sampler(image_sampler);
-    dev->destroy_buffer(render_cubemap_vertex_buffer);
-    dev->destroy_buffer(render_image_vertex_buffer);
 }

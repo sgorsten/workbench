@@ -1,10 +1,20 @@
 #pragma once
 #include "../rhi.h"
+#include <atomic>
 
 namespace rhi
 {
+    // Used for objects whose ownership is shared by their references
+    template<class T> struct delete_when_unreferenced : T
+    {
+        std::atomic_uint32_t ref_count {0};
+        void add_ref() override { ++ref_count; }
+        void release() override { if(--ref_count == 0) delete this; }
+        using T::T;
+    };
+
     std::vector<backend_info> & global_backend_list();
-    template<class Device> void register_backend(const char * name) { global_backend_list().push_back({name, [](std::function<void(const char *)> debug_callback) { return std::make_shared<Device>(debug_callback); }}); }
+    template<class Device> void register_backend(const char * name) { global_backend_list().push_back({name, [](std::function<void(const char *)> debug_callback) { return ptr<device>(new delete_when_unreferenced<Device>{debug_callback}); }}); }
     template<class Device> struct autoregister_backend { autoregister_backend(const char * name) { register_backend<Device>(name); } };
 
     enum attachment_type { color, depth_stencil };
@@ -56,7 +66,7 @@ namespace rhi
 
     class descriptor_emulator
     {
-        struct sampled_image { sampler sampler; image image; };
+        struct sampled_image { ptr<sampler> sampler; ptr<image> image; };
 
         struct emulated_descriptor_pool
         {
@@ -105,7 +115,7 @@ namespace rhi
         void reset_descriptor_pool(descriptor_pool pool);
         descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout);
         void write_descriptor(descriptor_set set, int binding, buffer_range range);
-        void write_descriptor(descriptor_set set, int binding, sampler sampler, image image);
+        void write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image);
 
         template<class BindBufferFunction, class BindImageFunction>
         void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set, BindBufferFunction bind_buffer, BindImageFunction bind_image) const
@@ -130,8 +140,8 @@ namespace rhi
         void destroy(descriptor_pool pool) { objects.destroy(pool); }
     };
 
-    struct generate_mipmaps_command { image im; };
-    struct begin_render_pass_command { render_pass_desc pass; framebuffer framebuffer; };
+    struct generate_mipmaps_command { ptr<image> im; };
+    struct begin_render_pass_command { render_pass_desc pass; ptr<framebuffer> framebuffer; };
     struct bind_pipeline_command { pipeline pipe; };
     struct bind_descriptor_set_command { pipeline_layout layout; int set_index; descriptor_set set; };
     struct bind_vertex_buffer_command { int index; buffer_range range; };
@@ -139,25 +149,30 @@ namespace rhi
     struct draw_command { int first_vertex, vertex_count; };
     struct draw_indexed_command { int first_index, index_count; };
     struct end_render_pass_command {};
+
     class command_emulator
     {
-        using command = std::variant<generate_mipmaps_command, begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
-        struct emulated_command_buffer { std::vector<command> commands; };
-        object_set<command_buffer, emulated_command_buffer> buffers;
-    public:
-        command_buffer start_command_buffer() { return std::get<command_buffer>(buffers.create()); }
-        void generate_mipmaps(command_buffer cmd, image image) { buffers[cmd].commands.push_back(generate_mipmaps_command{image}); }
-        void begin_render_pass(command_buffer cmd, const render_pass_desc & pass, framebuffer framebuffer) { buffers[cmd].commands.push_back(begin_render_pass_command{pass, framebuffer}); }
-        void bind_pipeline(command_buffer cmd, pipeline pipe) { buffers[cmd].commands.push_back(bind_pipeline_command{pipe}); }
-        void bind_descriptor_set(command_buffer cmd, pipeline_layout layout, int set_index, descriptor_set set) { buffers[cmd].commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }
-        void bind_vertex_buffer(command_buffer cmd, int index, buffer_range range) { buffers[cmd].commands.push_back(bind_vertex_buffer_command{index, range}); }
-        void bind_index_buffer(command_buffer cmd, buffer_range range) { buffers[cmd].commands.push_back(bind_index_buffer_command{range}); }
-        void draw(command_buffer cmd, int first_vertex, int vertex_count) { buffers[cmd].commands.push_back(draw_command{first_vertex, vertex_count}); }
-        void draw_indexed(command_buffer cmd, int first_index, int index_count) { buffers[cmd].commands.push_back(draw_indexed_command{first_index, index_count}); }
-        void end_render_pass(command_buffer cmd) { buffers[cmd].commands.push_back(end_render_pass_command{}); }
-        template<class ExecuteCommandFunction> void execute(command_buffer cmd, ExecuteCommandFunction execute_command) 
+        struct emulated_command_buffer : command_buffer
         { 
-            auto & buf = buffers[cmd];
+            using command = std::variant<generate_mipmaps_command, begin_render_pass_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
+            std::vector<command> commands; 
+    
+            void generate_mipmaps(image & image) { commands.push_back(generate_mipmaps_command{&image}); }
+            void begin_render_pass(const render_pass_desc & pass, framebuffer & framebuffer) { commands.push_back(begin_render_pass_command{pass, &framebuffer}); }
+            void bind_pipeline(pipeline pipe) { commands.push_back(bind_pipeline_command{pipe}); }
+            void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) { commands.push_back(bind_descriptor_set_command{layout, set_index, set}); }
+            void bind_vertex_buffer(int index, buffer_range range) { commands.push_back(bind_vertex_buffer_command{index, range}); }
+            void bind_index_buffer(buffer_range range) { commands.push_back(bind_index_buffer_command{range}); }
+            void draw(int first_vertex, int vertex_count) { commands.push_back(draw_command{first_vertex, vertex_count}); }
+            void draw_indexed(int first_index, int index_count) { commands.push_back(draw_indexed_command{first_index, index_count}); }
+            void end_render_pass() { commands.push_back(end_render_pass_command{}); }
+        };
+    public:
+        ptr<command_buffer> start_command_buffer() { return new delete_when_unreferenced<emulated_command_buffer>{}; }
+
+        template<class ExecuteCommandFunction> void execute(command_buffer & cmd, ExecuteCommandFunction execute_command) 
+        { 
+            auto & buf = static_cast<emulated_command_buffer &>(cmd);
             for(auto & command : buf.commands) std::visit(execute_command, command);
             buffers.destroy(cmd);
         }

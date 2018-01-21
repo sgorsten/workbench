@@ -113,7 +113,7 @@ rhi::descriptor_set descriptor_emulator::alloc_descriptor_set(rhi::descriptor_po
     return handle;
 }
 
-void descriptor_emulator::write_descriptor(rhi::descriptor_set set, int binding, rhi::buffer_range range)
+void descriptor_emulator::write_descriptor(descriptor_set set, int binding, buffer_range range)
 {
     auto & dset = objects[set];
     auto & dpool = objects[dset.pool];
@@ -123,12 +123,12 @@ void descriptor_emulator::write_descriptor(rhi::descriptor_set set, int binding,
     dpool.buffer_bindings[dset.buffer_offset + it->second] = range;
 }
 
-void descriptor_emulator::write_descriptor(rhi::descriptor_set set, int binding, rhi::sampler sampler, rhi::image image)
+void descriptor_emulator::write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image)
 {
     auto & dset = objects[set];
     auto & dpool = objects[dset.pool];
     const auto & dlayout = objects[dset.layout];
     auto it = dlayout.image_offsets.find(binding);
     if(it == dlayout.image_offsets.end()) throw std::logic_error("invalid binding");
-    dpool.image_bindings[dset.image_offset + it->second] = {sampler, image};
+    dpool.image_bindings[dset.image_offset + it->second] = {&sampler, &image};
 }

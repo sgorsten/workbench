@@ -25,25 +25,21 @@ namespace gfx
 
     class static_buffer
     {
-        std::shared_ptr<rhi::device> dev;
-        rhi::buffer buffer;
+        rhi::ptr<rhi::buffer> buffer;
         size_t size;
     public:
-        static_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, binary_view contents) : dev{dev}, buffer{dev->create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
-        ~static_buffer() { dev->destroy_buffer(buffer); }
+        static_buffer(rhi::ptr<rhi::device> dev, rhi::buffer_usage usage, binary_view contents) : buffer{dev->create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
 
         operator rhi::buffer_range() const { return {buffer, 0, size}; }
     };
 
     class dynamic_buffer
     {
-        std::shared_ptr<rhi::device> dev;
-        rhi::buffer buffer;
+        rhi::ptr<rhi::buffer> buffer;
         char * mapped;
         size_t size, used;
     public:
-        dynamic_buffer(std::shared_ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : dev{dev}, buffer{dev->create_buffer({size, usage, true}, nullptr)}, mapped{dev->get_mapped_memory(buffer)}, size{size}, used{0} {}
-        ~dynamic_buffer() { dev->destroy_buffer(buffer); }
+        dynamic_buffer(rhi::ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : buffer{dev->create_buffer({size, usage, true}, nullptr)}, mapped{buffer->get_mapped_memory()}, size{size}, used{0} {}
 
         void reset() { used = 0; }
         rhi::buffer_range write(binary_view contents)
@@ -63,48 +59,29 @@ namespace gfx
 
         descriptor_set write(int binding, rhi::buffer_range range) { dev.write_descriptor(set, binding, range); return *this; }
         descriptor_set write(int binding, dynamic_buffer & buffer, binary_view data) { return write(binding, buffer.write(data)); }
-        descriptor_set write(int binding, rhi::sampler sampler, rhi::image image) { dev.write_descriptor(set, binding, sampler, image); return *this; }
+        descriptor_set write(int binding, rhi::sampler & sampler, rhi::image & image) { dev.write_descriptor(set, binding, sampler, image); return *this; }
     };
 
     struct descriptor_pool
     {
-        std::shared_ptr<rhi::device> dev;
+        rhi::ptr<rhi::device> dev;
         rhi::descriptor_pool pool;
     public:
-        descriptor_pool(std::shared_ptr<rhi::device> dev) : dev{dev}, pool{dev->create_descriptor_pool()} {}
+        descriptor_pool(rhi::ptr<rhi::device> dev) : dev{dev}, pool{dev->create_descriptor_pool()} {}
         ~descriptor_pool() { dev->destroy_descriptor_pool(pool); }
 
         void reset() { dev->reset_descriptor_pool(pool); }
         descriptor_set alloc(rhi::descriptor_set_layout layout) { return{*dev, dev->alloc_descriptor_set(pool, layout)}; }
     };
 
-    struct command_buffer
-    {
-        rhi::device & dev;
-        rhi::command_buffer cmd;
-
-        command_buffer(rhi::device & dev) : dev{dev}, cmd{dev.start_command_buffer()} {}
-        void begin_render_pass(const rhi::render_pass_desc & desc, rhi::framebuffer framebuffer) { dev.begin_render_pass(cmd, desc, framebuffer); }
-        void bind_pipeline(rhi::pipeline pipe) { dev.bind_pipeline(cmd, pipe); }
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, rhi::descriptor_set set) { dev.bind_descriptor_set(cmd, layout, set_index, set); }
-        void bind_descriptor_set(rhi::pipeline_layout layout, int set_index, descriptor_set set) { dev.bind_descriptor_set(cmd, layout, set_index, set.set); }
-        void bind_vertex_buffer(int index, rhi::buffer_range range) { dev.bind_vertex_buffer(cmd, index, range); }
-        void bind_index_buffer(rhi::buffer_range range) { dev.bind_index_buffer(cmd, range); }
-        void draw(int first_vertex, int vertex_count) { dev.draw(cmd, first_vertex, vertex_count); }
-        void draw_indexed(int first_index, int index_count)  { dev.draw_indexed(cmd, first_index, index_count); }
-        void end_render_pass() { dev.end_render_pass(cmd); }
-        void generate_mipmaps(rhi::image image) { dev.generate_mipmaps(cmd, image); }
-        uint64_t submit() { return dev.submit(cmd); }
-    };
-
     class window
     {
         struct ignore { template<class... T> operator std::function<void(T...)>() const { return [](T...) {}; } };
-        std::shared_ptr<rhi::device> dev;
+        rhi::ptr<rhi::device> dev;
         rhi::window rhi_window;
         GLFWwindow * glfw_window;
     public:
-        window(std::shared_ptr<rhi::device> dev, const int2 & dimensions, const std::string & title);
+        window(rhi::ptr<rhi::device> dev, const int2 & dimensions, const std::string & title);
         ~window();
 
         // Observers
