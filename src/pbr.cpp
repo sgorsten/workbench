@@ -34,12 +34,12 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
     render_cubemap_vertex_buffer = dev->create_buffer({sizeof(cubemap_vertices), rhi::buffer_usage::vertex, false}, cubemap_vertices);
 
     render_image_vertex_shader = dev->create_shader(standard.render_image_vertex_shader);
-    compute_brdf_integral_image_fragment_shader = dev->create_shader(standard.compute_brdf_integral_image_fragment_shader);
+    auto compute_brdf_integral_image_fragment_shader = dev->create_shader(standard.compute_brdf_integral_image_fragment_shader);
 
     render_cubemap_vertex_shader = dev->create_shader(standard.render_cubemap_vertex_shader);
-    copy_cubemap_from_spheremap_fragment_shader = dev->create_shader(standard.copy_cubemap_from_spheremap_fragment_shader);
-    compute_irradiance_cubemap_fragment_shader = dev->create_shader(standard.compute_irradiance_cubemap_fragment_shader);
-    compute_reflectance_cubemap_fragment_shader = dev->create_shader(standard.compute_reflectance_cubemap_fragment_shader);
+    auto copy_cubemap_from_spheremap_fragment_shader = dev->create_shader(standard.copy_cubemap_from_spheremap_fragment_shader);
+    auto compute_irradiance_cubemap_fragment_shader = dev->create_shader(standard.compute_irradiance_cubemap_fragment_shader);
+    auto compute_reflectance_cubemap_fragment_shader = dev->create_shader(standard.compute_reflectance_cubemap_fragment_shader);
 
     op_set_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1},
@@ -48,25 +48,13 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
     op_pipeline_layout = dev->create_pipeline_layout({op_set_layout});
     empty_pipeline_layout = dev->create_pipeline_layout({});
 
-    compute_brdf_integral_image_pipeline = create_image_pipeline(empty_pipeline_layout, compute_brdf_integral_image_fragment_shader);
-    copy_cubemap_from_spheremap_pipeline = create_cubemap_pipeline(op_pipeline_layout, copy_cubemap_from_spheremap_fragment_shader);
-    compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(op_pipeline_layout, compute_irradiance_cubemap_fragment_shader);
-    compute_reflectance_cubemap_pipeline = create_cubemap_pipeline(op_pipeline_layout, compute_reflectance_cubemap_fragment_shader);    
+    compute_brdf_integral_image_pipeline = create_image_pipeline(*empty_pipeline_layout, *compute_brdf_integral_image_fragment_shader);
+    copy_cubemap_from_spheremap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *copy_cubemap_from_spheremap_fragment_shader);
+    compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *compute_irradiance_cubemap_fragment_shader);
+    compute_reflectance_cubemap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *compute_reflectance_cubemap_fragment_shader);    
 }
 
 standard_device_objects::~standard_device_objects()
 {
-    dev->destroy_pipeline(compute_reflectance_cubemap_pipeline);
-    dev->destroy_pipeline(compute_irradiance_cubemap_pipeline);
-    dev->destroy_pipeline(copy_cubemap_from_spheremap_pipeline);
-    dev->destroy_pipeline(compute_brdf_integral_image_pipeline);
-    dev->destroy_pipeline_layout(empty_pipeline_layout);
-    dev->destroy_pipeline_layout(op_pipeline_layout);
-    dev->destroy_descriptor_set_layout(op_set_layout);
-    dev->destroy_shader(compute_reflectance_cubemap_fragment_shader);
-    dev->destroy_shader(compute_irradiance_cubemap_fragment_shader);
-    dev->destroy_shader(copy_cubemap_from_spheremap_fragment_shader);
-    dev->destroy_shader(render_cubemap_vertex_shader);
-    dev->destroy_shader(compute_brdf_integral_image_fragment_shader);
-    dev->destroy_shader(render_image_vertex_shader);
+
 }

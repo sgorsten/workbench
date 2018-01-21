@@ -71,14 +71,14 @@ namespace gfx
         ~descriptor_pool() { dev->destroy_descriptor_pool(pool); }
 
         void reset() { dev->reset_descriptor_pool(pool); }
-        descriptor_set alloc(rhi::descriptor_set_layout layout) { return{*dev, dev->alloc_descriptor_set(pool, layout)}; }
+        descriptor_set alloc(rhi::descriptor_set_layout & layout) { return{*dev, dev->alloc_descriptor_set(pool, layout)}; }
     };
 
     class window
     {
         struct ignore { template<class... T> operator std::function<void(T...)>() const { return [](T...) {}; } };
         rhi::ptr<rhi::device> dev;
-        rhi::window rhi_window;
+        rhi::ptr<rhi::window> rhi_window;
         GLFWwindow * glfw_window;
     public:
         window(rhi::ptr<rhi::device> dev, const int2 & dimensions, const std::string & title);
@@ -95,7 +95,7 @@ namespace gfx
 
         // Mutators
         void set_pos(const int2 & pos) { glfwSetWindowPos(glfw_window, pos.x, pos.y); }
-        rhi::window get_rhi_window() { return rhi_window; }
+        rhi::window & get_rhi_window() { return *rhi_window; }
 
         // Event handling callbacks
         std::function<void(int2 pos)> on_window_pos = ignore{};

@@ -28,12 +28,29 @@ namespace rhi
     {
         virtual void add_ref() = 0;
         virtual void release() = 0;
+    protected:
+        object() = default;
+        object(object &&) = delete;
+        object(const object &) = delete;
+        object & operator = (object &&) = delete;
+        object & operator = (const object &) = delete;
+        ~object() = default;
     };
 
     struct buffer : object { virtual char * get_mapped_memory() = 0; };
     struct sampler : object {};
     struct image : object {};
     struct framebuffer : object { virtual coord_system get_ndc_coords() const = 0; };
+    struct window : object
+    {
+        virtual GLFWwindow * get_glfw_window() = 0;
+        virtual framebuffer & get_swapchain_framebuffer() = 0;
+    };
+
+    struct descriptor_set_layout : object {};
+    struct pipeline_layout : object {};
+    struct shader : object {};
+    struct pipeline : object {};
 
     // Simple handle type used to refer to device objects
     template<class T> struct handle 
@@ -48,14 +65,35 @@ namespace rhi
 
     // Object types
     using descriptor_pool = handle<struct descriptor_pool_tag>;
-    using descriptor_set_layout = handle<struct descriptor_set_layout_tag>;
     using descriptor_set = handle<struct descriptor_set_tag>;
-    using pipeline_layout = handle<struct pipeline_layout_tag>;
-    using shader = handle<struct shader_tag>;
-    using pipeline = handle<struct pipeline_tag>;
-    using window = handle<struct window_tag>;
     
-
+    // Render pass creation info
+    enum class layout { color_attachment_optimal, depth_stencil_attachment_optimal, shader_read_only_optimal, transfer_src_optimal, transfer_dst_optimal, present_src };
+    struct dont_care {};
+    struct clear_color { float r,g,b,a; };
+    struct clear_depth { float depth; uint8_t stencil; };
+    struct load { layout initial_layout; };
+    struct store { layout final_layout; };
+    struct color_attachment_desc { std::variant<dont_care, clear_color, load> load_op; std::variant<dont_care, store> store_op; };
+    struct depth_attachment_desc { std::variant<dont_care, clear_depth, load> load_op; std::variant<dont_care, store> store_op; };
+    struct render_pass_desc 
+    {
+        std::vector<color_attachment_desc> color_attachments;
+        std::optional<depth_attachment_desc> depth_attachment;
+    };
+    struct buffer_range { buffer * buffer; size_t offset, size; };
+    struct command_buffer : object
+    {
+        virtual void generate_mipmaps(image & image) = 0;
+        virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
+        virtual void bind_pipeline(pipeline & pipe) = 0;
+        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set set) = 0;
+        virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
+        virtual void bind_index_buffer(buffer_range range) = 0;
+        virtual void draw(int first_vertex, int vertex_count) = 0;
+        virtual void draw_indexed(int first_index, int index_count) = 0;
+        virtual void end_render_pass() = 0;
+    };
 
     // Buffer creation info
     enum class buffer_usage { vertex, index, uniform, storage };
@@ -137,21 +175,6 @@ namespace rhi
         address_mode wrap_s, wrap_t, wrap_r;
     };
 
-    // Render pass creation info
-    enum class layout { color_attachment_optimal, depth_stencil_attachment_optimal, shader_read_only_optimal, transfer_src_optimal, transfer_dst_optimal, present_src };
-    struct dont_care {};
-    struct clear_color { float r,g,b,a; };
-    struct clear_depth { float depth; uint8_t stencil; };
-    struct load { layout initial_layout; };
-    struct store { layout final_layout; };
-    struct color_attachment_desc { std::variant<dont_care, clear_color, load> load_op; std::variant<dont_care, store> store_op; };
-    struct depth_attachment_desc { std::variant<dont_care, clear_depth, load> load_op; std::variant<dont_care, store> store_op; };
-    struct render_pass_desc 
-    {
-        std::vector<color_attachment_desc> color_attachments;
-        std::optional<depth_attachment_desc> depth_attachment;
-    };
-
     // Framebuffer creation info
     struct framebuffer_attachment_desc { ptr<image> image; int mip, layer; };
     struct framebuffer_desc
@@ -177,9 +200,9 @@ namespace rhi
     enum class cull_mode { none, back, front };
     struct pipeline_desc
     {
-        pipeline_layout layout;                 // descriptors
+        ptr<pipeline_layout> layout;            // descriptors
         std::vector<vertex_binding_desc> input; // input state
-        std::vector<shader> stages;             // programmable stages
+        std::vector<ptr<shader>> stages;        // programmable stages
         primitive_topology topology;            // rasterizer state
         front_face front_face;       
         cull_mode cull_mode;
@@ -188,20 +211,6 @@ namespace rhi
     };
 
     struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
-    struct buffer_range { buffer * buffer; size_t offset, size; };
-
-    struct command_buffer : object
-    {
-        virtual void generate_mipmaps(image & image) = 0;
-        virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
-        virtual void bind_pipeline(pipeline pipe) = 0;
-        virtual void bind_descriptor_set(pipeline_layout layout, int set_index, descriptor_set set) = 0;
-        virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
-        virtual void bind_index_buffer(buffer_range range) = 0;
-        virtual void draw(int first_vertex, int vertex_count) = 0;
-        virtual void draw_indexed(int first_index, int index_count) = 0;
-        virtual void end_render_pass() = 0;
-    };
 
     struct device : object
     {
@@ -219,6 +228,12 @@ namespace rhi
         virtual ptr<sampler> create_sampler(const sampler_desc & desc) = 0;
         virtual ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0; // one ptr for non-cube, six ptrs in +x,-x,+y,-y,+z,-z order for cube
         virtual ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) = 0;
+        virtual ptr<window> create_window(const int2 & dimensions, std::string_view title) = 0;
+
+        virtual ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
+        virtual ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) = 0;
+        virtual ptr<shader> create_shader(const shader_module & module) = 0;
+        virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
 
         /////////////////
         // descriptors //
@@ -227,35 +242,10 @@ namespace rhi
         virtual descriptor_pool create_descriptor_pool() = 0;
         virtual void destroy_descriptor_pool(descriptor_pool pool) = 0;
 
-        virtual descriptor_set_layout create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
-        virtual void destroy_descriptor_set_layout(descriptor_set_layout layout) = 0;
-
         virtual void reset_descriptor_pool(descriptor_pool pool) = 0;
-        virtual descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout layout) = 0;
+        virtual descriptor_set alloc_descriptor_set(descriptor_pool pool, descriptor_set_layout & layout) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, buffer_range range) = 0;
         virtual void write_descriptor(descriptor_set set, int binding, sampler & sampler, image & image) = 0;
-
-        ///////////////
-        // pipelines //
-        ///////////////
-
-        virtual pipeline_layout create_pipeline_layout(const std::vector<descriptor_set_layout> & sets) = 0;
-        virtual void destroy_pipeline_layout(pipeline_layout layout) = 0;
-
-        virtual shader create_shader(const shader_module & module) = 0;
-        virtual void destroy_shader(shader shader) = 0;
-
-        virtual pipeline create_pipeline(const pipeline_desc & desc) = 0;
-        virtual void destroy_pipeline(pipeline pipeline) = 0;
-
-        /////////////
-        // windows //
-        /////////////
-
-        virtual window create_window(const int2 & dimensions, std::string_view title) = 0;
-        virtual GLFWwindow * get_glfw_window(window window) = 0;
-        virtual framebuffer * get_swapchain_framebuffer(window window) = 0;
-        virtual void destroy_window(window window) = 0;
 
         ///////////////
         // rendering //
@@ -263,7 +253,7 @@ namespace rhi
 
         virtual ptr<command_buffer> start_command_buffer() = 0;
         virtual uint64_t submit(command_buffer & cmd) = 0;
-        virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window window) = 0; // Submit commands to execute when the next frame is available, followed by a present
+        virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) = 0; // Submit commands to execute when the next frame is available, followed by a present
         virtual void wait_until_complete(uint64_t submit_id) = 0;
     };
 
