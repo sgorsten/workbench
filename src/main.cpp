@@ -290,7 +290,7 @@ public:
 
         // Draw objects to our primary framebuffer
         rhi::render_pass_desc pass;
-        pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::present_src}}};
+        pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::present_source}}};
         pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
         cmd->begin_render_pass(pass, fb);
 

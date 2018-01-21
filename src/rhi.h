@@ -61,7 +61,7 @@ namespace rhi
     };
 
     // Render pass creation info
-    enum class layout { color_attachment_optimal, depth_stencil_attachment_optimal, shader_read_only_optimal, transfer_src_optimal, transfer_dst_optimal, present_src };
+    enum class layout { attachment_optimal, shader_read_only_optimal, present_source };
     struct dont_care {};
     struct clear_color { float r,g,b,a; };
     struct clear_depth { float depth; uint8_t stencil; };

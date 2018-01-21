@@ -14,82 +14,11 @@ bool operator < (const VkAttachmentReference & a, const VkAttachmentReference & 
 
 namespace rhi
 {
-    VkFormat get_vk_format(image_format format)
-    {
-        switch(format)
-        {
-        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return VK;
-        #include "rhi-format.inl"
-        #undef X
-        default: fail_fast();
-        }
-    }
-
-    static VkImageLayout convert_layout(rhi::layout layout)
-    {
-        switch(layout)
-        {
-        case rhi::layout::color_attachment_optimal: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        case rhi::layout::depth_stencil_attachment_optimal: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        case rhi::layout::transfer_src_optimal: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        case rhi::layout::transfer_dst_optimal: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        case rhi::layout::present_src: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        default: fail_fast();
-        }
-    };
-    static VkAttachmentDescription make_attachment_description(VkFormat format, const rhi::color_attachment_desc & desc)
-    {
-        VkAttachmentDescription attachment {0, format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-        std::visit(overload(
-            [](dont_care) {},
-            [&](clear_color) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
-            [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
-        ), desc.load_op);
-        std::visit(overload(
-            [](dont_care) {},
-            [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
-        ), desc.store_op);
-        return attachment;
-    }
-
-    static VkAttachmentDescription make_attachment_description(VkFormat format, const rhi::depth_attachment_desc & desc)
-    {
-        VkAttachmentDescription attachment {0, format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-        std::visit(overload(
-            [](dont_care) {},
-            [&](clear_depth) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
-            [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); }
-        ), desc.load_op);
-        std::visit(overload(
-            [](dont_care) {},
-            [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
-        ), desc.store_op);
-        return attachment;
-    }
-
     struct vk_render_pass_desc
     {
         std::vector<VkAttachmentDescription> attachments;
         std::vector<VkAttachmentReference> color_refs;
         std::optional<VkAttachmentReference> depth_ref;
-
-        vk_render_pass_desc() {}
-        vk_render_pass_desc(const render_pass_desc & desc, const std::vector<VkFormat> & color_formats, std::optional<VkFormat> depth_format)
-        {
-            if(desc.color_attachments.size() != color_formats.size()) throw std::logic_error("render pass color attachments mismatch");
-            if(desc.depth_attachment.has_value() != depth_format.has_value()) throw std::logic_error("render pass color attachments mismatch");
-            for(size_t i=0; i<desc.color_attachments.size(); ++i)
-            {
-                color_refs.push_back({exactly(attachments.size()), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
-                attachments.push_back(make_attachment_description(color_formats[i], desc.color_attachments[i]));
-            }
-            if(desc.depth_attachment)
-            {
-                depth_ref = {exactly(attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-                attachments.push_back(make_attachment_description(*depth_format, *desc.depth_attachment));
-            }
-        }
     };
     bool operator < (const vk_render_pass_desc & a, const vk_render_pass_desc & b) { return std::tie(a.attachments, a.color_refs, a.depth_ref) < std::tie(b.attachments, b.color_refs, b.depth_ref); }
 
@@ -103,13 +32,6 @@ namespace rhi
         VkSurfaceTransformFlagBitsKHR surface_transform;
     };
 
-    struct vk_render_pass
-    {
-        render_pass_desc desc;
-        VkRenderPass pass_object;
-    };
-
-    struct vk_framebuffer;
     struct vk_device : device
     {
         // Core Vulkan objects
@@ -136,8 +58,8 @@ namespace rhi
         struct scheduled_action { uint64_t after_completion_index; std::function<void(VkDevice)> execute; };
         std::queue<scheduled_action> scheduled_actions;
 
-        // Objects
-        std::map<vk_render_pass_desc, vk_render_pass> render_passes;
+        // Deduplicated render passes
+        std::map<vk_render_pass_desc, VkRenderPass> render_passes;
 
         vk_device(std::function<void(const char *)> debug_callback);
         ~vk_device();
@@ -146,7 +68,7 @@ namespace rhi
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
         uint64_t submit(const VkSubmitInfo & submit_info);
         template<class F> void schedule(F f) { scheduled_actions.push({submitted_index, f}); }
-        const vk_render_pass & get_render_pass(vk_framebuffer & framebuffer, const render_pass_desc & desc);
+        VkRenderPass get_render_pass(const vk_render_pass_desc & desc);
 
         // info
         device_info get_info() const override { return {linalg::zero_to_one, false}; }
@@ -199,6 +121,8 @@ namespace rhi
 
         vk_image(vk_device * device, const image_desc & desc, std::vector<const void *> initial_data);
         ~vk_image();
+
+        VkImageView create_view(int mip, int layer) const;
     };
 
     struct vk_sampler : sampler
@@ -216,34 +140,35 @@ namespace rhi
         std::vector<VkFormat> color_formats;
         std::optional<VkFormat> depth_format;
         int2 dims;
+
+        GLFWwindow * glfw_window {};
+        VkSurfaceKHR surface {};
+        VkSwapchainKHR swapchain {};
+
         std::vector<VkImageView> views; // Views belonging to this framebuffer
         std::vector<VkFramebuffer> framebuffers; // If this framebuffer targets a swapchain, the framebuffers for each swapchain image
         uint32_t current_index {0}; // If this framebuffer targets a swapchain, the index of the current backbuffer
 
-        vk_framebuffer(vk_device * device) : device{device} {}
         vk_framebuffer(vk_device * device, const framebuffer_desc & desc);
+        vk_framebuffer(vk_device * device, vk_image & depth_image, const std::string & title);
         ~vk_framebuffer();
 
         coord_system get_ndc_coords() const override { return {coord_axis::right, coord_axis::down, coord_axis::forward}; }
+
+        vk_render_pass_desc get_render_pass_desc(const render_pass_desc & desc) const;
     };
 
     struct vk_window : window
     {
         ptr<vk_device> device;
-        GLFWwindow * glfw_window {};
-        VkSurfaceKHR surface {};
-        VkSwapchainKHR swapchain {};
-        std::vector<VkImage> swapchain_images;
-        std::vector<VkImageView> swapchain_image_views;
-        VkSemaphore image_available {}, render_finished {};
-        uint2 dims;
         ptr<image> depth_image;
         ptr<vk_framebuffer> swapchain_framebuffer;
+        VkSemaphore image_available {}, render_finished {};        
 
         vk_window(vk_device * device, const int2 & dimensions, std::string title);
         ~vk_window();
 
-        GLFWwindow * get_glfw_window() { return glfw_window; }
+        GLFWwindow * get_glfw_window() { return swapchain_framebuffer->glfw_window; }
         framebuffer & get_swapchain_framebuffer() { return *swapchain_framebuffer; }
     };
 
@@ -423,6 +348,17 @@ namespace rhi
         }
         throw std::runtime_error("no suitable Vulkan device present");
     }
+
+    VkFormat get_vk_format(image_format format)
+    {
+        switch(format)
+        {
+        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return VK;
+        #include "rhi-format.inl"
+        #undef X
+        default: fail_fast();
+        }
+    }
 }
 
 ////////////////
@@ -492,7 +428,7 @@ vk_device::~vk_device()
     // Flush our queue
     wait_until_complete(submitted_index);
     for(auto & fence : ring_fences) vkDestroyFence(dev, fence, nullptr);
-    for(auto & pair : render_passes) vkDestroyRenderPass(dev, pair.second.pass_object, nullptr);
+    for(auto & pair : render_passes) vkDestroyRenderPass(dev, pair.second, nullptr);
 
     // NOTE: We expect the higher level software layer to ensure that all API objects have been destroyed by this point
     vkDestroyCommandPool(dev, staging_pool, nullptr);
@@ -522,6 +458,28 @@ VkDeviceMemory vk_device::allocate(const VkMemoryRequirements & reqs, VkMemoryPr
         }
     }
     throw std::runtime_error("no suitable memory type");
+}
+
+VkRenderPass vk_device::get_render_pass(const vk_render_pass_desc & desc)
+{
+    auto & pass = render_passes[desc];
+    if(!pass)
+    {
+        VkSubpassDescription subpass_desc {};
+        subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass_desc.colorAttachmentCount = exactly(countof(desc.color_refs));
+        subpass_desc.pColorAttachments = desc.color_refs.data();
+        subpass_desc.pDepthStencilAttachment = desc.depth_ref ? &*desc.depth_ref : nullptr;
+
+        VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        render_pass_info.attachmentCount = exactly(countof(desc.attachments));
+        render_pass_info.pAttachments = desc.attachments.data();
+        render_pass_info.subpassCount = 1;
+        render_pass_info.pSubpasses = &subpass_desc;
+
+        check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass));
+    }
+    return pass;
 }
 
 /////////////////////////
@@ -684,6 +642,25 @@ vk_image::~vk_image()
     }); 
 }
 
+VkImageView vk_image::create_view(int mip, int layer) const
+{
+    auto info = view_info;
+    switch(info.viewType)
+    {
+    case VK_IMAGE_VIEW_TYPE_CUBE: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    case VK_IMAGE_VIEW_TYPE_1D_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_1D; break;
+    case VK_IMAGE_VIEW_TYPE_2D_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
+    }
+    info.subresourceRange.baseMipLevel = exactly(mip);
+    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.baseArrayLayer = exactly(layer);
+    info.subresourceRange.layerCount = 1;
+    VkImageView view;
+    check("vkCreateImageView", vkCreateImageView(device->dev, &info, nullptr, &view));
+    return view;
+}
+
 vk_sampler::vk_sampler(vk_device * device, const sampler_desc & desc) : device{device}
 {
     auto convert_mode = [](rhi::address_mode mode)
@@ -736,49 +713,6 @@ vk_sampler::~vk_sampler()
     device->schedule([sampler=sampler](VkDevice dev) { vkDestroySampler(dev, sampler, nullptr); });
 }
 
-static VkImageView get_mip_and_layer_view(VkDevice dev, VkImageViewCreateInfo info, int mip, int layer)
-{
-    switch(info.viewType)
-    {
-    case VK_IMAGE_VIEW_TYPE_CUBE: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
-    case VK_IMAGE_VIEW_TYPE_1D_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_1D; break;
-    case VK_IMAGE_VIEW_TYPE_2D_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
-    case VK_IMAGE_VIEW_TYPE_CUBE_ARRAY: info.viewType = VK_IMAGE_VIEW_TYPE_2D; break;
-    }
-    info.subresourceRange.baseMipLevel = exactly(mip);
-    info.subresourceRange.levelCount = 1;
-    info.subresourceRange.baseArrayLayer = exactly(layer);
-    info.subresourceRange.layerCount = 1;
-    VkImageView view;
-    check("vkCreateImageView", vkCreateImageView(dev, &info, nullptr, &view));
-    return view;
-}
-
-const vk_render_pass & vk_device::get_render_pass(vk_framebuffer & framebuffer, const render_pass_desc & desc)
-{
-    vk_render_pass_desc dd {desc, framebuffer.color_formats, framebuffer.depth_format};
-    auto & pass = render_passes[dd];
-    if(!pass.pass_object)
-    {
-        pass.desc = desc;
-
-        VkSubpassDescription subpass_desc {};
-        subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass_desc.colorAttachmentCount = exactly(countof(dd.color_refs));
-        subpass_desc.pColorAttachments = dd.color_refs.data();
-        subpass_desc.pDepthStencilAttachment = dd.depth_ref ? &*dd.depth_ref : nullptr;
-    
-        VkRenderPassCreateInfo render_pass_info {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        render_pass_info.attachmentCount = exactly(countof(dd.attachments));
-        render_pass_info.pAttachments = dd.attachments.data();
-        render_pass_info.subpassCount = 1;
-        render_pass_info.pSubpasses = &subpass_desc;
-
-        check("vkCreateRenderPass", vkCreateRenderPass(dev, &render_pass_info, nullptr, &pass.pass_object));
-    }
-    return pass;
-}
-
 vk_framebuffer::vk_framebuffer(vk_device * device, const framebuffer_desc & desc) : device{device}
 {
     dims = desc.dimensions;
@@ -787,19 +721,19 @@ vk_framebuffer::vk_framebuffer(vk_device * device, const framebuffer_desc & desc
     for(auto & color_attachment : desc.color_attachments) 
     {
         color_formats.push_back(get_vk_format(static_cast<vk_image &>(*color_attachment.image).desc.format));
-        views.push_back(get_mip_and_layer_view(device->dev, static_cast<vk_image &>(*color_attachment.image).view_info, color_attachment.mip, color_attachment.layer));
+        views.push_back(static_cast<vk_image &>(*color_attachment.image).create_view(color_attachment.mip, color_attachment.layer));
         pass_desc.color_attachments.push_back({dont_care{}, dont_care{}});
         
     }
     if(desc.depth_attachment) 
     {
         depth_format = get_vk_format(static_cast<vk_image &>(*desc.depth_attachment->image).desc.format);
-        views.push_back(get_mip_and_layer_view(device->dev, static_cast<vk_image &>(*desc.depth_attachment->image).view_info, desc.depth_attachment->mip, desc.depth_attachment->layer));
+        views.push_back(static_cast<vk_image &>(*desc.depth_attachment->image).create_view(desc.depth_attachment->mip, desc.depth_attachment->layer));
         pass_desc.depth_attachment = {dont_care{}, dont_care{}};
     }
     
     VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    framebuffer_info.renderPass = device->get_render_pass(*this, pass_desc).pass_object;
+    framebuffer_info.renderPass = device->get_render_pass(get_render_pass_desc(pass_desc));
     framebuffer_info.attachmentCount = exactly(views.size());
     framebuffer_info.pAttachments = views.data();
     framebuffer_info.width = exactly(desc.dimensions.x);
@@ -807,18 +741,11 @@ vk_framebuffer::vk_framebuffer(vk_device * device, const framebuffer_desc & desc
     framebuffer_info.layers = 1;
     check("vkCreateFramebuffer", vkCreateFramebuffer(device->dev, &framebuffer_info, nullptr, &framebuffers[0]));
 }
-vk_framebuffer::~vk_framebuffer()
-{
-    device->schedule([framebuffers=framebuffers, views=views](VkDevice dev)
-    {
-        for(auto fb : framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
-        for(auto view : views) vkDestroyImageView(dev, view, nullptr);
-    });
-}
 
-vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string title) : device{device}
+vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const std::string & title) : device{device} 
 {
-    auto format = rhi::image_format::rgba_srgb8;
+    const int2 dimensions = depth_image.desc.dimensions.xy();
+    const auto format = rhi::image_format::rgba_srgb8;    
 
     const std::string buffer {begin(title), end(title)};
     glfwDefaultWindowHints();
@@ -857,10 +784,10 @@ vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string ti
 
     uint32_t swapchain_image_count;    
     check("vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR(device->dev, swapchain, &swapchain_image_count, nullptr));
-    swapchain_images.resize(swapchain_image_count);
+    std::vector<VkImage> swapchain_images(swapchain_image_count);
     check("vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR(device->dev, swapchain, &swapchain_image_count, swapchain_images.data()));
 
-    swapchain_image_views.resize(swapchain_image_count);
+    views.resize(swapchain_image_count);
     for(uint32_t i=0; i<swapchain_image_count; ++i)
     {
         VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -872,48 +799,103 @@ vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string ti
         view_info.subresourceRange.levelCount = 1;
         view_info.subresourceRange.baseArrayLayer = 0;
         view_info.subresourceRange.layerCount = 1;
-        check("vkCreateImageView", vkCreateImageView(device->dev, &view_info, nullptr, &swapchain_image_views[i]));
+        check("vkCreateImageView", vkCreateImageView(device->dev, &view_info, nullptr, &views[i]));
     }
-
-    VkSemaphoreCreateInfo semaphore_info {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &image_available));
-    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &render_finished));
     
     // Create swapchain framebuffer
-    swapchain_framebuffer = new delete_when_unreferenced<vk_framebuffer>{device};
-    swapchain_framebuffer->dims = dimensions;
-    swapchain_framebuffer->framebuffers.resize(swapchain_image_views.size());
-    swapchain_framebuffer->color_formats = {get_vk_format(format)};
-    swapchain_framebuffer->depth_format = get_vk_format(rhi::image_format::depth_float32);
-    depth_image = device->create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
-    auto render_pass = device->get_render_pass(*swapchain_framebuffer, {{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}});
-    for(size_t i=0; i<swapchain_image_views.size(); ++i)
+    dims = dimensions;
+    framebuffers.resize(views.size());
+    color_formats = {get_vk_format(format)};
+    depth_format = get_vk_format(rhi::image_format::depth_float32);
+    auto render_pass = device->get_render_pass(get_render_pass_desc({{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}}));
+    for(size_t i=0; i<views.size(); ++i)
     {
-        std::vector<VkImageView> attachments {swapchain_image_views[i], static_cast<vk_image &>(*depth_image).image_view};
+        std::vector<VkImageView> attachments {views[i], depth_image.image_view};
         VkFramebufferCreateInfo framebuffer_info {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        framebuffer_info.renderPass = render_pass.pass_object;
+        framebuffer_info.renderPass = render_pass;
         framebuffer_info.attachmentCount = exactly(attachments.size());
         framebuffer_info.pAttachments = attachments.data();
         framebuffer_info.width = dimensions.x;
         framebuffer_info.height = dimensions.y;
         framebuffer_info.layers = 1;
-        check("vkCreateFramebuffer", vkCreateFramebuffer(device->dev, &framebuffer_info, nullptr, &swapchain_framebuffer->framebuffers[i]));
+        check("vkCreateFramebuffer", vkCreateFramebuffer(device->dev, &framebuffer_info, nullptr, &framebuffers[i]));
     }
-
-    // Acquire the first image
-    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(device->dev, swapchain, std::numeric_limits<uint64_t>::max(), image_available, VK_NULL_HANDLE, &swapchain_framebuffer->current_index));
 }
-vk_window::~vk_window()
-{ 
-    swapchain_framebuffer = nullptr;
-    device->schedule([rf=render_finished, ia=image_available, views=swapchain_image_views, swapchain=swapchain, surface=surface, w=glfw_window, inst=device->instance](VkDevice dev) 
-    { 
-        vkDestroySemaphore(dev, rf, nullptr);
-        vkDestroySemaphore(dev, ia, nullptr);
+
+vk_framebuffer::~vk_framebuffer()
+{
+    device->schedule([inst=device->instance, framebuffers=framebuffers, views=views, swapchain=swapchain, surface=surface, w=glfw_window](VkDevice dev)
+    {
+        for(auto fb : framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
         for(auto view : views) vkDestroyImageView(dev, view, nullptr);
         vkDestroySwapchainKHR(dev, swapchain, nullptr);
         vkDestroySurfaceKHR(inst, surface, nullptr);
         glfwDestroyWindow(w);
+    });
+}
+
+template<class T> static VkAttachmentDescription make_attachment_description(VkFormat format, const T & desc, VkImageLayout attachment_optimal_layout)
+{
+    VkAttachmentDescription attachment {0, format, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_UNDEFINED, attachment_optimal_layout};
+    auto convert_layout = [=](rhi::layout layout)
+    {
+        switch(layout)
+        {
+        case rhi::layout::attachment_optimal: return attachment_optimal_layout;
+        case rhi::layout::shader_read_only_optimal: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case rhi::layout::present_source: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        default: fail_fast();
+        }
+    };
+    auto visitor = overload(
+        [](dont_care) {},
+        [&](clear_color) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
+        [&](clear_depth) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; },
+        [&](load load) { attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; attachment.initialLayout = convert_layout(load.initial_layout); },
+        [&](store store) { attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; attachment.finalLayout = convert_layout(store.final_layout); }
+    );
+    std::visit(visitor, desc.load_op);
+    std::visit(visitor, desc.store_op);
+    return attachment;
+}
+
+vk_render_pass_desc vk_framebuffer::get_render_pass_desc(const render_pass_desc & desc) const
+{
+    vk_render_pass_desc r;
+    if(desc.color_attachments.size() != color_formats.size()) throw std::logic_error("render pass color attachments mismatch");
+    if(desc.depth_attachment.has_value() != depth_format.has_value()) throw std::logic_error("render pass color attachments mismatch");
+    for(size_t i=0; i<desc.color_attachments.size(); ++i)
+    {
+        r.color_refs.push_back({exactly(r.attachments.size()), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+        r.attachments.push_back(make_attachment_description(color_formats[i], desc.color_attachments[i], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL));
+    }
+    if(desc.depth_attachment)
+    {
+        r.depth_ref = {exactly(r.attachments.size()), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        r.attachments.push_back(make_attachment_description(*depth_format, *desc.depth_attachment, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
+    }
+    return r;
+}
+
+vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string title) : device{device}
+{
+    depth_image = device->create_image({rhi::image_shape::_2d, {dimensions,1}, 1, rhi::image_format::depth_float32, rhi::depth_attachment_bit}, {});
+    swapchain_framebuffer = new delete_when_unreferenced<vk_framebuffer>{device, static_cast<vk_image &>(*depth_image), title};
+
+    VkSemaphoreCreateInfo semaphore_info {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &image_available));
+    check("vkCreateSemaphore", vkCreateSemaphore(device->dev, &semaphore_info, nullptr, &render_finished));    
+
+    // Acquire the first image
+    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(device->dev, swapchain_framebuffer->swapchain, std::numeric_limits<uint64_t>::max(), image_available, VK_NULL_HANDLE, &swapchain_framebuffer->current_index));
+}
+vk_window::~vk_window()
+{ 
+    swapchain_framebuffer = nullptr;
+    device->schedule([rf=render_finished, ia=image_available, inst=device->instance](VkDevice dev) 
+    { 
+        vkDestroySemaphore(dev, rf, nullptr);
+        vkDestroySemaphore(dev, ia, nullptr);
     });
 }
 
@@ -1226,7 +1208,6 @@ void vk_command_buffer::generate_mipmaps(image & image)
 void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, framebuffer & framebuffer)
 {
     auto & fb = static_cast<vk_framebuffer &>(framebuffer);
-    auto & pass = device->get_render_pass(fb, pass_desc);
     std::vector<VkClearValue> clear_values;
     for(size_t i=0; i<pass_desc.color_attachments.size(); ++i)
     {
@@ -1246,7 +1227,7 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
     }
 
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass_begin_info.renderPass = pass.pass_object;
+    pass_begin_info.renderPass = device->get_render_pass(fb.get_render_pass_desc(pass_desc));
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
     pass_begin_info.renderArea = {{0,0},{exactly(fb.dims.x),exactly(fb.dims.y)}};
     pass_begin_info.clearValueCount = exactly(countof(clear_values));
@@ -1352,10 +1333,10 @@ uint64_t vk_device::acquire_and_submit_and_present(command_buffer & cmd, window 
     present_info.waitSemaphoreCount = 1;
     present_info.pWaitSemaphores = &win.render_finished;
     present_info.swapchainCount = 1;
-    present_info.pSwapchains = &win.swapchain;
+    present_info.pSwapchains = &win.swapchain_framebuffer->swapchain;
     present_info.pImageIndices = &win.swapchain_framebuffer->current_index;
     check("vkQueuePresentKHR", vkQueuePresentKHR(queue, &present_info));
 
-    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &win.swapchain_framebuffer->current_index));
+    check("vkAcquireNextImageKHR", vkAcquireNextImageKHR(dev, win.swapchain_framebuffer->swapchain, std::numeric_limits<uint64_t>::max(), win.image_available, VK_NULL_HANDLE, &win.swapchain_framebuffer->current_index));
     return submitted_index;
 }
