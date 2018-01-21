@@ -15,7 +15,7 @@ namespace rhi
         ptr(T * p) : p{p} { if(p) p->add_ref(); }
         ptr(const ptr & r) : ptr(r.p) {}
         ptr(ptr && r) noexcept : p{r.p} { r.p = nullptr; }
-        ptr & operator = (const ptr & r) { return *this = handle(r); }
+        ptr & operator = (const ptr & r) { return *this = ptr(r); }
         ptr & operator = (ptr && r) { std::swap(p, r.p); return *this; }
         ~ptr() { if(p) p->release(); }
 

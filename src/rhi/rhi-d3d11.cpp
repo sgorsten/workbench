@@ -39,30 +39,52 @@ namespace rhi
         }
     }
 
+    template<class T> class com_ptr
+    {
+        T * p {nullptr};
+    public:
+        com_ptr() = default;
+        com_ptr(T * p) : p{p} { if(p) p->AddRef(); }
+        com_ptr(const com_ptr & r) : com_ptr(r.p) {}
+        com_ptr(com_ptr && r) noexcept : p{r.p} { r.p = nullptr; }
+        com_ptr & operator = (const com_ptr & r) { return *this = com_ptr(r); }
+        com_ptr & operator = (com_ptr && r) { std::swap(p, r.p); return *this; }
+        ~com_ptr() { if(p) p->Release(); }
+
+        template<class U> com_ptr(const com_ptr<U> & r) : ptr(static_cast<U *>(r)) {}
+        template<class U> com_ptr & operator = (const com_ptr<U> & r) { return *this = static_cast<U *>(r); }
+
+        operator T * () const { return p; }
+        T & operator * () const { return *p; }
+        T * operator -> () const { return p; }
+        T ** init () { if(p) p->Release(); p = nullptr; return &p; }
+    };
+
     struct d3d_device : device
     {
         std::function<void(const char *)> debug_callback;    
 
-        ID3D11Device5 * dev;
-        ID3D11DeviceContext4 * ctx;
-        IDXGIFactory * factory;
-        ID3D11Fence * fence;
+        com_ptr<ID3D11Device5> dev;
+        com_ptr<ID3D11DeviceContext4> ctx;
+        com_ptr<IDXGIFactory> factory;
+        com_ptr<ID3D11Fence> fence;
         uint64_t submitted_index = 0;
 
         d3d_device(std::function<void(const char *)> debug_callback) : debug_callback{debug_callback}
         {
             const D3D_FEATURE_LEVEL feature_levels[] {D3D_FEATURE_LEVEL_11_1};
-            ID3D11Device * dev11;
-            ID3D11DeviceContext * ctx11;
-            IDXGIDevice * dxgi_dev;
-            check("D3D11CreateDevice", D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_DEBUG, feature_levels, 1, D3D11_SDK_VERSION, &dev11, nullptr, &ctx11));
-            check("IUnknown::QueryInterface", dev11->QueryInterface(&dev));
-            check("IUnknown::QueryInterface", ctx11->QueryInterface(&ctx));
-            check("IUnknown::QueryInterface", dev->QueryInterface(&dxgi_dev));
+            com_ptr<ID3D11Device> dev11;
+            com_ptr<ID3D11DeviceContext> ctx11;
+            com_ptr<IDXGIDevice> dxgi_dev;
+
+            check("D3D11CreateDevice", D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_DEBUG, feature_levels, 1, D3D11_SDK_VERSION, dev11.init(), nullptr, ctx11.init()));
+            check("IUnknown::QueryInterface", dev11->QueryInterface(dev.init()));
+            check("IUnknown::QueryInterface", ctx11->QueryInterface(ctx.init()));
+            check("IUnknown::QueryInterface", dev->QueryInterface(dxgi_dev.init()));
 
             IDXGIAdapter * adapter = nullptr;
             check("IDXGIDevice::GetAdapter", dxgi_dev->GetAdapter(&adapter));
-            check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)&factory));
+            check("IDXGIAdapter::GetParent", adapter->GetParent(__uuidof(IDXGIFactory), (void **)factory.init()));
 
             check("ID3D11Device5::CreateFence", dev->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&fence));
         }
@@ -92,7 +114,7 @@ namespace rhi
 
     struct d3d_buffer : buffer
     {
-        ID3D11Buffer * buffer_object = 0;
+        com_ptr<ID3D11Buffer> buffer_object;
         char * mapped = 0;
 
         d3d_buffer(ID3D11Device & device, ID3D11DeviceContext & ctx, const buffer_desc & desc, const void * initial_data);
@@ -101,7 +123,7 @@ namespace rhi
 
     struct d3d_sampler : sampler
     {
-        ID3D11SamplerState * sampler_state = 0;
+        com_ptr<ID3D11SamplerState> sampler_state;
 
         d3d_sampler(ID3D11Device & device, const sampler_desc & desc);
     };
@@ -109,8 +131,8 @@ namespace rhi
     struct d3d_image : image
     {
         rhi::image_format format;
-        ID3D11Resource * resource = 0;
-        ID3D11ShaderResourceView * shader_resource_view;
+        com_ptr<ID3D11Resource> resource;
+        com_ptr<ID3D11ShaderResourceView> shader_resource_view;
 
         d3d_image(ID3D11Device & device, const image_desc & desc, std::vector<const void *> initial_data);
     };
@@ -118,8 +140,8 @@ namespace rhi
     struct d3d_framebuffer : framebuffer
     {
         int2 dims;
-        std::vector<ID3D11RenderTargetView *> render_target_views; // non-owning
-        ID3D11DepthStencilView * depth_stencil_view = 0; // non-owning
+        std::vector<com_ptr<ID3D11RenderTargetView>> render_target_views;
+        com_ptr<ID3D11DepthStencilView> depth_stencil_view;
 
         d3d_framebuffer() {}
         d3d_framebuffer(ID3D11Device & device, const framebuffer_desc & desc);
@@ -129,12 +151,13 @@ namespace rhi
     struct d3d_window : window
     {
         GLFWwindow * w = 0;
-        IDXGISwapChain * swap_chain = 0;
-        ID3D11RenderTargetView * swap_chain_view = 0;
+        com_ptr<IDXGISwapChain> swap_chain;
+        com_ptr<ID3D11RenderTargetView> swap_chain_view;
         ptr<d3d_image> depth_image;
         ptr<d3d_framebuffer> fb;
 
         d3d_window(d3d_device & device, const int2 & dimensions, std::string title);
+        ~d3d_window() { fb=nullptr; depth_image=nullptr; swap_chain_view=nullptr; swap_chain=nullptr; glfwDestroyWindow(w); }
         GLFWwindow * get_glfw_window() override { return w; }
         framebuffer & get_swapchain_framebuffer() override { return *fb; }
     };
@@ -149,11 +172,11 @@ namespace rhi
     struct d3d_pipeline : pipeline
     {
         rhi::pipeline_desc desc;
-        ID3D11InputLayout * layout = 0;
-        ID3D11VertexShader * vs = 0;
-        ID3D11PixelShader * ps = 0;
-        ID3D11RasterizerState * rasterizer_state = 0;
-        ID3D11DepthStencilState * depth_stencil_state = 0;
+        com_ptr<ID3D11InputLayout> layout;
+        com_ptr<ID3D11VertexShader> vs;
+        com_ptr<ID3D11PixelShader> ps;
+        com_ptr<ID3D11RasterizerState> rasterizer_state;
+        com_ptr<ID3D11DepthStencilState> depth_stencil_state;
 
         d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc);
     };
@@ -200,7 +223,9 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             }
 
             // Set the render targets and viewport
-            ctx->OMSetRenderTargets(exactly(fb.render_target_views.size()), fb.render_target_views.data(), fb.depth_stencil_view);
+            std::vector<ID3D11RenderTargetView *> views;
+            for(auto & view : fb.render_target_views) views.push_back(view);
+            ctx->OMSetRenderTargets(exactly(views.size()), views.data(), fb.depth_stencil_view);
             D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
             ctx->RSSetViewports(1, &vp);
         },
@@ -223,15 +248,18 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         {
             descriptor_emulator::bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer_range range) 
             { 
+                ID3D11Buffer * buffer = static_cast<d3d_buffer &>(*range.buffer).buffer_object;
                 const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
-                ctx->VSSetConstantBuffers1(exactly(index), 1, &static_cast<d3d_buffer &>(*range.buffer).buffer_object, &first_constant, &num_constants);
-                ctx->PSSetConstantBuffers1(exactly(index), 1, &static_cast<d3d_buffer &>(*range.buffer).buffer_object, &first_constant, &num_constants);
+                ctx->VSSetConstantBuffers1(exactly(index), 1, &buffer, &first_constant, &num_constants);
+                ctx->PSSetConstantBuffers1(exactly(index), 1, &buffer, &first_constant, &num_constants);
             }, [this](size_t index, sampler & sampler, image & image) 
             {
-                ctx->VSSetSamplers(exactly(index), 1, &static_cast<d3d_sampler &>(sampler).sampler_state);
-                ctx->VSSetShaderResources(exactly(index), 1, &static_cast<d3d_image &>(image).shader_resource_view);
-                ctx->PSSetSamplers(exactly(index), 1, &static_cast<d3d_sampler &>(sampler).sampler_state);
-                ctx->PSSetShaderResources(exactly(index), 1, &static_cast<d3d_image &>(image).shader_resource_view);
+                ID3D11SamplerState * sampler_state = static_cast<d3d_sampler &>(sampler).sampler_state;
+                ID3D11ShaderResourceView * shader_resource_view = static_cast<d3d_image &>(image).shader_resource_view;
+                ctx->VSSetSamplers(exactly(index), 1, &sampler_state);
+                ctx->VSSetShaderResources(exactly(index), 1, &shader_resource_view);
+                ctx->PSSetSamplers(exactly(index), 1, &sampler_state);
+                ctx->PSSetShaderResources(exactly(index), 1, &shader_resource_view);
             });
         },
         [this,&current_pipeline](const bind_vertex_buffer_command & c)
@@ -240,13 +268,14 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             {
                 if(buf.index == c.index)
                 {
+                    ID3D11Buffer * buffer = static_cast<d3d_buffer &>(*c.range.buffer).buffer_object;
                     const UINT stride = exactly(buf.stride), offset = exactly(c.range.offset);
-                    ctx->IASetVertexBuffers(c.index, 1, &static_cast<d3d_buffer &>(*c.range.buffer).buffer_object, &stride, &offset);
+                    ctx->IASetVertexBuffers(c.index, 1, &buffer, &stride, &offset);
                 }
             }      
         },
         [this](const bind_index_buffer_command & c) 
-        { 
+        {
             ctx->IASetIndexBuffer(static_cast<d3d_buffer &>(*c.range.buffer).buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); 
         },
         [this](const draw_command & c)
@@ -292,7 +321,7 @@ d3d_buffer::d3d_buffer(ID3D11Device & device, ID3D11DeviceContext & ctx, const b
 
     D3D11_SUBRESOURCE_DATA data {};
     data.pSysMem = initial_data;
-    check("ID3D11Device::CreateBuffer", device.CreateBuffer(&buffer_desc, initial_data ? &data : 0, &buffer_object));
+    check("ID3D11Device::CreateBuffer", device.CreateBuffer(&buffer_desc, initial_data ? &data : 0, buffer_object.init()));
 
     if(desc.dynamic)
     {
@@ -327,7 +356,7 @@ d3d_sampler::d3d_sampler(ID3D11Device & device, const sampler_desc & desc)
     samp_desc.AddressU = convert_mode(desc.wrap_s);
     samp_desc.AddressV = convert_mode(desc.wrap_t);
     samp_desc.AddressW = convert_mode(desc.wrap_r);
-    check("ID3D11Device::CreateSamplerState", device.CreateSamplerState(&samp_desc, &sampler_state));
+    check("ID3D11Device::CreateSamplerState", device.CreateSamplerState(&samp_desc, sampler_state.init()));
 }
     
 d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector<const void *> initial_data)
@@ -354,46 +383,46 @@ d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector
     if(desc.shape == rhi::image_shape::_1d)
     {
         const D3D11_TEXTURE1D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
-        ID3D11Texture1D * tex;
-        check("ID3D11Device::CreateTexture1D", device.CreateTexture1D(&tex_desc, data.empty() ? nullptr : data.data(), &tex));
+        com_ptr<ID3D11Texture1D> tex;
+        check("ID3D11Device::CreateTexture1D", device.CreateTexture1D(&tex_desc, data.empty() ? nullptr : data.data(), tex.init()));
         resource = tex;
     }
     else if(desc.shape == rhi::image_shape::_3d)
     {
         const D3D11_TEXTURE3D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.dimensions.z), exactly(desc.mip_levels), get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
-        ID3D11Texture3D * tex;
-        check("ID3D11Device::CreateTexture2D", device.CreateTexture3D(&tex_desc, data.empty() ? nullptr : data.data(), &tex));
+        com_ptr<ID3D11Texture3D> tex;
+        check("ID3D11Device::CreateTexture2D", device.CreateTexture3D(&tex_desc, data.empty() ? nullptr : data.data(), tex.init()));
         resource = tex;
     }
     else // 2D or cube textures
     {
         const D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), {1,0}, D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
-        ID3D11Texture2D * tex;
-        check("ID3D11Device::CreateTexture2D", device.CreateTexture2D(&tex_desc, data.empty() ? nullptr : data.data(), &tex));
+        com_ptr<ID3D11Texture2D> tex;
+        check("ID3D11Device::CreateTexture2D", device.CreateTexture2D(&tex_desc, data.empty() ? nullptr : data.data(), tex.init()));
         resource = tex;
     } 
-    if(desc.flags & rhi::image_flag::sampled_image_bit) check("ID3D11Device::CreateShaderResourceView", device.CreateShaderResourceView(resource, nullptr, &shader_resource_view));
+    if(desc.flags & rhi::image_flag::sampled_image_bit) check("ID3D11Device::CreateShaderResourceView", device.CreateShaderResourceView(resource, nullptr, shader_resource_view.init()));
 }
 
-ID3D11RenderTargetView * create_render_target_view(ID3D11Device & device, ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
+com_ptr<ID3D11RenderTargetView> create_render_target_view(ID3D11Device & device, ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
 {
     D3D11_RENDER_TARGET_VIEW_DESC view_desc {get_dx_format(format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
     view_desc.Texture2DArray.MipSlice = exactly(mip);
     view_desc.Texture2DArray.FirstArraySlice = exactly(layer);
     view_desc.Texture2DArray.ArraySize = 1;
-    ID3D11RenderTargetView * view;
-    check("ID3D11Device::CreateRenderTargetView", device.CreateRenderTargetView(resource, &view_desc, &view));
+    com_ptr<ID3D11RenderTargetView> view;
+    check("ID3D11Device::CreateRenderTargetView", device.CreateRenderTargetView(resource, &view_desc, view.init()));
     return view;
 }
 
-ID3D11DepthStencilView * create_depth_stencil_view(ID3D11Device & device, ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
+com_ptr<ID3D11DepthStencilView> create_depth_stencil_view(ID3D11Device & device, ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
 {
     D3D11_DEPTH_STENCIL_VIEW_DESC view_desc {get_dx_format(format), D3D11_DSV_DIMENSION_TEXTURE2DARRAY};
     view_desc.Texture2DArray.MipSlice = exactly(mip);
     view_desc.Texture2DArray.FirstArraySlice = exactly(layer);
     view_desc.Texture2DArray.ArraySize = 1;
-    ID3D11DepthStencilView * view;
-    check("ID3D11Device::CreateDepthStencilView", device.CreateDepthStencilView(resource, &view_desc, &view));
+    com_ptr<ID3D11DepthStencilView> view;
+    check("ID3D11Device::CreateDepthStencilView", device.CreateDepthStencilView(resource, &view_desc, view.init()));
     return view;
 }
 
@@ -420,10 +449,10 @@ d3d_window::d3d_window(d3d_device & device, const int2 & dimensions, std::string
     scd.OutputWindow = glfwGetWin32Window(w);
     scd.SampleDesc.Count = 1;
     scd.Windowed = TRUE;
-    check("IDXGIFactory::CreateSwapChain", device.factory->CreateSwapChain(device.dev, &scd, &swap_chain));
+    check("IDXGIFactory::CreateSwapChain", device.factory->CreateSwapChain(device.dev, &scd, swap_chain.init()));
     ID3D11Resource * image;
     check("IDXGISwapChain::GetBuffer", swap_chain->GetBuffer(0, __uuidof(ID3D11Resource), (void**)&image));
-    check("ID3D11Device::CreateRenderTargetView", device.dev->CreateRenderTargetView(image, nullptr, &swap_chain_view));
+    check("ID3D11Device::CreateRenderTargetView", device.dev->CreateRenderTargetView(image, nullptr, swap_chain_view.init()));
 
     // Create a framebuffer for this window
     fb = new delete_when_unreferenced<d3d_framebuffer>{};
@@ -468,11 +497,11 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
         default: throw std::logic_error("invalid shader_stage");
         case shader_stage::fragment:
             check("D3DCompile", D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "ps_5_0", 0, 0, &shader_blob, &error_blob));
-            check("ID3D11Device::CreatePixelShader", device.CreatePixelShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &ps));
+            check("ID3D11Device::CreatePixelShader", device.CreatePixelShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, ps.init()));
             break;
         case shader_stage::vertex: 
             check("D3DCompile", D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &shader_blob, &error_blob));
-            check("ID3D11Device::CreateVertexShader", device.CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, &vs));           
+            check("ID3D11Device::CreateVertexShader", device.CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, vs.init()));           
             std::vector<D3D11_INPUT_ELEMENT_DESC> input_descs;  
             for(auto & buf : desc.input)
             {
@@ -488,7 +517,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
                     }
                 }
             }
-            check("ID3D11Device::CreateInputLayout", device.CreateInputLayout(input_descs.data(), exactly(input_descs.size()), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), &layout));
+            check("ID3D11Device::CreateInputLayout", device.CreateInputLayout(input_descs.data(), exactly(input_descs.size()), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), layout.init()));
             break;
         }
     }
@@ -503,7 +532,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
     }
     rasterizer_desc.FrontCounterClockwise = desc.front_face == rhi::front_face::counter_clockwise;
     rasterizer_desc.DepthClipEnable = TRUE;
-    check("ID3D11Device::CreateRasterizerState", device.CreateRasterizerState(&rasterizer_desc, &rasterizer_state));
+    check("ID3D11Device::CreateRasterizerState", device.CreateRasterizerState(&rasterizer_desc, rasterizer_state.init()));
 
     D3D11_DEPTH_STENCIL_DESC depth_stencil_desc {};
     if(desc.depth_test)
@@ -512,5 +541,5 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
         depth_stencil_desc.DepthFunc = static_cast<D3D11_COMPARISON_FUNC>(static_cast<int>(*desc.depth_test)+1);
     }
     depth_stencil_desc.DepthWriteMask = desc.depth_write ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
-    check("ID3D11Device::CreateDepthStencilState", device.CreateDepthStencilState(&depth_stencil_desc, &depth_stencil_state));
+    check("ID3D11Device::CreateDepthStencilState", device.CreateDepthStencilState(&depth_stencil_desc, depth_stencil_state.init()));
 }
