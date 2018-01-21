@@ -8,6 +8,7 @@
 
 namespace rhi
 {
+    struct gl_pipeline;
     struct gl_device : device
     {
         std::function<void(const char *)> debug_callback;
@@ -16,9 +17,17 @@ namespace rhi
         std::map<uint64_t, GLsync> sync_objects;
         uint64_t submitted_index=0;
 
-        void enable_debug_callback(GLFWwindow * window);
+        struct context_objects { std::unordered_map<gl_pipeline *, GLuint> vertex_array_objects;};
+        std::map<GLFWwindow *, context_objects> context_specific_objects;
+
+        
         gl_device(std::function<void(const char *)> debug_callback);
         
+        void enable_debug_callback(GLFWwindow * window);
+        void destroy_context_objects(GLFWwindow * context);
+        void destroy_pipeline_objects(gl_pipeline * pipeline);
+        void bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline);
+
         device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
 
         ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) override;
@@ -44,36 +53,44 @@ namespace rhi
 
     struct gl_buffer : buffer
     {
+        ptr<gl_device> device;
         GLuint buffer_object = 0;
         char * mapped = 0;
 
-        gl_buffer(const buffer_desc & desc, const void * initial_data);
+        gl_buffer(gl_device * device, const buffer_desc & desc, const void * initial_data);
+        ~gl_buffer();
         char * get_mapped_memory() override { return mapped; }
     };
 
     struct gl_sampler : sampler
     {
+        ptr<gl_device> device;
         GLuint sampler_object = 0;
 
-        gl_sampler(const sampler_desc & desc);
+        gl_sampler(gl_device * device, const sampler_desc & desc);
+        ~gl_sampler();
     };
 
     struct gl_image : image
     {
+        ptr<gl_device> device;
         image_desc desc;
         GLuint texture_object;
 
-        gl_image(const image_desc & desc, std::vector<const void *> initial_data);
+        gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data);
+        ~gl_image();
     };
 
     struct gl_framebuffer : framebuffer
     {
+        ptr<gl_device> device;
         GLFWwindow * context;
         GLuint framebuffer_object;
         int2 dims;
 
-        gl_framebuffer() {}
-        gl_framebuffer(GLFWwindow * hidden_window, const framebuffer_desc & desc);
+        gl_framebuffer(gl_device * device) : device{device} {}
+        gl_framebuffer(gl_device * device, GLFWwindow * hidden_window, const framebuffer_desc & desc);
+        ~gl_framebuffer();
         coord_system get_ndc_coords() const override { return {coord_axis::right, framebuffer_object ? coord_axis::down : coord_axis::up, coord_axis::forward}; }
     };
 
@@ -84,6 +101,7 @@ namespace rhi
         ptr<gl_framebuffer> fb;
 
         gl_window(gl_device * device, const int2 & dimensions, std::string title);
+        ~gl_window();
         GLFWwindow * get_glfw_window() override { return w; }
         framebuffer & get_swapchain_framebuffer() override { return *fb; }
     };
@@ -97,12 +115,12 @@ namespace rhi
 
     struct gl_pipeline : pipeline
     {
+        ptr<gl_device> device;
         pipeline_desc desc;
         GLuint program_object;
-        mutable std::unordered_map<GLFWwindow *, GLuint> vertex_array_objects; // vertex array objects cannot be shared between OpenGL contexts, so we must cache them per-context
     
-        gl_pipeline(const pipeline_desc & desc);
-        void bind_vertex_array(GLFWwindow * context) const;
+        gl_pipeline(gl_device * device, const pipeline_desc & desc);
+        ~gl_pipeline();
     };
 }
 
@@ -146,13 +164,61 @@ void gl_device::enable_debug_callback(GLFWwindow * window)
     }
 }
 
-ptr<buffer> gl_device::create_buffer(const buffer_desc & desc, const void * initial_data) { return new delete_when_unreferenced<gl_buffer>{desc, initial_data}; }
-ptr<sampler> gl_device::create_sampler(const sampler_desc & desc) { return new delete_when_unreferenced<gl_sampler>{desc}; }
-ptr<image> gl_device::create_image(const image_desc & desc, std::vector<const void *> initial_data) { return new delete_when_unreferenced<gl_image>{desc, initial_data}; }
-ptr<framebuffer> gl_device::create_framebuffer(const framebuffer_desc & desc) { return new delete_when_unreferenced<gl_framebuffer>{hidden_window, desc}; }
+void gl_device::destroy_context_objects(GLFWwindow * context)
+{
+    glfwMakeContextCurrent(context);
+    for(auto vao : context_specific_objects[context].vertex_array_objects) glDeleteVertexArrays(1, &vao.second);
+    context_specific_objects.erase(context);
+    glfwMakeContextCurrent(hidden_window);
+}
+
+void gl_device::destroy_pipeline_objects(gl_pipeline * pipeline)
+{
+    for(auto & ctx : context_specific_objects)
+    {
+        auto it = ctx.second.vertex_array_objects.find(pipeline);
+        if(it == ctx.second.vertex_array_objects.end()) continue;
+
+        glfwMakeContextCurrent(ctx.first);
+        glDeleteVertexArrays(1, &it->second);
+        ctx.second.vertex_array_objects.erase(pipeline);
+        glfwMakeContextCurrent(hidden_window);
+    }
+}
+
+void gl_device::bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline)
+{
+    auto & vertex_array = context_specific_objects[context].vertex_array_objects[&pipeline];
+    if(!vertex_array)
+    {
+        // If vertex array object was not yet created in this context, go ahead and generate it
+        glCreateVertexArrays(1, &vertex_array);
+        for(auto & buf : pipeline.desc.input)
+        {
+            for(auto & attrib : buf.attributes)
+            {
+                glEnableVertexArrayAttrib(vertex_array, attrib.index);
+                glVertexArrayAttribBinding(vertex_array, attrib.index, buf.index);
+                switch(attrib.type)
+                {
+                case attribute_format::float1: glVertexArrayAttribFormat(vertex_array, attrib.index, 1, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                case attribute_format::float2: glVertexArrayAttribFormat(vertex_array, attrib.index, 2, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                case attribute_format::float3: glVertexArrayAttribFormat(vertex_array, attrib.index, 3, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                case attribute_format::float4: glVertexArrayAttribFormat(vertex_array, attrib.index, 4, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                }                
+            }
+        }
+    }
+    glBindVertexArray(vertex_array);
+}
+
+ptr<buffer> gl_device::create_buffer(const buffer_desc & desc, const void * initial_data) { return new delete_when_unreferenced<gl_buffer>{this, desc, initial_data}; }
+ptr<sampler> gl_device::create_sampler(const sampler_desc & desc) { return new delete_when_unreferenced<gl_sampler>{this, desc}; }
+ptr<image> gl_device::create_image(const image_desc & desc, std::vector<const void *> initial_data) { return new delete_when_unreferenced<gl_image>{this, desc, initial_data}; }
+ptr<framebuffer> gl_device::create_framebuffer(const framebuffer_desc & desc) { return new delete_when_unreferenced<gl_framebuffer>{this, hidden_window, desc}; }
 ptr<window> gl_device::create_window(const int2 & dimensions, std::string_view title) { return new delete_when_unreferenced<gl_window>{this, dimensions, std::string{title}}; }
 ptr<shader> gl_device::create_shader(const shader_module & module) { return new delete_when_unreferenced<gl_shader>{module}; }
-ptr<pipeline> gl_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<gl_pipeline>{desc}; }
+ptr<pipeline> gl_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<gl_pipeline>{this, desc}; }
 
 uint64_t gl_device::submit(command_buffer & cmd)
 {
@@ -197,7 +263,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
         {
             current_pipeline = &static_cast<gl_pipeline &>(*c.pipe);
             glUseProgram(current_pipeline->program_object);
-            current_pipeline->bind_vertex_array(context);
+            bind_vertex_array(context, *current_pipeline);
             glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
             // Rasterizer state
@@ -288,7 +354,7 @@ void gl_device::wait_until_complete(uint64_t submit_id)
     }
 }
 
-gl_buffer::gl_buffer(const buffer_desc & desc, const void * initial_data)
+gl_buffer::gl_buffer(gl_device * device, const buffer_desc & desc, const void * initial_data) : device{device}
 {
     glCreateBuffers(1, &buffer_object);
     GLbitfield flags = 0;
@@ -296,8 +362,13 @@ gl_buffer::gl_buffer(const buffer_desc & desc, const void * initial_data)
     glNamedBufferStorage(buffer_object, desc.size, initial_data, flags);
     if(desc.dynamic) mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer_object, GL_WRITE_ONLY));
 }
+gl_buffer::~gl_buffer()
+{
+    if(mapped) glUnmapNamedBuffer(buffer_object);
+    glDeleteBuffers(1, &buffer_object);
+}
 
-gl_sampler::gl_sampler(const sampler_desc & desc)
+gl_sampler::gl_sampler(gl_device * device, const sampler_desc & desc) : device{device}
 { 
     auto convert_mode = [](rhi::address_mode mode)
     {
@@ -335,6 +406,10 @@ gl_sampler::gl_sampler(const sampler_desc & desc)
     }
     else glSamplerParameteri(sampler_object, GL_TEXTURE_MIN_FILTER, convert_filter(desc.min_filter)); 
 }
+gl_sampler::~gl_sampler()
+{
+    glDeleteSamplers(1, &sampler_object);
+}
 
 struct gl_format { GLenum internal_format, format, type; };
 static gl_format get_gl_format(image_format format)
@@ -348,7 +423,7 @@ static gl_format get_gl_format(image_format format)
     }
 }
 
-gl_image::gl_image(const image_desc & desc, std::vector<const void *> initial_data) : desc{desc}
+gl_image::gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data) : device{device}, desc{desc}
 {
     auto glf = get_gl_format(desc.format);
     switch(desc.shape)
@@ -383,8 +458,12 @@ gl_image::gl_image(const image_desc & desc, std::vector<const void *> initial_da
     default: fail_fast();
     }
 }
+gl_image::~gl_image()
+{
+    glDeleteTextures(1, &texture_object);
+}
 
-gl_framebuffer::gl_framebuffer(GLFWwindow * hidden_window, const framebuffer_desc & desc) : context{hidden_window}
+gl_framebuffer::gl_framebuffer(gl_device * device, GLFWwindow * hidden_window, const framebuffer_desc & desc) : device{device}, context{hidden_window}
 {
     dims = desc.dimensions;
     std::vector<GLenum> draw_buffers;
@@ -403,6 +482,11 @@ gl_framebuffer::gl_framebuffer(GLFWwindow * hidden_window, const framebuffer_des
     }
     glNamedFramebufferDrawBuffers(framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
 }
+gl_framebuffer::~gl_framebuffer()
+{
+    if(framebuffer_object) glDeleteFramebuffers(1, &framebuffer_object);
+    else glfwDestroyWindow(context);
+}
 
 gl_window::gl_window(gl_device * device, const int2 & dimensions, std::string title) : device{device}
 {
@@ -415,13 +499,17 @@ gl_window::gl_window(gl_device * device, const int2 & dimensions, std::string ti
     if(!w) throw std::runtime_error("glfwCreateWindow(...) failed");
     device->enable_debug_callback(w);
 
-    fb = new delete_when_unreferenced<gl_framebuffer>{};
+    fb = new delete_when_unreferenced<gl_framebuffer>{device};
     fb->context = w;
     fb->framebuffer_object = 0;
     fb->dims = dimensions;
 }
+gl_window::~gl_window()
+{
+    device->destroy_context_objects(w);
+}
 
-gl_pipeline::gl_pipeline(const pipeline_desc & desc) : desc{desc}
+gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : device{device}, desc{desc}
 {
     program_object = glCreateProgram();
     for(auto s : desc.stages)
@@ -481,29 +569,9 @@ gl_pipeline::gl_pipeline(const pipeline_desc & desc) : desc{desc}
         throw std::runtime_error(buffer.data());
     }
 }
-
-void gl_pipeline::bind_vertex_array(GLFWwindow * context) const
+gl_pipeline::~gl_pipeline()
 {
-    auto & vertex_array = vertex_array_objects[context];
-    if(!vertex_array)
-    {
-        // If vertex array object was not yet created in this context, go ahead and generate it
-        glCreateVertexArrays(1, &vertex_array);
-        for(auto & buf : desc.input)
-        {
-            for(auto & attrib : buf.attributes)
-            {
-                glEnableVertexArrayAttrib(vertex_array, attrib.index);
-                glVertexArrayAttribBinding(vertex_array, attrib.index, buf.index);
-                switch(attrib.type)
-                {
-                case attribute_format::float1: glVertexArrayAttribFormat(vertex_array, attrib.index, 1, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                case attribute_format::float2: glVertexArrayAttribFormat(vertex_array, attrib.index, 2, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                case attribute_format::float3: glVertexArrayAttribFormat(vertex_array, attrib.index, 3, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                case attribute_format::float4: glVertexArrayAttribFormat(vertex_array, attrib.index, 4, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                }                
-            }
-        }
-    }
-    glBindVertexArray(vertex_array);
+    device->destroy_pipeline_objects(this);
+    glDeleteProgram(program_object);
 }
+
