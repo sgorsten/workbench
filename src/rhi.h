@@ -19,6 +19,9 @@ namespace rhi
         ptr & operator = (ptr && r) { std::swap(p, r.p); return *this; }
         ~ptr() { if(p) p->release(); }
 
+        template<class U> ptr(const ptr<U> & r) : ptr(static_cast<U *>(r)) {}
+        template<class U> ptr & operator = (const ptr<U> & r) { return *this = static_cast<U *>(r); }
+
         operator T * () const { return p; }
         T & operator * () const { return *p; }
         T * operator -> () const { return p; }
@@ -28,13 +31,6 @@ namespace rhi
     {
         virtual void add_ref() = 0;
         virtual void release() = 0;
-    protected:
-        object() = default;
-        object(object &&) = delete;
-        object(const object &) = delete;
-        object & operator = (object &&) = delete;
-        object & operator = (const object &) = delete;
-        ~object() = default;
     };
 
     struct buffer : object { virtual char * get_mapped_memory() = 0; };

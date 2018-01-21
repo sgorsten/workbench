@@ -174,8 +174,6 @@ namespace rhi
 
     autoregister_backend<vk_device> autoregister_vk_backend {"Vulkan 1.0"};
     
-    static void check(const char * func, VkResult result);
-
     struct vk_buffer : buffer
     {
         ptr<vk_device> device;
