@@ -171,12 +171,13 @@ namespace rhi
     
     struct d3d_pipeline : pipeline
     {
-        rhi::pipeline_desc desc;
+        std::vector<rhi::vertex_binding_desc> input;
         com_ptr<ID3D11InputLayout> layout;
         com_ptr<ID3D11VertexShader> vs;
         com_ptr<ID3D11PixelShader> ps;
         com_ptr<ID3D11RasterizerState> rasterizer_state;
         com_ptr<ID3D11DepthStencilState> depth_stencil_state;
+        D3D11_PRIMITIVE_TOPOLOGY topology;
 
         d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc);
     };
@@ -233,12 +234,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         {
             current_pipeline = &static_cast<d3d_pipeline &>(*c.pipe);
             ctx->IASetInputLayout(current_pipeline->layout);
-            switch(current_pipeline->desc.topology)
-            {
-            case primitive_topology::points: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST); break;
-            case primitive_topology::lines: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST); break;
-            case primitive_topology::triangles: ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST); break;
-            }
+            ctx->IASetPrimitiveTopology(current_pipeline->topology);
             ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
             ctx->RSSetState(current_pipeline->rasterizer_state);
             ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
@@ -264,7 +260,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         },
         [this,&current_pipeline](const bind_vertex_buffer_command & c)
         {
-            for(auto & buf : current_pipeline->desc.input)
+            for(auto & buf : current_pipeline->input)
             {
                 if(buf.index == c.index)
                 {
@@ -359,7 +355,7 @@ d3d_sampler::d3d_sampler(ID3D11Device & device, const sampler_desc & desc)
     check("ID3D11Device::CreateSamplerState", device.CreateSamplerState(&samp_desc, sampler_state.init()));
 }
     
-d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector<const void *> initial_data)
+d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector<const void *> initial_data) : format{desc.format}
 {
     UINT array_size = 1, bind_flags = 0, misc_flags = 0;
     if(desc.flags & rhi::image_flag::sampled_image_bit) bind_flags |= D3D11_BIND_SHADER_RESOURCE;
@@ -379,7 +375,6 @@ d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector
     const size_t row_pitch = get_pixel_size(desc.format)*desc.dimensions.x, slice_pitch = row_pitch*desc.dimensions.y;
     for(auto d : initial_data) data.push_back({d, exactly(row_pitch), exactly(slice_pitch)});
 
-    format = desc.format;
     if(desc.shape == rhi::image_shape::_1d)
     {
         const D3D11_TEXTURE1D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
@@ -464,7 +459,7 @@ d3d_window::d3d_window(d3d_device & device, const int2 & dimensions, std::string
     fb->depth_stencil_view = create_depth_stencil_view(*device.dev, depth_image->resource, image_format::depth_float32, 0, 0);
 }
 
-d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : desc{desc}
+d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : input{desc.input}
 {
     for(auto & s : desc.stages)
     {
@@ -522,6 +517,14 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
         }
     }
 
+    switch(desc.topology)
+    {
+    case primitive_topology::points: topology = D3D11_PRIMITIVE_TOPOLOGY_POINTLIST; break;
+    case primitive_topology::lines: topology = D3D11_PRIMITIVE_TOPOLOGY_LINELIST; break;
+    case primitive_topology::triangles: topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST; break;
+    default: fail_fast();
+    }
+
     D3D11_RASTERIZER_DESC rasterizer_desc {};
     rasterizer_desc.FillMode = D3D11_FILL_SOLID;
     switch(desc.cull_mode)
@@ -529,6 +532,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
     case rhi::cull_mode::none: rasterizer_desc.CullMode = D3D11_CULL_NONE; break;
     case rhi::cull_mode::back: rasterizer_desc.CullMode = D3D11_CULL_BACK; break;
     case rhi::cull_mode::front: rasterizer_desc.CullMode = D3D11_CULL_FRONT; break;
+    default: fail_fast();
     }
     rasterizer_desc.FrontCounterClockwise = desc.front_face == rhi::front_face::counter_clockwise;
     rasterizer_desc.DepthClipEnable = TRUE;
