@@ -177,6 +177,3 @@ struct standard_device_objects
         return target;    
     }
 };
-
-extern const std::string preamble;
-extern const std::string pbr_lighting;

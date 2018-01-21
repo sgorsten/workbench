@@ -96,8 +96,7 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(Vulkan_SDK)\include;..\..\dep\include;..\..\dep\glfw-3.2.1\include;..\..\dep\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
@@ -113,8 +112,7 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(Vulkan_SDK)\include;..\..\dep\include;..\..\dep\glfw-3.2.1\include;..\..\dep\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
@@ -132,9 +130,9 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <SDLCheck>true</SDLCheck>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(Vulkan_SDK)\include;..\..\dep\include;..\..\dep\glfw-3.2.1\include;..\..\dep\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -152,9 +150,9 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <SDLCheck>true</SDLCheck>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>$(Vulkan_SDK)\include;..\..\dep\include;..\..\dep\glfw-3.2.1\include;..\..\dep\glad\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -199,6 +197,19 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\assets\colored-unlit.frag" />
+    <None Include="..\..\assets\compute-brdf-integral-image.frag" />
+    <None Include="..\..\assets\compute-irradiance-cubemap.frag" />
+    <None Include="..\..\assets\compute-reflectance-cubemap.frag" />
+    <None Include="..\..\assets\copy-cubemap-from-spheremap.frag" />
+    <None Include="..\..\assets\pbr.glsl" />
+    <None Include="..\..\assets\preamble.glsl" />
+    <None Include="..\..\assets\render-cubemap.vert" />
+    <None Include="..\..\assets\render-image.vert" />
+    <None Include="..\..\assets\skybox.frag" />
+    <None Include="..\..\assets\skybox.vert" />
+    <None Include="..\..\assets\static-mesh.vert" />
+    <None Include="..\..\assets\textured-pbr.frag" />
     <None Include="..\..\src\rhi\rhi-format.inl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

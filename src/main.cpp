@@ -144,77 +144,12 @@ struct common_assets
         shader_compiler compiler;
         standard = standard_shaders::compile(compiler);
 
-        vs = compiler.compile(shader_stage::vertex, preamble + pbr_lighting + R"(
-            layout(set=1,binding=0) uniform PerObject 
-            { 
-                mat4 u_model_matrix;
-                vec2 u_material; // roughness, metalness
-            };
-            layout(location=0) in vec3 v_position;
-            layout(location=1) in vec3 v_color;
-            layout(location=2) in vec3 v_normal;
-            layout(location=3) in vec2 v_texcoord;
-            layout(location=0) out vec3 position;
-            layout(location=1) out vec3 color;
-            layout(location=2) out vec3 normal;
-            layout(location=3) out vec2 texcoord;
-            void main()
-            {
-                position = (u_model_matrix * vec4(v_position,1)).xyz;
-                color = v_color;
-                normal = (u_model_matrix * vec4(v_normal,0)).xyz;
-                texcoord = v_texcoord;
-                gl_Position = u_view_proj_matrix * vec4(position,1);
-            }
-        )");
-        fs = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
-            layout(set=1,binding=0) uniform PerObject 
-            { 
-                mat4 u_model_matrix;
-                vec2 u_material; // roughness, metalness
-            };
-            layout(set=1,binding=1) uniform sampler2D u_albedo_tex;
-            layout(location=0) in vec3 position;
-            layout(location=1) in vec3 color;
-            layout(location=2) in vec3 normal;
-            layout(location=3) in vec2 texcoord;
-            layout(location=0) out vec4 f_color;
-            void main() 
-            { 
-                f_color = vec4(compute_lighting(position, normalize(normal), color*texture(u_albedo_tex, texcoord).rgb, u_material.x, u_material.y, 1.0), 1);
-            }
-        )");
-        fs_unlit = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
-            layout(location=0) in vec3 position;
-            layout(location=1) in vec3 color;
-            layout(location=0) out vec4 f_color;
-            void main() 
-            {
-                f_color = vec4(color,1);
-            }
-        )");
+        vs = compiler.compile_file(shader_stage::vertex, "../../assets/static-mesh.vert");
+        fs = compiler.compile_file(shader_stage::fragment, "../../assets/textured-pbr.frag");
+        fs_unlit = compiler.compile_file(shader_stage::fragment, "../../assets/colored-unlit.frag");
 
-        skybox_vs = compiler.compile(shader_stage::vertex, preamble + pbr_lighting + R"(
-            layout(location=0) in vec3 v_position;
-            layout(location=1) in vec3 v_color;
-            layout(location=2) in vec3 v_normal;
-            layout(location=3) in vec2 v_texcoord;
-            layout(location=0) out vec3 direction;
-            void main()
-            {
-                direction = v_position;
-                gl_Position = u_skybox_view_proj_matrix * vec4(v_position,1);
-            }
-        )");
-        skybox_fs_cubemap = compiler.compile(shader_stage::fragment, preamble + pbr_lighting + R"(
-            layout(set=1,binding=0) uniform samplerCube u_texture;
-            layout(location=0) in vec3 direction;
-            layout(location=0) out vec4 f_color;
-            void main()
-            {
-                f_color = texture(u_texture, normalize(direction));
-            }
-        )");
+        skybox_vs = compiler.compile_file(shader_stage::vertex, "../../assets/skybox.vert");
+        skybox_fs_cubemap = compiler.compile_file(shader_stage::fragment, "../../assets/skybox.frag");
 
         //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
         //for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
@@ -234,7 +169,7 @@ class device_session
     rhi::device_info info;
     gfx::descriptor_pool desc_pool;
     gfx::dynamic_buffer uniform_buffer;
-    uint64_t transient_resource_fence;
+    uint64_t transient_resource_fence=0;
 
     gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer, sphere_vertex_buffer, sphere_index_buffer;
 

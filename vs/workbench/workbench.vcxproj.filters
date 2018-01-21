@@ -42,10 +42,52 @@
     <Filter Include="rhi">
       <UniqueIdentifier>{f8f04ceb-4a3a-4b67-a3b6-e03351c46ac7}</UniqueIdentifier>
     </Filter>
+    <Filter Include="shaders">
+      <UniqueIdentifier>{616698e6-7743-4953-8c2a-c3527aed0d7e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\rhi\rhi-format.inl">
       <Filter>rhi</Filter>
+    </None>
+    <None Include="..\..\assets\colored-unlit.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\compute-brdf-integral-image.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\compute-irradiance-cubemap.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\compute-reflectance-cubemap.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\copy-cubemap-from-spheremap.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\pbr.glsl">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\preamble.glsl">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\render-cubemap.vert">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\render-image.vert">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\skybox.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\skybox.vert">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\static-mesh.vert">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\textured-pbr.frag">
+      <Filter>shaders</Filter>
     </None>
   </ItemGroup>
 </Project>
