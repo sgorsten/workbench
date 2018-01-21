@@ -20,7 +20,6 @@ namespace rhi
         struct context_objects { std::unordered_map<gl_pipeline *, GLuint> vertex_array_objects;};
         std::map<GLFWwindow *, context_objects> context_specific_objects;
 
-        
         gl_device(std::function<void(const char *)> debug_callback);
         
         void enable_debug_callback(GLFWwindow * window);
@@ -75,7 +74,7 @@ namespace rhi
     {
         ptr<gl_device> device;
         image_desc desc;
-        GLuint texture_object;
+        GLuint texture_object = 0;
 
         gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data);
         ~gl_image();
@@ -84,25 +83,22 @@ namespace rhi
     struct gl_framebuffer : framebuffer
     {
         ptr<gl_device> device;
-        GLFWwindow * context;
-        GLuint framebuffer_object;
+        GLuint framebuffer_object = 0;  // If nonzero, this is a framebuffer object in the context of the hidden window
+        GLFWwindow * glfw_window = 0;   // If not null, this is the default framebuffer of the specified window
         int2 dims;
 
-        gl_framebuffer(gl_device * device) : device{device} {}
-        gl_framebuffer(gl_device * device, GLFWwindow * hidden_window, const framebuffer_desc & desc);
+        gl_framebuffer(gl_device * device, const framebuffer_desc & desc);
+        gl_framebuffer(gl_device * device, const int2 & dimensions, const std::string & title);
         ~gl_framebuffer();
         coord_system get_ndc_coords() const override { return {coord_axis::right, framebuffer_object ? coord_axis::down : coord_axis::up, coord_axis::forward}; }
     };
 
     struct gl_window : window
     {
-        ptr<gl_device> device;
-        GLFWwindow * w;
         ptr<gl_framebuffer> fb;
 
         gl_window(gl_device * device, const int2 & dimensions, std::string title);
-        ~gl_window();
-        GLFWwindow * get_glfw_window() override { return w; }
+        GLFWwindow * get_glfw_window() override { return fb->glfw_window; }
         framebuffer & get_swapchain_framebuffer() override { return *fb; }
     };
 
@@ -117,7 +113,7 @@ namespace rhi
     {
         ptr<gl_device> device;
         pipeline_desc desc;
-        GLuint program_object;
+        GLuint program_object = 0;
     
         gl_pipeline(gl_device * device, const pipeline_desc & desc);
         ~gl_pipeline();
@@ -215,7 +211,7 @@ void gl_device::bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline)
 ptr<buffer> gl_device::create_buffer(const buffer_desc & desc, const void * initial_data) { return new delete_when_unreferenced<gl_buffer>{this, desc, initial_data}; }
 ptr<sampler> gl_device::create_sampler(const sampler_desc & desc) { return new delete_when_unreferenced<gl_sampler>{this, desc}; }
 ptr<image> gl_device::create_image(const image_desc & desc, std::vector<const void *> initial_data) { return new delete_when_unreferenced<gl_image>{this, desc, initial_data}; }
-ptr<framebuffer> gl_device::create_framebuffer(const framebuffer_desc & desc) { return new delete_when_unreferenced<gl_framebuffer>{this, hidden_window, desc}; }
+ptr<framebuffer> gl_device::create_framebuffer(const framebuffer_desc & desc) { return new delete_when_unreferenced<gl_framebuffer>{this, desc}; }
 ptr<window> gl_device::create_window(const int2 & dimensions, std::string_view title) { return new delete_when_unreferenced<gl_window>{this, dimensions, std::string{title}}; }
 ptr<shader> gl_device::create_shader(const shader_module & module) { return new delete_when_unreferenced<gl_shader>{module}; }
 ptr<pipeline> gl_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<gl_pipeline>{this, desc}; }
@@ -234,8 +230,8 @@ uint64_t gl_device::submit(command_buffer & cmd)
         [&](const begin_render_pass_command & c)
         {
             auto & fb = static_cast<gl_framebuffer &>(*c.framebuffer);
-            context = fb.context;
-            glfwMakeContextCurrent(fb.context);
+            context = fb.glfw_window ? fb.glfw_window : hidden_window;
+            glfwMakeContextCurrent(context);
             glEnable(GL_FRAMEBUFFER_SRGB);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
             glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
@@ -463,11 +459,10 @@ gl_image::~gl_image()
     glDeleteTextures(1, &texture_object);
 }
 
-gl_framebuffer::gl_framebuffer(gl_device * device, GLFWwindow * hidden_window, const framebuffer_desc & desc) : device{device}, context{hidden_window}
+gl_framebuffer::gl_framebuffer(gl_device * device, const framebuffer_desc & desc) : device{device}, dims{desc.dimensions}
 {
-    dims = desc.dimensions;
     std::vector<GLenum> draw_buffers;
-    glfwMakeContextCurrent(hidden_window); // Framebuffers are not shared between GL contexts, so create them all in the hidden window's context
+    glfwMakeContextCurrent(device->hidden_window); // Framebuffers are not shared between GL contexts, so create them all in the hidden window's context
     glCreateFramebuffers(1, &framebuffer_object);
     for(size_t i=0; i<desc.color_attachments.size(); ++i) 
     {
@@ -482,31 +477,34 @@ gl_framebuffer::gl_framebuffer(gl_device * device, GLFWwindow * hidden_window, c
     }
     glNamedFramebufferDrawBuffers(framebuffer_object, exactly(draw_buffers.size()), draw_buffers.data());
 }
-gl_framebuffer::~gl_framebuffer()
-{
-    if(framebuffer_object) glDeleteFramebuffers(1, &framebuffer_object);
-    else glfwDestroyWindow(context);
-}
-
-gl_window::gl_window(gl_device * device, const int2 & dimensions, std::string title) : device{device}
+gl_framebuffer::gl_framebuffer(gl_device * device, const int2 & dimensions, const std::string & title) : device{device}, dims{dimensions} 
 {
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, 1);
-    w = glfwCreateWindow(dimensions.x, dimensions.y, title.c_str(), nullptr, device->hidden_window);
-    if(!w) throw std::runtime_error("glfwCreateWindow(...) failed");
-    device->enable_debug_callback(w);
-
-    fb = new delete_when_unreferenced<gl_framebuffer>{device};
-    fb->context = w;
-    fb->framebuffer_object = 0;
-    fb->dims = dimensions;
+    glfw_window = glfwCreateWindow(dimensions.x, dimensions.y, title.c_str(), nullptr, device->hidden_window);
+    if(!glfw_window) throw std::runtime_error("glfwCreateWindow(...) failed");
+    device->enable_debug_callback(glfw_window);
 }
-gl_window::~gl_window()
+gl_framebuffer::~gl_framebuffer()
 {
-    device->destroy_context_objects(w);
+    if(framebuffer_object)
+    {
+        glfwMakeContextCurrent(device->hidden_window);
+        glDeleteFramebuffers(1, &framebuffer_object);
+    }
+    if(glfw_window) 
+    {
+        device->destroy_context_objects(glfw_window);
+        glfwDestroyWindow(glfw_window);
+    }
+}
+
+gl_window::gl_window(gl_device * device, const int2 & dimensions, std::string title)
+{
+    fb = new delete_when_unreferenced<gl_framebuffer>{device, dimensions, title};
 }
 
 gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : device{device}, desc{desc}
