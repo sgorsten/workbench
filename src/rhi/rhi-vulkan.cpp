@@ -32,6 +32,8 @@ namespace rhi
         VkSurfaceTransformFlagBitsKHR surface_transform;
     };
 
+    //using device_object = std::variant<VkRenderPass, VkBuffer, VkSampler, VkImage, VkImageView, VkFramebuffer, VkDescriptorSetLayout, VkPipelineLayout, VkPipeline, VkDescriptorPool, VkSurfaceKHR, VkSwapchainKHR, GLFWwindow *>;
+
     struct vk_device : device
     {
         // Core Vulkan objects
@@ -55,7 +57,7 @@ namespace rhi
         constexpr static int fence_ring_size = 256, fence_ring_mask = 0xFF;
         VkFence ring_fences[fence_ring_size];
         uint64_t submitted_index, completed_index;
-        struct scheduled_action { uint64_t after_completion_index; std::function<void(VkDevice)> execute; };
+        struct scheduled_action { uint64_t after_completion_index; std::function<void(vk_device &)> execute; };
         std::queue<scheduled_action> scheduled_actions;
 
         // Deduplicated render passes
@@ -65,10 +67,28 @@ namespace rhi
         ~vk_device();
 
         // Core helper functions
+        void destroy_immediate(VkRenderPass pass) { vkDestroyRenderPass(dev, pass, nullptr); }
+        void destroy_immediate(VkDeviceMemory memory) { vkFreeMemory(dev, memory, nullptr); }
+        void destroy_immediate(VkBuffer buffer) { vkDestroyBuffer(dev, buffer, nullptr); }
+        void destroy_immediate(VkSampler sampler) { vkDestroySampler(dev, sampler, nullptr); }
+        void destroy_immediate(VkImage image) { vkDestroyImage(dev, image, nullptr); }
+        void destroy_immediate(VkImageView image_view) { vkDestroyImageView(dev, image_view, nullptr); }
+        void destroy_immediate(VkFramebuffer framebuffer) { vkDestroyFramebuffer(dev, framebuffer, nullptr); }
+        void destroy_immediate(VkDescriptorSetLayout layout) { vkDestroyDescriptorSetLayout(dev, layout, nullptr); }
+        void destroy_immediate(VkPipelineLayout layout) { vkDestroyPipelineLayout(dev, layout, nullptr); }
+        void destroy_immediate(VkShaderModule module) { vkDestroyShaderModule(dev, module, nullptr); }
+        void destroy_immediate(VkPipeline pipeline) { vkDestroyPipeline(dev, pipeline, nullptr); }
+        void destroy_immediate(VkDescriptorPool pool) { vkDestroyDescriptorPool(dev, pool, nullptr); }
+        void destroy_immediate(VkSemaphore semaphore) { vkDestroySemaphore(dev, semaphore, nullptr); }
+        void destroy_immediate(VkFence fence) { vkDestroyFence(dev, fence, nullptr); }
+        void destroy_immediate(VkSurfaceKHR surface) { vkDestroySurfaceKHR(instance, surface, nullptr); }
+        void destroy_immediate(VkSwapchainKHR swapchain) { vkDestroySwapchainKHR(dev, swapchain, nullptr); }
+        void destroy_immediate(GLFWwindow * window) { glfwDestroyWindow(window); }
+        template<class T> void destroy(T object) { scheduled_actions.push({submitted_index, [object](vk_device & dev) { dev.destroy_immediate(object); }}); }
+
         VkDeviceMemory allocate(const VkMemoryRequirements & reqs, VkMemoryPropertyFlags props);
-        uint64_t submit(const VkSubmitInfo & submit_info);
-        template<class F> void schedule(F f) { scheduled_actions.push({submitted_index, f}); }
         VkRenderPass get_render_pass(const vk_render_pass_desc & desc);
+        uint64_t submit(const VkSubmitInfo & submit_info);
 
         // info
         device_info get_info() const override { return {linalg::zero_to_one, false}; }
@@ -527,12 +547,9 @@ vk_buffer::vk_buffer(vk_device * device, const buffer_desc & desc, const void * 
 
 vk_buffer::~vk_buffer()
 {
-    device->schedule([memory_object=memory_object, buffer_object=buffer_object, mapped=mapped](VkDevice dev)
-    {
-        vkDestroyBuffer(dev, buffer_object, nullptr);
-        if(mapped) vkUnmapMemory(dev, memory_object);
-        vkFreeMemory(dev, memory_object, nullptr);
-    });
+    if(mapped) vkUnmapMemory(device->dev, memory_object);
+    device->destroy(buffer_object);
+    device->destroy(memory_object);
 }
 
 static void transition_image(VkCommandBuffer command_buffer, VkImage image, uint32_t mip_level, uint32_t array_layer, 
@@ -634,12 +651,9 @@ vk_image::vk_image(vk_device * device, const image_desc & desc, std::vector<cons
 
 vk_image::~vk_image()
 {
-    device->schedule([image_view=image_view, image_object=image_object, device_memory=device_memory](VkDevice dev)
-    {
-        vkDestroyImageView(dev, image_view, nullptr);
-        vkDestroyImage(dev, image_object, nullptr);
-        vkFreeMemory(dev, device_memory, nullptr);
-    }); 
+    device->destroy(image_view);
+    device->destroy(image_object);
+    device->destroy(device_memory);
 }
 
 VkImageView vk_image::create_view(int mip, int layer) const
@@ -710,7 +724,7 @@ vk_sampler::vk_sampler(vk_device * device, const sampler_desc & desc) : device{d
 }
 vk_sampler::~vk_sampler()
 {
-    device->schedule([sampler=sampler](VkDevice dev) { vkDestroySampler(dev, sampler, nullptr); });
+    device->destroy(sampler);
 }
 
 vk_framebuffer::vk_framebuffer(vk_device * device, const framebuffer_desc & desc) : device{device}
@@ -824,14 +838,11 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
 
 vk_framebuffer::~vk_framebuffer()
 {
-    device->schedule([inst=device->instance, framebuffers=framebuffers, views=views, swapchain=swapchain, surface=surface, w=glfw_window](VkDevice dev)
-    {
-        for(auto fb : framebuffers) vkDestroyFramebuffer(dev, fb, nullptr);
-        for(auto view : views) vkDestroyImageView(dev, view, nullptr);
-        vkDestroySwapchainKHR(dev, swapchain, nullptr);
-        vkDestroySurfaceKHR(inst, surface, nullptr);
-        glfwDestroyWindow(w);
-    });
+    for(auto fb : framebuffers) device->destroy(fb);
+    for(auto view : views) device->destroy(view);
+    device->destroy(swapchain);
+    device->destroy(surface);
+    device->destroy(glfw_window);
 }
 
 template<class T> static VkAttachmentDescription make_attachment_description(VkFormat format, const T & desc, VkImageLayout attachment_optimal_layout)
@@ -891,12 +902,8 @@ vk_window::vk_window(vk_device * device, const int2 & dimensions, std::string ti
 }
 vk_window::~vk_window()
 { 
-    swapchain_framebuffer = nullptr;
-    device->schedule([rf=render_finished, ia=image_available, inst=device->instance](VkDevice dev) 
-    { 
-        vkDestroySemaphore(dev, rf, nullptr);
-        vkDestroySemaphore(dev, ia, nullptr);
-    });
+    device->destroy(render_finished);
+    device->destroy(image_available);
 }
 
 vk_descriptor_set_layout::vk_descriptor_set_layout(vk_device * device, const std::vector<descriptor_binding> & bindings) : device{device}
@@ -921,7 +928,7 @@ vk_descriptor_set_layout::vk_descriptor_set_layout(vk_device * device, const std
 }
 vk_descriptor_set_layout::~vk_descriptor_set_layout()
 { 
-    device->schedule([layout=layout](VkDevice dev) { vkDestroyDescriptorSetLayout(dev, layout, nullptr); });
+    device->destroy(layout);
 }
 
 vk_pipeline_layout::vk_pipeline_layout(vk_device * device, const std::vector<descriptor_set_layout *> & sets) : device{device}
@@ -936,7 +943,7 @@ vk_pipeline_layout::vk_pipeline_layout(vk_device * device, const std::vector<des
 }
 vk_pipeline_layout::~vk_pipeline_layout()
 {
-    device->schedule([layout=layout](VkDevice dev) { vkDestroyPipelineLayout(dev, layout, nullptr); });
+    device->destroy(layout);
 }
 
 vk_shader::vk_shader(vk_device * device, const shader_module & module) : device{device}
@@ -949,7 +956,7 @@ vk_shader::vk_shader(vk_device * device, const shader_module & module) : device{
 }
 vk_shader::~vk_shader()
 {
-    device->schedule([module=module](VkDevice dev) { vkDestroyShaderModule(dev, module, nullptr); });
+    device->destroy(module);
 }
 
 vk_pipeline::vk_pipeline(vk_device * device, const pipeline_desc & desc) : device{device}, desc{desc} {}
@@ -1087,13 +1094,7 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
 }
 vk_pipeline::~vk_pipeline()
 {
-    device->schedule([pipeline_objects=pipeline_objects](VkDevice dev) 
-    { 
-        for(auto & pass_to_pipe : pipeline_objects)
-        {
-            vkDestroyPipeline(dev, pass_to_pipe.second, nullptr); 
-        }
-    });
+    for(auto & pass_to_pipe : pipeline_objects) device->destroy(pass_to_pipe.second);
 }
 
 void vk_descriptor_set::write(int binding, buffer_range range) 
@@ -1121,7 +1122,7 @@ vk_descriptor_pool::vk_descriptor_pool(vk_device * device) : device{device}
 }
 vk_descriptor_pool::~vk_descriptor_pool()
 {
-    device->schedule([pool=pool](VkDevice dev) { vkDestroyDescriptorPool(dev, pool, nullptr); });
+    device->destroy(pool);
 }
 
 void vk_descriptor_pool::reset()
@@ -1282,7 +1283,7 @@ uint64_t vk_device::submit(const VkSubmitInfo & submit_info)
     if(completed_index + fence_ring_size == submitted_index) wait_until_complete(submitted_index - fence_ring_mask);
     check("vkQueueSubmit", vkQueueSubmit(queue, 1, &submit_info, ring_fences[submitted_index & fence_ring_mask]));
     ++submitted_index;
-    for(uint32_t i=0; i<submit_info.commandBufferCount; ++i) scheduled_actions.push({submitted_index, [this, cmd=submit_info.pCommandBuffers[i]](VkDevice dev) { vkFreeCommandBuffers(dev, staging_pool, 1, &cmd); }});
+    for(uint32_t i=0; i<submit_info.commandBufferCount; ++i) scheduled_actions.push({submitted_index, [cmd=submit_info.pCommandBuffers[i]](vk_device & dev) { vkFreeCommandBuffers(dev.dev, dev.staging_pool, 1, &cmd); }});
     return submitted_index;
 }
 
@@ -1297,7 +1298,7 @@ void vk_device::wait_until_complete(uint64_t submission_index)
 
     while(!scheduled_actions.empty() && completed_index >= scheduled_actions.front().after_completion_index)
     {
-        scheduled_actions.front().execute(dev);
+        scheduled_actions.front().execute(*this);
         scheduled_actions.pop();
     }
 }
