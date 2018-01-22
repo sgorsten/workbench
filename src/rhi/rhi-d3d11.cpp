@@ -97,14 +97,14 @@ namespace rhi
         ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) override;
         ptr<window> create_window(const int2 & dimensions, std::string_view title) override;        
         
-        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return descriptor_emulator::create_descriptor_set_layout(bindings); }
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override { return descriptor_emulator::create_pipeline_layout(sets); }
+        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
         ptr<shader> create_shader(const shader_module & module) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
 
-        ptr<descriptor_pool> create_descriptor_pool() override { return descriptor_emulator::create_descriptor_pool(); }
+        ptr<descriptor_pool> create_descriptor_pool() override { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
 
-        ptr<command_buffer> start_command_buffer() override { return command_emulator::start_command_buffer(); }
+        ptr<command_buffer> start_command_buffer() override { return new delete_when_unreferenced<emulated_command_buffer>(); }
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
         void wait_until_complete(uint64_t submit_id) override;
@@ -197,7 +197,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
 {
     d3d_pipeline * current_pipeline = 0;
     ctx->ClearState();
-    command_emulator::execute(cmd, overload(
+    static_cast<const emulated_command_buffer &>(cmd).execute(overload(
         [this](const generate_mipmaps_command & c)
         {
             ctx->GenerateMips(static_cast<d3d_image &>(*c.im).shader_resource_view);
@@ -242,7 +242,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         },
         [this](const bind_descriptor_set_command & c)
         {
-            descriptor_emulator::bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer_range range) 
+            bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer_range range) 
             { 
                 ID3D11Buffer * buffer = static_cast<d3d_buffer &>(*range.buffer).buffer_object;
                 const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
@@ -470,12 +470,12 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
 	    spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	    for(auto & resource : resources.uniform_buffers)
 	    {
-            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(descriptor_emulator::get_flat_buffer_binding(*desc.layout, compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<emulated_pipeline_layout &>(*desc.layout).get_flat_buffer_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
 		    compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	    }
 	    for(auto & resource : resources.sampled_images)
 	    {
-		    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(descriptor_emulator::get_flat_image_binding(*desc.layout, compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+		    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<emulated_pipeline_layout &>(*desc.layout).get_flat_image_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
             compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	    }
         spirv_cross::CompilerHLSL::Options options;
