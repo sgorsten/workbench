@@ -297,8 +297,7 @@ namespace rhi
     {
         if(result != VK_SUCCESS)
         {
-            std::ostringstream ss; ss << func << "(...) failed";
-            throw std::system_error(std::error_code(exactly(static_cast<std::underlying_type_t<VkResult>>(result)), vulkan_error::instance()), ss.str());
+            throw std::system_error(std::error_code(exactly(static_cast<std::underlying_type_t<VkResult>>(result)), vulkan_error::instance()), to_string(func, "(...) failed"));
         }
     }
 
@@ -1100,7 +1099,7 @@ vk_pipeline::~vk_pipeline()
 
 void vk_descriptor_set::write(int binding, buffer_range range) 
 {
-    VkDescriptorBufferInfo buffer_info { static_cast<vk_buffer *>(range.buffer)->buffer_object, range.offset, range.size };
+    VkDescriptorBufferInfo buffer_info { static_cast<vk_buffer &>(range.buffer).buffer_object, range.offset, range.size };
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }
@@ -1272,15 +1271,15 @@ void vk_command_buffer::bind_descriptor_set(pipeline_layout & layout, int set_in
 
 void vk_command_buffer::bind_vertex_buffer(int index, buffer_range range)
 {
-    record_reference(*range.buffer);
+    record_reference(range.buffer);
     VkDeviceSize offset = range.offset;
-    vkCmdBindVertexBuffers(cmd, index, 1, &static_cast<vk_buffer *>(range.buffer)->buffer_object, &offset);
+    vkCmdBindVertexBuffers(cmd, index, 1, &static_cast<vk_buffer &>(range.buffer).buffer_object, &offset);
 }
 
 void vk_command_buffer::bind_index_buffer(buffer_range range)
 {
-    record_reference(*range.buffer);
-    vkCmdBindIndexBuffer(cmd, static_cast<vk_buffer *>(range.buffer)->buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
+    record_reference(range.buffer);
+    vkCmdBindIndexBuffer(cmd, static_cast<vk_buffer &>(range.buffer).buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
 }
 
 void vk_command_buffer::draw(int first_vertex, int vertex_count)

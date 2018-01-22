@@ -28,9 +28,9 @@ namespace gfx
         rhi::ptr<rhi::buffer> buffer;
         size_t size;
     public:
-        static_buffer(rhi::ptr<rhi::device> dev, rhi::buffer_usage usage, binary_view contents) : buffer{dev->create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
+        static_buffer(rhi::device & dev, rhi::buffer_usage usage, binary_view contents) : buffer{dev.create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
 
-        operator rhi::buffer_range() const { return {buffer, 0, size}; }
+        operator rhi::buffer_range() const { return {*buffer, 0, size}; }
     };
 
     class dynamic_buffer
@@ -39,12 +39,12 @@ namespace gfx
         char * mapped;
         size_t size, used;
     public:
-        dynamic_buffer(rhi::ptr<rhi::device> dev, rhi::buffer_usage usage, size_t size) : buffer{dev->create_buffer({size, usage, true}, nullptr)}, mapped{buffer->get_mapped_memory()}, size{size}, used{0} {}
+        dynamic_buffer(rhi::device & dev, rhi::buffer_usage usage, size_t size) : buffer{dev.create_buffer({size, usage, true}, nullptr)}, mapped{buffer->get_mapped_memory()}, size{size}, used{0} {}
 
         void reset() { used = 0; }
         rhi::buffer_range write(binary_view contents)
         {
-            const rhi::buffer_range range {buffer, (used+255)/256*256, contents.size};
+            const rhi::buffer_range range {*buffer, (used+255)/256*256, contents.size};
             used = range.offset + range.size;
             if(used > size) throw std::runtime_error("out of memory");
             memcpy(mapped + range.offset, contents.data, static_cast<size_t>(range.size));       
@@ -55,11 +55,10 @@ namespace gfx
     class window
     {
         struct ignore { template<class... T> operator std::function<void(T...)>() const { return [](T...) {}; } };
-        rhi::ptr<rhi::device> dev;
         rhi::ptr<rhi::window> rhi_window;
         GLFWwindow * glfw_window;
     public:
-        window(rhi::ptr<rhi::device> dev, const int2 & dimensions, const std::string & title);
+        window(rhi::device & dev, const int2 & dimensions, const std::string & title);
         ~window();
 
         // Observers

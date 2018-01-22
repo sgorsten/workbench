@@ -52,3 +52,11 @@ template<class First, class... Rest> struct overload_set<First,Rest...> : First,
     using overload_set<Rest...>::operator();
 };
 template<class... F> overload_set<F...> overload(F... f) { return {f...}; }
+
+// Helper for forming strings via an ostringstream
+template<class... T> std::string to_string(T && ... args)
+{
+    std::ostringstream ss;
+    const int z[] {(ss << std::forward<T>(args), 0)...};
+    return ss.str();
+}

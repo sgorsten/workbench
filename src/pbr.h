@@ -82,7 +82,7 @@ struct standard_device_objects
         pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::shader_read_only_optimal}}};
         cmd->begin_render_pass(pass, *fb);
         bind_pipeline(*cmd);
-        cmd->bind_vertex_buffer(0, {render_image_vertex_buffer, 0, sizeof(render_image_vertex)*6});
+        cmd->bind_vertex_buffer(0, {*render_image_vertex_buffer, 0, sizeof(render_image_vertex)*6});
         cmd->draw(0, 6);
         cmd->end_render_pass();
         if(generate_mips) cmd->generate_mipmaps(target_image);
@@ -109,7 +109,7 @@ struct standard_device_objects
             pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::shader_read_only_optimal}}};
             cmd->begin_render_pass(pass, *fb);
             bind_pipeline(*cmd);
-            cmd->bind_vertex_buffer(0, {render_cubemap_vertex_buffer, exactly(sizeof(render_cubemap_vertex)*6*i), sizeof(render_cubemap_vertex)*6});
+            cmd->bind_vertex_buffer(0, {*render_cubemap_vertex_buffer, exactly(sizeof(render_cubemap_vertex)*6*i), sizeof(render_cubemap_vertex)*6});
             cmd->draw(0, 6);
             cmd->end_render_pass();
         }

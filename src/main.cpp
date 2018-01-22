@@ -189,14 +189,14 @@ class device_session
 public:
     device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) :
         dev{dev}, standard{dev, assets.standard}, info{dev->get_info()},
-        uniform_buffer{dev, rhi::buffer_usage::uniform, 1024*1024},
-        basis_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
-        ground_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
-        box_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
-        sphere_vertex_buffer{dev, rhi::buffer_usage::vertex, assets.sphere_mesh.vertices},
-        ground_index_buffer{dev, rhi::buffer_usage::index, assets.ground_mesh.triangles},
-        box_index_buffer{dev, rhi::buffer_usage::index, assets.box_mesh.triangles},
-        sphere_index_buffer{dev, rhi::buffer_usage::index, assets.sphere_mesh.triangles}
+        uniform_buffer{*dev, rhi::buffer_usage::uniform, 1024*1024},
+        basis_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
+        ground_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
+        box_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
+        sphere_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.sphere_mesh.vertices},
+        ground_index_buffer{*dev, rhi::buffer_usage::index, assets.ground_mesh.triangles},
+        box_index_buffer{*dev, rhi::buffer_usage::index, assets.box_mesh.triangles},
+        sphere_index_buffer{*dev, rhi::buffer_usage::index, assets.sphere_mesh.triangles}
     {
         desc_pool = dev->create_descriptor_pool();
 
@@ -236,8 +236,7 @@ public:
         env_cubemap3 = standard.create_reflectance_cubemap(128, *desc_pool, uniform_buffer, *env_cubemap);
         brdf_integral = standard.create_brdf_integral_image(*desc_pool, uniform_buffer);
 
-        std::ostringstream ss; ss << "Workbench 2018 Render Test (" << name << ")";
-        gwindow = std::make_unique<gfx::window>(dev, int2{512,512}, ss.str());
+        gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));
         gwindow->set_pos(window_pos); 
     }
 

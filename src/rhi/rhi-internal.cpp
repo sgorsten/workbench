@@ -75,6 +75,8 @@ emulated_pipeline_layout::emulated_pipeline_layout(const std::vector<descriptor_
 void emulated_descriptor_pool::reset()
 {
     for(auto & set : sets) if(set.ref_count != 0) throw std::logic_error("rhi::descriptor_pool::reset called with descriptor sets outstanding");
+    for(auto & binding : buffer_bindings) binding = {};
+    for(auto & binding : image_bindings) binding = {};
     used_buffer_bindings = used_image_bindings = used_sets = 0;
 }
 
@@ -100,7 +102,7 @@ void emulated_descriptor_set::write(int binding, buffer_range range)
 {
     auto it = layout->buffer_offsets.find(binding);
     if(it == layout->buffer_offsets.end()) throw std::logic_error("invalid binding");
-    buffer_bindings[it->second] = range;
+    buffer_bindings[it->second] = {&range.buffer, range.offset, range.size};
 }
 
 void emulated_descriptor_set::write(int binding, sampler & sampler, image & image)

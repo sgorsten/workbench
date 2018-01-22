@@ -140,12 +140,10 @@ gl_device::gl_device(std::function<void(const char *)> debug_callback) : debug_c
     if(!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) throw std::runtime_error("gladLoadGLLoader(...) failed");
     if(debug_callback)
     {
-        std::ostringstream ss;
-        ss << "GL_VERSION = " << glGetString(GL_VERSION);
-        ss << "\nGL_SHADING_LANGUAGE_VERSION = " << glGetString(GL_SHADING_LANGUAGE_VERSION);
-        ss << "\nGL_VENDOR = " << glGetString(GL_VENDOR);
-        ss << "\nGL_RENDERER = " << glGetString(GL_RENDERER);
-        debug_callback(ss.str().c_str());
+        debug_callback(to_string("GL_VERSION = ", glGetString(GL_VERSION)).c_str());
+        debug_callback(to_string("GL_SHADING_LANGUAGE_VERSION = ", glGetString(GL_SHADING_LANGUAGE_VERSION)).c_str());
+        debug_callback(to_string("GL_VENDOR = ", glGetString(GL_VENDOR)).c_str());
+        debug_callback(to_string("GL_RENDERER = ", glGetString(GL_RENDERER)).c_str());
     }
     enable_debug_callback(hidden_window);
 }
@@ -274,7 +272,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
         [](const bind_descriptor_set_command & c)
         {
             bind_descriptor_set(*c.layout, c.set_index, *c.set, 
-                [](size_t index, buffer_range range) { glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), static_cast<gl_buffer &>(*range.buffer).buffer_object, range.offset, range.size); },
+                [](size_t index, buffer & buffer, size_t offset, size_t size) { glBindBufferRange(GL_UNIFORM_BUFFER, exactly(index), static_cast<gl_buffer &>(buffer).buffer_object, offset, size); },
                 [](size_t index, sampler & sampler, image & image) 
                 { 
                     glBindSampler(exactly(index), static_cast<gl_sampler &>(sampler).sampler_object); 
@@ -287,13 +285,13 @@ uint64_t gl_device::submit(command_buffer & cmd)
             {
                 if(buf.index == c.index)
                 {
-                    glBindVertexBuffer(c.index, static_cast<gl_buffer &>(*c.range.buffer).buffer_object, c.range.offset, buf.stride);
+                    glBindVertexBuffer(c.index, static_cast<gl_buffer &>(c.range.buffer).buffer_object, c.range.offset, buf.stride);
                 }
             }        
         },
         [&](const bind_index_buffer_command & c)
         {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<gl_buffer &>(*c.range.buffer).buffer_object);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, static_cast<gl_buffer &>(c.range.buffer).buffer_object);
             base_indices_pointer = (const char *)c.range.offset;
         },
         [&](const draw_command & c) { glDrawArrays(current_pipeline->primitive_mode, c.first_vertex, c.vertex_count); },

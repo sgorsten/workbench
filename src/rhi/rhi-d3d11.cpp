@@ -34,8 +34,7 @@ namespace rhi
     {
         if(FAILED(result))
         {
-            std::ostringstream ss; ss << func << "(...) failed";
-            throw std::system_error(std::error_code(exactly(result), d3d_error::instance()), ss.str());
+            throw std::system_error(std::error_code(exactly(result), d3d_error::instance()), to_string(func, "(...) failed"));
         }
     }
 
@@ -242,12 +241,12 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         },
         [this](const bind_descriptor_set_command & c)
         {
-            bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer_range range) 
+            bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer & buffer, size_t offset, size_t size)
             { 
-                ID3D11Buffer * buffer = static_cast<d3d_buffer &>(*range.buffer).buffer_object;
-                const UINT first_constant = exactly(range.offset/16), num_constants = exactly((range.size+255)/256*16);
-                ctx->VSSetConstantBuffers1(exactly(index), 1, &buffer, &first_constant, &num_constants);
-                ctx->PSSetConstantBuffers1(exactly(index), 1, &buffer, &first_constant, &num_constants);
+                ID3D11Buffer * buf = static_cast<d3d_buffer &>(buffer).buffer_object;
+                const UINT first_constant = exactly(offset/16), num_constants = exactly((size+255)/256*16);
+                ctx->VSSetConstantBuffers1(exactly(index), 1, &buf, &first_constant, &num_constants);
+                ctx->PSSetConstantBuffers1(exactly(index), 1, &buf, &first_constant, &num_constants);
             }, [this](size_t index, sampler & sampler, image & image) 
             {
                 ID3D11SamplerState * sampler_state = static_cast<d3d_sampler &>(sampler).sampler_state;
@@ -264,7 +263,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             {
                 if(buf.index == c.index)
                 {
-                    ID3D11Buffer * buffer = static_cast<d3d_buffer &>(*c.range.buffer).buffer_object;
+                    ID3D11Buffer * buffer = static_cast<d3d_buffer &>(c.range.buffer).buffer_object;
                     const UINT stride = exactly(buf.stride), offset = exactly(c.range.offset);
                     ctx->IASetVertexBuffers(c.index, 1, &buffer, &stride, &offset);
                 }
@@ -272,7 +271,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         },
         [this](const bind_index_buffer_command & c) 
         {
-            ctx->IASetIndexBuffer(static_cast<d3d_buffer &>(*c.range.buffer).buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); 
+            ctx->IASetIndexBuffer(static_cast<d3d_buffer &>(c.range.buffer).buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); 
         },
         [this](const draw_command & c)
         { 

@@ -54,12 +54,13 @@ namespace rhi
         size_t get_flat_image_binding(int set, int binding) const;        
     };
 
-    struct sampled_image { ptr<sampler> sampler; ptr<image> image; };
+    struct buffer_binding { ptr<buffer> buffer; size_t offset, size; };
+    struct image_binding { ptr<sampler> sampler; ptr<image> image; };
     struct emulated_descriptor_set : descriptor_set
     {
         ptr<emulated_descriptor_set_layout> layout;
-        buffer_range * buffer_bindings;
-        sampled_image * image_bindings;
+        buffer_binding * buffer_bindings;
+        image_binding * image_bindings;
 
         void write(int binding, buffer_range range) override;
         void write(int binding, sampler & sampler, image & image) override;
@@ -67,8 +68,8 @@ namespace rhi
 
     struct emulated_descriptor_pool : descriptor_pool
     {
-        std::vector<buffer_range> buffer_bindings;
-        std::vector<sampled_image> image_bindings;
+        std::vector<buffer_binding> buffer_bindings;
+        std::vector<image_binding> image_bindings;
         std::vector<counted<emulated_descriptor_set>> sets;
         size_t used_buffer_bindings;
         size_t used_image_bindings;
@@ -86,12 +87,11 @@ namespace rhi
     template<class BindBufferFunction, class BindImageFunction>
     void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set, BindBufferFunction bind_buffer, BindImageFunction bind_image)
     {
-        const auto & pipeline_layout = static_cast<emulated_pipeline_layout &>(layout);
-        const auto & descriptor_set = static_cast<emulated_descriptor_set &>(set);
-        if(descriptor_set.layout != pipeline_layout.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
-
-        for(size_t i=0; i<descriptor_set.layout->num_buffers; ++i) bind_buffer(pipeline_layout.sets[set_index].buffer_offset + i, descriptor_set.buffer_bindings[i]);
-        for(size_t i=0; i<descriptor_set.layout->num_images; ++i) bind_image(pipeline_layout.sets[set_index].image_offset + i, *descriptor_set.image_bindings[i].sampler, *descriptor_set.image_bindings[i].image);
+        const auto & p = static_cast<emulated_pipeline_layout &>(layout);
+        const auto & s = static_cast<emulated_descriptor_set &>(set);
+        if(s.layout != p.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
+        for(size_t i=0; i<s.layout->num_buffers; ++i) bind_buffer(p.sets[set_index].buffer_offset + i, *s.buffer_bindings[i].buffer, s.buffer_bindings[i].offset, s.buffer_bindings[i].size);
+        for(size_t i=0; i<s.layout->num_images; ++i) bind_image(p.sets[set_index].image_offset + i, *s.image_bindings[i].sampler, *s.image_bindings[i].image);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////

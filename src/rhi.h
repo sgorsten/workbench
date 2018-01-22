@@ -48,7 +48,7 @@ namespace rhi
     struct shader : object {};
     struct pipeline : object {};
 
-    struct buffer_range { buffer * buffer; size_t offset, size; };
+    struct buffer_range { buffer & buffer; size_t offset, size; };
     struct descriptor_set : object 
     {
         virtual void write(int binding, buffer_range range) = 0;

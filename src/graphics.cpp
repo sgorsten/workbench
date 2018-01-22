@@ -8,7 +8,7 @@ void gfx::context::poll_events() { glfwPollEvents(); }
 
 static gfx::window & get(GLFWwindow * window) { return *reinterpret_cast<gfx::window *>(glfwGetWindowUserPointer(window)); }
 
-gfx::window::window(rhi::ptr<rhi::device> dev, const int2 & dimensions, const std::string & title) : dev{dev}, rhi_window{dev->create_window(dimensions, title)}, glfw_window{rhi_window->get_glfw_window()}
+gfx::window::window(rhi::device & dev, const int2 & dimensions, const std::string & title) : rhi_window{dev.create_window(dimensions, title)}, glfw_window{rhi_window->get_glfw_window()}
 {
     glfwSetWindowUserPointer(glfw_window, this);
     glfwSetWindowPosCallback(glfw_window, [](GLFWwindow * window, int xpos, int ypos) { get(window).on_window_pos({xpos, ypos}); });
