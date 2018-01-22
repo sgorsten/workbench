@@ -101,7 +101,6 @@ struct standard_device_objects
 
     template<class F> void render_to_cubemap(rhi::image & target_cube_map, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
     {
-        std::vector<rhi::ptr<rhi::framebuffer>> framebuffers;
         auto cmd = dev->create_command_buffer();
         for(int i=0; i<6; ++i)
         {
@@ -113,7 +112,6 @@ struct standard_device_objects
             cmd->bind_vertex_buffer(0, {render_cubemap_vertex_buffer, exactly(sizeof(render_cubemap_vertex)*6*i), sizeof(render_cubemap_vertex)*6});
             cmd->draw(0, 6);
             cmd->end_render_pass();
-            framebuffers.push_back(fb);
         }
         if(generate_mips) cmd->generate_mipmaps(target_cube_map);
         dev->wait_until_complete(dev->submit(*cmd));

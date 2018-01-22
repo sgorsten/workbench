@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 #pragma comment(lib, "vulkan-1.lib")
 #include <queue>
+#include <set>
 
 auto get_tuple(const VkAttachmentDescription & desc) { return std::tie(desc.flags, desc.format, desc.samples, desc.loadOp, desc.storeOp, desc.stencilLoadOp, desc.stencilStoreOp, desc.initialLayout, desc.finalLayout); }
 bool operator < (const VkAttachmentDescription & a, const VkAttachmentDescription & b) { return get_tuple(a) < get_tuple(b); }
@@ -254,9 +255,11 @@ namespace rhi
     struct vk_command_buffer : command_buffer
     {
         ptr<vk_device> device;
+        std::set<ptr<object>> referenced_objects;
         VkCommandBuffer cmd;
         VkRenderPass current_pass;
 
+        void record_reference(object & object);
         virtual void generate_mipmaps(image & image) override;
         virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
         virtual void bind_pipeline(pipeline & pipe) override;
@@ -1169,8 +1172,15 @@ ptr<command_buffer> vk_device::create_command_buffer()
     return cmd;
 }
 
+void vk_command_buffer::record_reference(object & object)
+{
+    auto it = referenced_objects.find(&object);
+    if(it == referenced_objects.end()) referenced_objects.insert(&object);
+}
+
 void vk_command_buffer::generate_mipmaps(image & image)
 {
+    record_reference(image);
     auto & im = static_cast<vk_image &>(image);
     for(uint32_t layer=0; layer<im.image_info.arrayLayers; ++layer)
     {
@@ -1213,6 +1223,7 @@ void vk_command_buffer::generate_mipmaps(image & image)
 
 void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, framebuffer & framebuffer)
 {
+    record_reference(framebuffer);
     auto & fb = static_cast<vk_framebuffer &>(framebuffer);
     std::vector<VkClearValue> clear_values;
     for(size_t i=0; i<pass_desc.color_attachments.size(); ++i)
@@ -1248,22 +1259,27 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
 
 void vk_command_buffer::bind_pipeline(pipeline & pipe)
 {
+    record_reference(pipe);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline &>(pipe).get_pipeline(current_pass));
 }
 
 void vk_command_buffer::bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set)
 {
+    record_reference(layout);
+    record_reference(set);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline_layout &>(layout).layout, set_index, 1, &static_cast<vk_descriptor_set &>(set).set, 0, nullptr);
 }
 
 void vk_command_buffer::bind_vertex_buffer(int index, buffer_range range)
 {
+    record_reference(*range.buffer);
     VkDeviceSize offset = range.offset;
     vkCmdBindVertexBuffers(cmd, index, 1, &static_cast<vk_buffer *>(range.buffer)->buffer_object, &offset);
 }
 
 void vk_command_buffer::bind_index_buffer(buffer_range range)
 {
+    record_reference(*range.buffer);
     vkCmdBindIndexBuffer(cmd, static_cast<vk_buffer *>(range.buffer)->buffer_object, range.offset, VK_INDEX_TYPE_UINT32);
 }
 
