@@ -74,32 +74,38 @@ emulated_pipeline_layout::emulated_pipeline_layout(const std::vector<descriptor_
 
 void emulated_descriptor_pool::reset()
 {
-    buffer_bindings.clear();
-    image_bindings.clear();
+    for(auto & set : sets) if(set.ref_count != 0) throw std::logic_error("rhi::descriptor_pool::reset called with descriptor sets outstanding");
+    used_buffer_bindings = used_image_bindings = used_sets = 0;
 }
 
 ptr<descriptor_set> emulated_descriptor_pool::alloc(descriptor_set_layout & layout)
 {
-    ptr<emulated_descriptor_set> set {new delete_when_unreferenced<emulated_descriptor_set>{}};
-    set->pool = this;
-    set->layout = static_cast<emulated_descriptor_set_layout *>(&layout);
-    set->buffer_offset = buffer_bindings.size();
-    set->image_offset = image_bindings.size();
-    buffer_bindings.resize(set->buffer_offset + set->layout->num_buffers);
-    image_bindings.resize(set->image_offset + set->layout->num_images);
-    return set;
+    auto & set_layout = static_cast<emulated_descriptor_set_layout &>(layout);
+    const size_t needed_buffer_bindings = used_buffer_bindings + set_layout.num_buffers;
+    const size_t needed_image_bindings = used_image_bindings + set_layout.num_images;
+    if(needed_buffer_bindings > buffer_bindings.size()) throw std::logic_error("out of buffer bindings");
+    if(needed_image_bindings > image_bindings.size()) throw std::logic_error("out of image bindings");
+    if(used_sets == sets.size()) throw std::logic_error("out of descriptor sets");
+
+    auto & set = sets[used_sets++];
+    set.layout = &set_layout;
+    set.buffer_bindings = buffer_bindings.data() + used_buffer_bindings;
+    set.image_bindings = image_bindings.data() + used_image_bindings;
+    used_buffer_bindings = needed_buffer_bindings;
+    used_image_bindings = needed_image_bindings;
+    return &set;
 }
 
 void emulated_descriptor_set::write(int binding, buffer_range range)
 {
     auto it = layout->buffer_offsets.find(binding);
     if(it == layout->buffer_offsets.end()) throw std::logic_error("invalid binding");
-    pool->buffer_bindings[buffer_offset + it->second] = range;
+    buffer_bindings[it->second] = range;
 }
 
 void emulated_descriptor_set::write(int binding, sampler & sampler, image & image)
 {
     auto it = layout->image_offsets.find(binding);
     if(it == layout->image_offsets.end()) throw std::logic_error("invalid binding");
-    pool->image_bindings[image_offset + it->second] = {&sampler, &image};
+    image_bindings[it->second] = {&sampler, &image};
 }

@@ -286,7 +286,7 @@ public:
         per_scene_view_set->write(2, *standard.cubemap_sampler, *env_cubemap3);
         per_scene_view_set->write(3, uniform_buffer.write(per_view_uniforms));
 
-        auto cmd = dev->start_command_buffer();
+        auto cmd = dev->create_command_buffer();
 
         // Draw objects to our primary framebuffer
         rhi::render_pass_desc pass;
@@ -338,7 +338,7 @@ public:
                 per_object.model_matrix = translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f));
                 per_object.roughness = (j+0.5f)/6;
                 per_object.metalness = (i+0.5f)/6;
-                auto sphere_set =  desc_pool->alloc(*per_object_layout);
+                auto sphere_set = desc_pool->alloc(*per_object_layout);
                 sphere_set->write(0, uniform_buffer.write(per_object));
                 sphere_set->write(1, *nearest, *checkerboard);
                 cmd->bind_descriptor_set(*pipe_layout, 1, *sphere_set);                      

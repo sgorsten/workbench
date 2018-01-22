@@ -104,9 +104,8 @@ namespace rhi
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;        
 
         ptr<descriptor_pool> create_descriptor_pool() override;
+        ptr<command_buffer> create_command_buffer() override;
 
-        // rendering
-        ptr<command_buffer> start_command_buffer() override;
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
         void wait_until_complete(uint64_t submit_id) override;
@@ -531,7 +530,7 @@ vk_buffer::vk_buffer(vk_device * device, const buffer_desc & desc, const void * 
     if(initial_data)
     {
         memcpy(device->mapped_staging_memory, initial_data, desc.size);
-        auto cmd = device->start_command_buffer();
+        auto cmd = device->create_command_buffer();
         const VkBufferCopy copy {0, 0, desc.size};
         vkCmdCopyBuffer(static_cast<vk_command_buffer &>(*cmd).cmd, device->staging_buffer, buffer_object, 1, &copy);
         device->submit(*cmd);
@@ -615,7 +614,7 @@ vk_image::vk_image(vk_device * device, const image_desc & desc, std::vector<cons
             layers.layerCount = 1;
 
             // Copy image contents from staging buffer into mip level zero
-            auto cmd = device->start_command_buffer();
+            auto cmd = device->create_command_buffer();
 
             // Must transition to transfer_dst_optimal before any transfers occur
             transition_image(static_cast<vk_command_buffer &>(*cmd).cmd, image_object, 0, exactly(layer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -1146,7 +1145,7 @@ ptr<descriptor_set> vk_descriptor_pool::alloc(descriptor_set_layout & layout)
 // vk_device rendering //
 //////////////////////////
 
-ptr<command_buffer> vk_device::start_command_buffer()
+ptr<command_buffer> vk_device::create_command_buffer()
 {
     ptr<vk_command_buffer> cmd {new delete_when_unreferenced<vk_command_buffer>{}};
     cmd->device = this;

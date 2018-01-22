@@ -103,8 +103,8 @@ namespace rhi
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
 
         ptr<descriptor_pool> create_descriptor_pool() override { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
+        ptr<command_buffer> create_command_buffer() override { return new delete_when_unreferenced<emulated_command_buffer>(); }
 
-        ptr<command_buffer> start_command_buffer() override { return new delete_when_unreferenced<emulated_command_buffer>(); }
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
         void wait_until_complete(uint64_t submit_id) override;

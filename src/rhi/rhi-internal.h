@@ -13,6 +13,15 @@ namespace rhi
         using T::T;
     };
 
+    // Used for objects which are reference counted but whose lifetime is controlled by another object
+    template<class T> struct counted : T
+    {
+        std::atomic_uint32_t ref_count {0};
+        void add_ref() override { ++ref_count; }
+        void release() override { --ref_count; }
+        using T::T;
+    };
+
     std::vector<backend_info> & global_backend_list();
     template<class Device> void register_backend(const char * name) { global_backend_list().push_back({name, [](std::function<void(const char *)> debug_callback) { return ptr<device>(new delete_when_unreferenced<Device>{debug_callback}); }}); }
     template<class Device> struct autoregister_backend { autoregister_backend(const char * name) { register_backend<Device>(name); } };
@@ -23,8 +32,6 @@ namespace rhi
     /////////////////////////////////////////////////////////////////////////////////////////
     // Emulation layer for backends which do not have a native concept of a descriptor set //
     /////////////////////////////////////////////////////////////////////////////////////////
-
-    struct sampled_image { ptr<sampler> sampler; ptr<image> image; };
 
     struct emulated_descriptor_set_layout : descriptor_set_layout
     {
@@ -47,23 +54,33 @@ namespace rhi
         size_t get_flat_image_binding(int set, int binding) const;        
     };
 
+    struct sampled_image { ptr<sampler> sampler; ptr<image> image; };
+    struct emulated_descriptor_set : descriptor_set
+    {
+        ptr<emulated_descriptor_set_layout> layout;
+        buffer_range * buffer_bindings;
+        sampled_image * image_bindings;
+
+        void write(int binding, buffer_range range) override;
+        void write(int binding, sampler & sampler, image & image) override;
+    };
+
     struct emulated_descriptor_pool : descriptor_pool
     {
         std::vector<buffer_range> buffer_bindings;
         std::vector<sampled_image> image_bindings;
+        std::vector<counted<emulated_descriptor_set>> sets;
+        size_t used_buffer_bindings;
+        size_t used_image_bindings;
+        size_t used_sets;
+
+        emulated_descriptor_pool() : buffer_bindings{1024}, image_bindings{1024}, sets{1024}, used_buffer_bindings{0}, used_image_bindings{0}, used_sets{0}
+        {
+
+        }
 
         void reset() override;
         ptr<descriptor_set> alloc(descriptor_set_layout & layout) override;
-    };
-
-    struct emulated_descriptor_set : descriptor_set
-    {
-        ptr<emulated_descriptor_pool> pool;
-        ptr<emulated_descriptor_set_layout> layout;
-        size_t buffer_offset, image_offset;
-
-        void write(int binding, buffer_range range) override;
-        void write(int binding, sampler & sampler, image & image) override;
     };
 
     template<class BindBufferFunction, class BindImageFunction>
@@ -73,14 +90,8 @@ namespace rhi
         const auto & descriptor_set = static_cast<emulated_descriptor_set &>(set);
         if(descriptor_set.layout != pipeline_layout.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
 
-        const auto & descriptor_pool = *descriptor_set.pool;
-        const auto & descriptor_set_layout = *descriptor_set.layout;
-        for(size_t i=0; i<descriptor_set_layout.num_buffers; ++i) bind_buffer(pipeline_layout.sets[set_index].buffer_offset + i, descriptor_pool.buffer_bindings[descriptor_set.buffer_offset + i]);
-        for(size_t i=0; i<descriptor_set_layout.num_images; ++i) 
-        {
-            auto & binding = descriptor_pool.image_bindings[descriptor_set.image_offset + i];
-            bind_image(pipeline_layout.sets[set_index].image_offset + i, *binding.sampler, *binding.image);
-        }
+        for(size_t i=0; i<descriptor_set.layout->num_buffers; ++i) bind_buffer(pipeline_layout.sets[set_index].buffer_offset + i, descriptor_set.buffer_bindings[i]);
+        for(size_t i=0; i<descriptor_set.layout->num_images; ++i) bind_image(pipeline_layout.sets[set_index].image_offset + i, *descriptor_set.image_bindings[i].sampler, *descriptor_set.image_bindings[i].image);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////

@@ -206,15 +206,7 @@ namespace rhi
 
     struct device : object
     {
-        //////////
-        // info //
-        //////////
-
         virtual auto get_info() const -> device_info = 0;
-
-        ///////////////
-        // resources //
-        ///////////////
 
         virtual ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
         virtual ptr<sampler> create_sampler(const sampler_desc & desc) = 0;
@@ -228,12 +220,8 @@ namespace rhi
         virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
 
         virtual ptr<descriptor_pool> create_descriptor_pool() = 0;
+        virtual ptr<command_buffer> create_command_buffer() = 0;
 
-        ///////////////
-        // rendering //
-        ///////////////
-
-        virtual ptr<command_buffer> start_command_buffer() = 0;
         virtual uint64_t submit(command_buffer & cmd) = 0;
         virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) = 0; // Submit commands to execute when the next frame is available, followed by a present
         virtual void wait_until_complete(uint64_t submit_id) = 0;

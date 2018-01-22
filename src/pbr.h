@@ -77,7 +77,7 @@ struct standard_device_objects
     template<class F> void render_to_image(rhi::image & target_image, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
     {
         auto fb = dev->create_framebuffer({dimensions, {{&target_image,mip,0}}});
-        auto cmd = dev->start_command_buffer();
+        auto cmd = dev->create_command_buffer();
         rhi::render_pass_desc pass;
         pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::shader_read_only_optimal}}};
         cmd->begin_render_pass(pass, *fb);
@@ -102,7 +102,7 @@ struct standard_device_objects
     template<class F> void render_to_cubemap(rhi::image & target_cube_map, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
     {
         std::vector<rhi::ptr<rhi::framebuffer>> framebuffers;
-        auto cmd = dev->start_command_buffer();
+        auto cmd = dev->create_command_buffer();
         for(int i=0; i<6; ++i)
         {
             auto fb = dev->create_framebuffer({dimensions, {{&target_cube_map,mip,i}}});
