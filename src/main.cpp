@@ -120,7 +120,7 @@ struct common_assets
 
     common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
-        env_spheremap = load_image(loader, "monument-valley.hdr");
+        env_spheremap = loader.load_image("monument-valley.hdr");
 
         shader_compiler compiler{loader};
         standard = standard_shaders::compile(compiler);

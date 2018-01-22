@@ -63,10 +63,3 @@ template<class... T> std::string to_string(T && ... args)
 }
 
 template<class C, class T> intptr_t member_offset(T C::*member_pointer) { C object; return reinterpret_cast<char *>(&(object.*member_pointer)) - reinterpret_cast<char *>(&object); }
-
-// Helper for executing code when leaving a scope
-template<class F> struct final_act { F f; ~final_act() { f(); } };
-template<class F> final_act<F> make_final_act(F && f) { return {std::move(f)}; }
-#define FINAL_ACT_IDENTIFIER_2(LINE) final_act_##LINE
-#define FINAL_ACT_IDENTIFIER(LINE) FINAL_ACT_IDENTIFIER_2(LINE)
-#define FINALLY(...) auto FINAL_ACT_IDENTIFIER(__LINE__) = make_final_act([&]() { __VA_ARGS__ });

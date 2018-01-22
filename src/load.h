@@ -4,19 +4,38 @@
 #include <string_view>
 #include <optional>
 
-std::string get_program_binary_path();
+enum class file_mode { binary, text };
+class file
+{
+    std::string path;
+    FILE * f;
+    size_t length;
+public:
+    file(std::string_view path, file_mode mode);
+    file(file && r) : path(move(r.path)), f{r.f}, length{r.length} { r.f = nullptr; }
+    file(const file & r) = delete;
+    file & operator = (file && r) { std::swap(path, r.path); std::swap(f, r.f); std::swap(length, r.length); return *this; }
+    file & operator = (const file & r) = delete;
+    ~file();
 
+    explicit operator bool () const;
+    const std::string & get_path() const { return path; }
+    size_t get_length() const { return length; }
+    bool eof() const;
+    size_t read(char * buffer, size_t size);
+    void seek(int64_t offset);
+};
+
+struct image { int2 dimensions; rhi::image_format format; void * pixels; };
 class loader
 {
     std::vector<std::string> roots;
 public:
-    std::optional<std::string> find_filepath(std::string_view filename) const;
-    std::string find_filepath_or_throw(std::string_view filename) const;
-
     void register_root(std::string_view root) { roots.push_back(to_string(root, '/')); }
-    
+    file open_file(std::string_view filename, file_mode mode);
+
     std::vector<char> load_text_file(std::string_view filename);
+    image load_image(std::string_view filename);
 };
 
-struct image { int2 dimensions; rhi::image_format format; void * pixels; };
-image load_image(loader & loader, std::string_view filename);
+std::string get_program_binary_path();
