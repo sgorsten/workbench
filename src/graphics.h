@@ -89,4 +89,12 @@ namespace gfx
         std::function<void(int key, int scancode, int action, int mods)> on_key = ignore{};
         std::function<void(unsigned int codepoint, int mods)> on_char = ignore{};
     };
+
+    template<class T> struct vertex_binder : rhi::vertex_binding_desc
+    {
+        vertex_binder(int binding_index) { index = binding_index; stride = sizeof(T); }
+        vertex_binder attribute(int attribute_index, float2 T::*field) { attributes.push_back({attribute_index, rhi::attribute_format::float2, exactly(member_offset(field))}); return *this; }
+        vertex_binder attribute(int attribute_index, float3 T::*field) { attributes.push_back({attribute_index, rhi::attribute_format::float3, exactly(member_offset(field))}); return *this; }
+        vertex_binder attribute(int attribute_index, float4 T::*field) { attributes.push_back({attribute_index, rhi::attribute_format::float4, exactly(member_offset(field))}); return *this; }
+    };
 }

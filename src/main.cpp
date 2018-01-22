@@ -1,6 +1,7 @@
 #include "graphics.h"
 #include "io.h"
 #include "pbr.h"
+#include "load.h"
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest.h>
 #include <chrono>
@@ -29,12 +30,11 @@ struct mesh_vertex
     float2 texcoord;
     static rhi::vertex_binding_desc get_binding(int index)
     {
-        return {index, sizeof(mesh_vertex), {
-            {0, rhi::attribute_format::float3, offsetof(mesh_vertex, position)},
-            {1, rhi::attribute_format::float3, offsetof(mesh_vertex, color)},
-            {2, rhi::attribute_format::float3, offsetof(mesh_vertex, normal)},
-            {3, rhi::attribute_format::float2, offsetof(mesh_vertex, texcoord)},
-        }};
+        return gfx::vertex_binder<mesh_vertex>(index)
+            .attribute(0, &mesh_vertex::position)
+            .attribute(1, &mesh_vertex::color)
+            .attribute(2, &mesh_vertex::normal)
+            .attribute(3, &mesh_vertex::texcoord);
     }
 };
 
@@ -109,25 +109,6 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-struct image { int2 dimensions; rhi::image_format format; void * pixels; };
-image load_image(const std::string & filename)
-{
-    int width, height;
-    auto pixels = stbi_load(filename.c_str(), &width, &height, nullptr, 4);
-    if(!pixels) throw std::runtime_error("stbi_load(\""+filename+"\", ...) failed");
-    return {{width,height}, rhi::image_format::rgba_unorm8, pixels};
-}
-image load_image_hdr(const std::string & filename)
-{
-    int width, height;
-    auto pixels = stbi_loadf(filename.c_str(), &width, &height, nullptr, 4);
-    if(!pixels) throw std::runtime_error("stbi_loadf(\""+filename+"\", ...) failed");
-    return {{width,height}, rhi::image_format::rgba_float32, pixels};
-}
-
 struct common_assets
 {
     coord_system game_coords;
@@ -137,19 +118,19 @@ struct common_assets
     shader_module skybox_vs, skybox_fs_cubemap;
     image env_spheremap;
 
-    common_assets() : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
+    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
-        env_spheremap = load_image_hdr("../../assets/monument-valley.hdr");
+        env_spheremap = load_image(loader, "monument-valley.hdr");
 
-        shader_compiler compiler;
+        shader_compiler compiler{loader};
         standard = standard_shaders::compile(compiler);
 
-        vs = compiler.compile_file(shader_stage::vertex, "../../assets/static-mesh.vert");
-        fs = compiler.compile_file(shader_stage::fragment, "../../assets/textured-pbr.frag");
-        fs_unlit = compiler.compile_file(shader_stage::fragment, "../../assets/colored-unlit.frag");
+        vs = compiler.compile_file(shader_stage::vertex, "static-mesh.vert");
+        fs = compiler.compile_file(shader_stage::fragment, "textured-pbr.frag");
+        fs_unlit = compiler.compile_file(shader_stage::fragment, "colored-unlit.frag");
 
-        skybox_vs = compiler.compile_file(shader_stage::vertex, "../../assets/skybox.vert");
-        skybox_fs_cubemap = compiler.compile_file(shader_stage::fragment, "../../assets/skybox.frag");
+        skybox_vs = compiler.compile_file(shader_stage::vertex, "skybox.vert");
+        skybox_fs_cubemap = compiler.compile_file(shader_stage::fragment, "skybox.frag");
 
         //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
         //for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
@@ -360,8 +341,13 @@ int main(int argc, const char * argv[]) try
         if(dt_context.shouldExit()) return dt_return;
     }
 
+    std::cout << "Running from " << get_program_binary_path() << std::endl;
+
     // Launch the workbench
-    common_assets assets;
+    loader loader;
+    loader.register_root(get_program_binary_path() + "../../assets");
+
+    common_assets assets{loader};
     camera cam {assets.game_coords};
     cam.pitch += 0.8f;
     cam.move(coord_axis::back, 10.0f);

@@ -1,21 +1,10 @@
 #include "shader.h"
+#include "load.h"
 #include <map>
 #include "../dep/glslang/glslang/Public/ShaderLang.h"
 #include "../dep/glslang/SPIRV/GlslangToSpv.h"
 #include "../dep/glslang/StandAlone/ResourceLimits.h"
 #include "../dep/glslang/SPIRV/spirv.hpp"
-
-std::vector<char> load_text_file(const char * filename)
-{
-    FILE * f = fopen(filename, "r");
-    if(!f) throw std::runtime_error(std::string("failed to open ") + filename);
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    std::vector<char> buffer(len);
-    buffer.resize(fread(buffer.data(), 1, buffer.size(), f));
-    return buffer;
-}
 
 std::ostream & operator << (std::ostream & out, const shader_module::scalar_type & s)
 {
@@ -207,9 +196,12 @@ struct shader_compiler_impl : glslang::TShader::Includer
     {
         std::vector<char> text;
         IncludeResult result;
-        result_text(const std::string & header_name) : text{load_text_file(header_name.c_str())}, result{header_name, text.data(), text.size(), nullptr} {}
+        result_text(const char * header_name, std::vector<char> text_) : text{move(text_)}, result{header_name, text.data(), text.size(), nullptr} {}
     };
+    ::loader & loader;
     std::vector<std::unique_ptr<result_text>> results;
+
+    shader_compiler_impl(::loader & loader) : loader{loader} {}
 
     IncludeResult * get_header(const std::string & name)
     {
@@ -225,7 +217,8 @@ struct shader_compiler_impl : glslang::TShader::Includer
         // Otherwise attempt to load
         try
         {
-            results.push_back(std::make_unique<result_text>(name));
+            auto text = loader.load_text_file(name.c_str());
+            results.push_back({std::make_unique<result_text>(name.c_str(), move(text))});
             return &results.back()->result;
         }
         catch(const std::runtime_error &)
@@ -237,46 +230,20 @@ struct shader_compiler_impl : glslang::TShader::Includer
     // Implement glslang::TShader::Includer
     IncludeResult * includeSystem(const char * header_name, const char * includer_name, size_t inclusion_depth) override { return nullptr; }
     IncludeResult * includeLocal(const char * header_name, const char * includer_name, size_t inclusion_depth) override 
-    { 
+    {
         std::string path {includer_name};
         size_t off = path.rfind('/');
         if(off != std::string::npos) path.resize(off+1);
+        else path.clear();
         return get_header(path + header_name);
     }
     void releaseInclude(IncludeResult * result) override {}
 };
 
-/*std::vector<uint32_t> shader_compiler::compile_glsl(VkShaderStageFlagBits stage, const char * filename)
-{    
-    glslang::TShader shader([stage]()
-    {
-        switch(stage)
-        {
-        case VK_SHADER_STAGE_VERTEX_BIT: return EShLangVertex;
-        case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: return EShLangTessControl;
-        case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: return EShLangTessEvaluation;
-        case VK_SHADER_STAGE_GEOMETRY_BIT: return EShLangGeometry;
-        case VK_SHADER_STAGE_FRAGMENT_BIT: return EShLangFragment;
-        case VK_SHADER_STAGE_COMPUTE_BIT: return EShLangCompute;
-        default: throw std::logic_error("bad stage");
-        }
-    }());    
-
-    auto buffer = load_text_file(filename);
-    const char * s = buffer.data();
-    int l = static_cast<int>(buffer.size());
-    shader.setStringsWithLengthsAndNames(&s, &l, &filename, 1);
-
-    if(!shader.parse(&glslang::DefaultTBuiltInResource, 450, ENoProfile, false, false, static_cast<EShMessages>(EShMsgSpvRules|EShMsgVulkanRules), *impl))
-    {
-        throw std::runtime_error(std::string("GLSL compile failure: ") + shader.getInfoLog());
-    }
-*/
-
-shader_compiler::shader_compiler()
+shader_compiler::shader_compiler(loader & loader)
 {
     glslang::InitializeProcess();
-    impl = std::make_unique<shader_compiler_impl>();
+    impl = std::make_unique<shader_compiler_impl>(loader);
 }
 
 shader_compiler::~shader_compiler()
@@ -338,7 +305,7 @@ shader_module shader_compiler::compile_file(shader_stage stage, const std::strin
         }
     }());
 
-    const auto text = load_text_file(filename.c_str());
+    const auto text = impl->loader.load_text_file(filename);
     const auto string = text.data();
     const int length = exactly(text.size());
     const auto name = filename.c_str();

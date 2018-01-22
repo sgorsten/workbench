@@ -72,22 +72,22 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>bin\$(Configuration)-$(Platform)\</OutDir>
+    <OutDir>..\..\bin\$(Configuration)-$(Platform)\</OutDir>
     <IntDir>obj\$(Configuration)-$(Platform)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>bin\$(Configuration)-$(Platform)\</OutDir>
+    <OutDir>..\..\bin\$(Configuration)-$(Platform)\</OutDir>
     <IntDir>obj\$(Configuration)-$(Platform)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>bin\$(Configuration)-$(Platform)\</OutDir>
+    <OutDir>..\..\bin\$(Configuration)-$(Platform)\</OutDir>
     <IntDir>obj\$(Configuration)-$(Platform)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>bin\$(Configuration)-$(Platform)\</OutDir>
+    <OutDir>..\..\bin\$(Configuration)-$(Platform)\</OutDir>
     <IntDir>obj\$(Configuration)-$(Platform)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -167,6 +167,7 @@
     <ClCompile Include="..\..\src\core.cpp" />
     <ClCompile Include="..\..\src\geometry.cpp" />
     <ClCompile Include="..\..\src\graphics.cpp" />
+    <ClCompile Include="..\..\src\load.cpp" />
     <ClCompile Include="..\..\src\main.cpp" />
     <ClCompile Include="..\..\src\pbr.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-d3d11.cpp" />
@@ -179,6 +180,7 @@
     <ClInclude Include="..\..\src\core.h" />
     <ClInclude Include="..\..\src\geometry.h" />
     <ClInclude Include="..\..\src\graphics.h" />
+    <ClInclude Include="..\..\src\load.h" />
     <ClInclude Include="..\..\src\pbr.h" />
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\rhi\rhi-internal.h" />

@@ -49,12 +49,13 @@ struct shader_module
     std::vector<interface> inputs, outputs;
 };
 
+class loader;
 struct shader_compiler_impl;
 struct shader_compiler
 {
     std::unique_ptr<shader_compiler_impl> impl;
 
-    shader_compiler();
+    shader_compiler(loader & loader);
     ~shader_compiler();
 
     shader_module compile(shader_stage stage, const std::string & glsl);

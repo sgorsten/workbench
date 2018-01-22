@@ -34,6 +34,9 @@
     <ClCompile Include="..\..\src\shader.cpp">
       <Filter>src\gfx</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\load.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\rhi\rhi-internal.h">
@@ -57,6 +60,9 @@
     </ClInclude>
     <ClInclude Include="..\..\src\shader.h">
       <Filter>src\gfx</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\load.h">
+      <Filter>src</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -7,10 +7,9 @@ struct render_image_vertex
     float2 texcoord;
     static rhi::vertex_binding_desc get_binding(int index)
     {
-        return {index, sizeof(render_image_vertex), {
-            {0, rhi::attribute_format::float2, offsetof(render_image_vertex, position)},
-            {1, rhi::attribute_format::float2, offsetof(render_image_vertex, texcoord)}
-        }};
+        return gfx::vertex_binder<render_image_vertex>(0)
+            .attribute(0, &render_image_vertex::position)
+            .attribute(1, &render_image_vertex::texcoord);
     }
 };
 
@@ -20,10 +19,9 @@ struct render_cubemap_vertex
     float3 direction;
     static rhi::vertex_binding_desc get_binding(int index)
     {
-        return {index, sizeof(render_cubemap_vertex), {
-            {0, rhi::attribute_format::float2, offsetof(render_cubemap_vertex, position)},
-            {1, rhi::attribute_format::float3, offsetof(render_cubemap_vertex, direction)}
-        }};
+        return gfx::vertex_binder<render_cubemap_vertex>(0)
+            .attribute(0, &render_cubemap_vertex::position)
+            .attribute(1, &render_cubemap_vertex::direction);
     }
 };
 
