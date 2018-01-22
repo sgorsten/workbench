@@ -231,9 +231,8 @@ namespace rhi
 
     struct vk_descriptor_set : descriptor_set 
     {
-        ptr<vk_device> device;
+        VkDevice device;
         VkDescriptorSet set;
-        vk_descriptor_set(vk_device * device, VkDescriptorSet set) : device{device}, set{set} {}
 
         void write(int binding, buffer_range range) override;
         void write(int binding, sampler & sampler, image & image) override;
@@ -242,7 +241,8 @@ namespace rhi
     {
         ptr<vk_device> device;
         VkDescriptorPool pool;
-        std::vector<VkDescriptorSet> sets;
+        std::vector<counted<vk_descriptor_set>> sets;
+        size_t used_sets;
 
         vk_descriptor_pool(vk_device * device);
         ~vk_descriptor_pool();
@@ -1099,16 +1099,16 @@ void vk_descriptor_set::write(int binding, buffer_range range)
 {
     VkDescriptorBufferInfo buffer_info { static_cast<vk_buffer *>(range.buffer)->buffer_object, range.offset, range.size };
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &buffer_info, nullptr};
-    vkUpdateDescriptorSets(device->dev, 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }
 void vk_descriptor_set::write(int binding, sampler & sampler, image & image) 
 {
     VkDescriptorImageInfo image_info {static_cast<vk_sampler &>(sampler).sampler, static_cast<vk_image &>(image).image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set, exactly(binding), 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &image_info, nullptr, nullptr};
-    vkUpdateDescriptorSets(device->dev, 1, &write, 0, nullptr);
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }
 
-vk_descriptor_pool::vk_descriptor_pool(vk_device * device) : device{device}
+vk_descriptor_pool::vk_descriptor_pool(vk_device * device) : device{device}, sets{1024}, used_sets{0}
 { 
     const VkDescriptorPoolSize pool_sizes[] {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1024}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1024}};
     VkDescriptorPoolCreateInfo descriptor_pool_info {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -1117,6 +1117,7 @@ vk_descriptor_pool::vk_descriptor_pool(vk_device * device) : device{device}
     descriptor_pool_info.maxSets = 1024;
     descriptor_pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     check("vkCreateDescriptorPool", vkCreateDescriptorPool(device->dev, &descriptor_pool_info, nullptr, &pool));
+    for(auto & set : sets) set.device = device->dev;
 }
 vk_descriptor_pool::~vk_descriptor_pool()
 {
@@ -1125,20 +1126,23 @@ vk_descriptor_pool::~vk_descriptor_pool()
 
 void vk_descriptor_pool::reset()
 {
-    vkFreeDescriptorSets(device->dev, pool, exactly(sets.size()), sets.data());
+    for(size_t i=0; i<used_sets; ++i)
+    {
+        if(sets[i].ref_count != 0) throw std::logic_error("rhi::descriptor_pool::reset called with descriptor sets outstanding");
+        vkFreeDescriptorSets(device->dev, pool, 1, &sets[i].set);
+    }
     vkResetDescriptorPool(device->dev, pool, 0);
-    sets.clear();
+    used_sets = 0;
 }
 ptr<descriptor_set> vk_descriptor_pool::alloc(descriptor_set_layout & layout) 
 { 
+    if(used_sets == sets.size()) throw std::logic_error("out of descriptor sets");
     VkDescriptorSetAllocateInfo alloc_info {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     alloc_info.descriptorPool = pool;
     alloc_info.descriptorSetCount = 1;
     alloc_info.pSetLayouts = &static_cast<vk_descriptor_set_layout &>(layout).layout;
-    VkDescriptorSet set;
-    check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(device->dev, &alloc_info, &set));
-    sets.push_back(set);
-    return new delete_when_unreferenced<vk_descriptor_set>{device, set};
+    check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(device->dev, &alloc_info, &sets[used_sets].set));
+    return &sets[used_sets++];
 }
 
 //////////////////////////
