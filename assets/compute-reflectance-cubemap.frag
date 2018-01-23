@@ -2,8 +2,8 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
 #include "preamble.glsl"
-layout(set=0,binding=0) uniform PerOp { float u_roughness; } per_op;
-layout(set=0,binding=1) uniform samplerCube u_texture;
+layout(set=0,binding=0) uniform samplerCube u_texture;
+layout(set=0,binding=1) uniform PerOp { float u_roughness; };
 layout(location=0) in vec3 direction;
 layout(location=0) out vec4 f_color;
 
@@ -15,7 +15,7 @@ void main()
 	const vec3 basis_z = normalize(direction);    
 	const vec3 basis_x = normalize(cross(dFdx(basis_z), basis_z));
 	const vec3 basis_y = normalize(cross(basis_z, basis_x));
-	const float alpha = roughness_to_alpha(per_op.u_roughness);
+	const float alpha = roughness_to_alpha(u_roughness);
 
 	// Precompute the average solid angle of a cube map texel
 	const int cube_width = textureSize(u_texture, 0).x;

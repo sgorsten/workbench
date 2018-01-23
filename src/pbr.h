@@ -2,30 +2,6 @@
 #include "graphics.h"
 #include "shader.h"
 
-struct render_image_vertex
-{
-    float2 position;
-    float2 texcoord;
-    static rhi::vertex_binding_desc get_binding(int index)
-    {
-        return gfx::vertex_binder<render_image_vertex>(0)
-            .attribute(0, &render_image_vertex::position)
-            .attribute(1, &render_image_vertex::texcoord);
-    }
-};
-
-struct render_cubemap_vertex 
-{ 
-    float2 position; 
-    float3 direction;
-    static rhi::vertex_binding_desc get_binding(int index)
-    {
-        return gfx::vertex_binder<render_cubemap_vertex>(0)
-            .attribute(0, &render_cubemap_vertex::position)
-            .attribute(1, &render_cubemap_vertex::direction);
-    }
-};
-
 struct standard_shaders
 {
     // Standard image operations

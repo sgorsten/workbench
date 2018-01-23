@@ -26,8 +26,7 @@ struct camera
 
 struct mesh_vertex
 {
-    float3 position, color, normal;
-    float2 texcoord;
+    float3 position, color, normal; float2 texcoord;
     static rhi::vertex_binding_desc get_binding(int index)
     {
         return gfx::vertex_binder<mesh_vertex>(index)
@@ -35,6 +34,18 @@ struct mesh_vertex
             .attribute(1, &mesh_vertex::color)
             .attribute(2, &mesh_vertex::normal)
             .attribute(3, &mesh_vertex::texcoord);
+    }
+};
+
+struct ui_vertex
+{
+    float2 position, texcoord; float4 color;
+    static rhi::vertex_binding_desc get_binding(int index)
+    {
+        return gfx::vertex_binder<ui_vertex>(index)
+            .attribute(0, &ui_vertex::position)
+            .attribute(1, &ui_vertex::texcoord)
+            .attribute(2, &ui_vertex::color);
     }
 };
 
@@ -222,7 +233,7 @@ public:
         wire_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
         solid_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
         skybox_pipe_cubemap = dev->create_pipeline({skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-        ui_pipe = dev->create_pipeline({pipe_layout, {render_image_vertex::get_binding(0)}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
+        ui_pipe = dev->create_pipeline({pipe_layout, {ui_vertex::get_binding(0)}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
 
@@ -235,14 +246,14 @@ public:
             auto bitmap = stbtt_GetCodepointBitmap(&font, 0, stbtt_ScaleForPixelHeight(&font, 64), 'A', &width, &height, 0,0);
             font_image = dev->create_image({rhi::image_shape::_2d, {width,height,1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {bitmap});
 
-            render_image_vertex verts[]
+            ui_vertex verts[]
             {
-                {{-0.5f,-0.5f}, {0,0}},
-                {{+0.5f,-0.5f}, {1,0}},
-                {{+0.5f,+0.5f}, {1,1}},
-                {{-0.5f,-0.5f}, {0,0}},
-                {{+0.5f,+0.5f}, {1,1}},
-                {{-0.5f,+0.5f}, {0,1}}
+                {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
+                {{+0.5f,-0.5f}, {1,0}, {1,0,0,1}},
+                {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
+                {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
+                {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
+                {{-0.5f,+0.5f}, {0,1}, {1,0,0,1}}
             };
             font_buffer = gfx::static_buffer{*dev, rhi::buffer_usage::vertex, verts};
         }
@@ -250,7 +261,7 @@ public:
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
 
-        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
+        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels.get()});
         env = standard.create_environment_map_from_spheremap(*desc_pool, uniform_buffer, *env_spheremap, 512, assets.game_coords);
 
         gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));

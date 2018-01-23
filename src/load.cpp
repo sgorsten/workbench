@@ -47,7 +47,7 @@ std::vector<char> loader::load_text_file(std::string_view filename) const
 image loader::load_image(std::string_view filename)
 {
     auto f = open_file(filename, file_mode::binary);
-
+    
     stbi__context context;
     stbi_io_callbacks callbacks =
     {
@@ -60,14 +60,14 @@ image loader::load_image(std::string_view filename)
     if(stbi__hdr_test(&context))
     {
         auto pixelsf = stbi__loadf_main(&context, &width, &height, nullptr, 4);
-        if(pixelsf) return {{width,height}, rhi::image_format::rgba_float32, pixelsf};
+        if(pixelsf) return {{width,height}, rhi::image_format::rgba_float32, std::shared_ptr<void>(pixelsf,stbi_image_free)};
     }
     else
     {   
         stbi__result_info ri;
         auto pixels = stbi__load_main(&context, &width, &height, nullptr, 4, &ri, 0);
-        if(pixels && ri.bits_per_channel==8) return {{width,height}, rhi::image_format::rgba_unorm8, pixels};
-        if(pixels && ri.bits_per_channel==16) return {{width,height}, rhi::image_format::rgba_unorm16, pixels};
+        if(pixels && ri.bits_per_channel==8) return {{width,height}, rhi::image_format::rgba_unorm8, std::shared_ptr<void>(pixels,stbi_image_free)};
+        if(pixels && ri.bits_per_channel==16) return {{width,height}, rhi::image_format::rgba_unorm16, std::shared_ptr<void>(pixels,stbi_image_free)};
     }
     throw std::runtime_error(to_string("unknown image format for \"", f.get_path(), '"'));
 }

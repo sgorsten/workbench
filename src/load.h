@@ -23,7 +23,7 @@ public:
     void seek(int64_t offset);
 };
 
-struct image { int2 dimensions; rhi::image_format format; void * pixels; };
+struct image { int2 dimensions; rhi::image_format format; std::shared_ptr<void> pixels; };
 class loader
 {
     std::vector<std::string> roots;
