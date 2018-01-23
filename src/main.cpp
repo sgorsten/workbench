@@ -114,7 +114,7 @@ struct common_assets
     coord_system game_coords;
     standard_shaders standard;
     mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
-    shader_module vs, fs, fs_unlit;
+    shader_module vs, fs, fs_unlit, ui_vs, ui_fs;
     shader_module skybox_vs, skybox_fs_cubemap;
     image env_spheremap;
 
@@ -132,6 +132,9 @@ struct common_assets
         skybox_vs = compiler.compile_file(shader_stage::vertex, "skybox.vert");
         skybox_fs_cubemap = compiler.compile_file(shader_stage::fragment, "skybox.frag");
 
+        ui_vs = compiler.compile_file(shader_stage::vertex, "ui.vert");
+        ui_fs = compiler.compile_file(shader_stage::fragment, "ui.frag");
+
         //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
         //for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
         //for(auto & v : vs.outputs) { std::cout << "layout(location=" << v.location << ") out " << v.name << " : " << v.type << std::endl; }
@@ -143,6 +146,10 @@ struct common_assets
     }
 };
 
+#define STB_TRUETYPE_IMPLEMENTATION  // force following include to generate implementation
+#include "stb_truetype.h"
+unsigned char ttf_buffer[1<<25];
+
 class device_session
 {
     rhi::ptr<rhi::device> dev;
@@ -153,12 +160,16 @@ class device_session
     uint64_t transient_resource_fence=0;
 
     gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer, sphere_vertex_buffer, sphere_index_buffer;
+    gfx::static_buffer font_buffer;
 
     rhi::ptr<rhi::descriptor_set_layout> per_scene_view_layout, per_object_layout, skybox_per_object_layout;
     rhi::ptr<rhi::pipeline_layout> pipe_layout, skybox_pipe_layout;
-    rhi::ptr<rhi::pipeline> wire_pipe, solid_pipe, skybox_pipe_cubemap;
+    rhi::ptr<rhi::pipeline> wire_pipe, solid_pipe, skybox_pipe_cubemap, ui_pipe;
 
     rhi::ptr<rhi::sampler> nearest;
+
+    rhi::ptr<rhi::image> font_image;
+
     rhi::ptr<rhi::image> checkerboard;
     rhi::ptr<rhi::image> env_cubemap;
     rhi::ptr<rhi::image> env_cubemap2;
@@ -203,14 +214,38 @@ public:
         auto skybox_vs = dev->create_shader(assets.skybox_vs);
         auto skybox_fs_cubemap = dev->create_shader(assets.skybox_fs_cubemap);
 
+        auto ui_vs = dev->create_shader(assets.ui_vs);
+        auto ui_fs = dev->create_shader(assets.ui_fs);
+
         wire_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
         solid_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true});
         skybox_pipe_cubemap = dev->create_pipeline({skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
+        ui_pipe = dev->create_pipeline({pipe_layout, {render_image_vertex::get_binding(0)}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false});
 
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
 
+        {
+            int w, h, s=64;
+            stbtt_fontinfo font;
+            stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer,0));
+            auto bitmap = stbtt_GetCodepointBitmap(&font, 0,stbtt_ScaleForPixelHeight(&font, s), 'A', &w, &h, 0,0);
+            font_image = dev->create_image({rhi::image_shape::_2d, {w,h,1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {bitmap});
+
+            render_image_vertex verts[]
+            {
+                {{-0.5f,-0.5f}, {0,0}},
+                {{+0.5f,-0.5f}, {1,0}},
+                {{+0.5f,+0.5f}, {1,1}},
+                {{-0.5f,-0.5f}, {0,0}},
+                {{+0.5f,+0.5f}, {1,1}},
+                {{-0.5f,+0.5f}, {0,1}}
+            };
+            font_buffer = gfx::static_buffer{*dev, rhi::buffer_usage::vertex, verts};
+        }
+
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
+
         auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
         env_cubemap = standard.create_cubemap_from_spheremap(512, *desc_pool, uniform_buffer, *env_spheremap, assets.game_coords);
         env_cubemap2 = standard.create_irradiance_cubemap(32, *desc_pool, uniform_buffer, *env_cubemap);
@@ -325,6 +360,17 @@ public:
                 cmd->draw_indexed(0, 32*32*6);
             }
         }
+
+        // Draw the UI
+        const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
+        auto ui_set = desc_pool->alloc(*per_object_layout);
+        ui_set->write(0, uniform_buffer.write(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
+        ui_set->write(1, *nearest, *font_image);
+        cmd->bind_pipeline(*ui_pipe);
+        cmd->bind_descriptor_set(*pipe_layout, 1, *ui_set);
+        cmd->bind_vertex_buffer(0, font_buffer);
+        cmd->draw(0, 6);
+
         cmd->end_render_pass();
         transient_resource_fence = dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
     }
@@ -342,6 +388,8 @@ int main(int argc, const char * argv[]) try
     }
 
     std::cout << "Running from " << get_program_binary_path() << std::endl;
+
+    fread(ttf_buffer, 1, 1<<25, fopen("c:/windows/fonts/arialbd.ttf", "rb"));
 
     // Launch the workbench
     loader loader;

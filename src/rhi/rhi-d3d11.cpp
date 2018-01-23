@@ -13,16 +13,31 @@
 
 namespace rhi
 {
-    DXGI_FORMAT get_dx_format(image_format format)
-    {
-        switch(format)
-        {
-        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return DX;
-        #include "rhi-format.inl"
-        #undef X
-        default: fail_fast();
-        }
-    }
+    // Initialize tables
+    auto convert_dx(address_mode mode) { switch(mode) { default: fail_fast();
+        #define RHI_ADDRESS_MODE(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_dx(primitive_topology topology) { switch(topology) { default: fail_fast();
+        #define RHI_PRIMITIVE_TOPOLOGY(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_dx(compare_op op) { switch(op) { default: fail_fast();
+        #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_dx(blend_op op) { switch(op) { default: fail_fast();
+        #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_dx(blend_factor factor) { switch(factor) { default: fail_fast();
+        #define RHI_BLEND_FACTOR(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_dx(image_format format) { switch(format) { default: fail_fast();
+        #define RHI_IMAGE_FORMAT(CASE, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
 
     struct d3d_error : public std::error_category
     {
@@ -332,11 +347,8 @@ d3d_sampler::d3d_sampler(ID3D11Device & device, const sampler_desc & desc)
     {
         switch(mode)
         {
-        case rhi::address_mode::repeat: return D3D11_TEXTURE_ADDRESS_WRAP;
-        case rhi::address_mode::mirrored_repeat: return D3D11_TEXTURE_ADDRESS_MIRROR;
-        case rhi::address_mode::clamp_to_edge: return D3D11_TEXTURE_ADDRESS_CLAMP;
-        case rhi::address_mode::mirror_clamp_to_edge: return D3D11_TEXTURE_ADDRESS_MIRROR_ONCE;
-        case rhi::address_mode::clamp_to_border: return D3D11_TEXTURE_ADDRESS_BORDER;
+        #define RHI_ADDRESS_MODE(MODE, VK, DX, GL) case MODE: return DX;
+        #include "rhi-tables.inl"
         default: fail_fast();
         }
     };
@@ -376,21 +388,21 @@ d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector
 
     if(desc.shape == rhi::image_shape::_1d)
     {
-        const D3D11_TEXTURE1D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
+        const D3D11_TEXTURE1D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.mip_levels), array_size, convert_dx(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
         com_ptr<ID3D11Texture1D> tex;
         check("ID3D11Device::CreateTexture1D", device.CreateTexture1D(&tex_desc, data.empty() ? nullptr : data.data(), tex.init()));
         resource = tex;
     }
     else if(desc.shape == rhi::image_shape::_3d)
     {
-        const D3D11_TEXTURE3D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.dimensions.z), exactly(desc.mip_levels), get_dx_format(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
+        const D3D11_TEXTURE3D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.dimensions.z), exactly(desc.mip_levels), convert_dx(desc.format), D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
         com_ptr<ID3D11Texture3D> tex;
         check("ID3D11Device::CreateTexture2D", device.CreateTexture3D(&tex_desc, data.empty() ? nullptr : data.data(), tex.init()));
         resource = tex;
     }
     else // 2D or cube textures
     {
-        const D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), array_size, get_dx_format(desc.format), {1,0}, D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
+        const D3D11_TEXTURE2D_DESC tex_desc {exactly(desc.dimensions.x), exactly(desc.dimensions.y), exactly(desc.mip_levels), array_size, convert_dx(desc.format), {1,0}, D3D11_USAGE_DEFAULT, bind_flags, 0, misc_flags};
         com_ptr<ID3D11Texture2D> tex;
         check("ID3D11Device::CreateTexture2D", device.CreateTexture2D(&tex_desc, data.empty() ? nullptr : data.data(), tex.init()));
         resource = tex;
@@ -400,7 +412,7 @@ d3d_image::d3d_image(ID3D11Device & device, const image_desc & desc, std::vector
 
 com_ptr<ID3D11RenderTargetView> create_render_target_view(ID3D11Device & device, ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
 {
-    D3D11_RENDER_TARGET_VIEW_DESC view_desc {get_dx_format(format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
+    D3D11_RENDER_TARGET_VIEW_DESC view_desc {convert_dx(format), D3D11_RTV_DIMENSION_TEXTURE2DARRAY};
     view_desc.Texture2DArray.MipSlice = exactly(mip);
     view_desc.Texture2DArray.FirstArraySlice = exactly(layer);
     view_desc.Texture2DArray.ArraySize = 1;
@@ -411,7 +423,7 @@ com_ptr<ID3D11RenderTargetView> create_render_target_view(ID3D11Device & device,
 
 com_ptr<ID3D11DepthStencilView> create_depth_stencil_view(ID3D11Device & device, ID3D11Resource * resource, rhi::image_format format, int mip, int layer)
 {
-    D3D11_DEPTH_STENCIL_VIEW_DESC view_desc {get_dx_format(format), D3D11_DSV_DIMENSION_TEXTURE2DARRAY};
+    D3D11_DEPTH_STENCIL_VIEW_DESC view_desc {convert_dx(format), D3D11_DSV_DIMENSION_TEXTURE2DARRAY};
     view_desc.Texture2DArray.MipSlice = exactly(mip);
     view_desc.Texture2DArray.FirstArraySlice = exactly(layer);
     view_desc.Texture2DArray.ArraySize = 1;
@@ -438,7 +450,7 @@ d3d_window::d3d_window(d3d_device & device, const int2 & dimensions, std::string
     // Create swapchain and render target view for this window
     DXGI_SWAP_CHAIN_DESC scd {};
     scd.BufferCount = 3;
-    scd.BufferDesc.Format = get_dx_format(image_format::rgba_srgb8);
+    scd.BufferDesc.Format = convert_dx(image_format::rgba_srgb8);
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scd.OutputWindow = glfwGetWin32Window(w);
     scd.SampleDesc.Count = 1;

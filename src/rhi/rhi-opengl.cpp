@@ -8,6 +8,33 @@
 
 namespace rhi
 {
+    // Initialize tables
+    struct gl_format { GLenum internal_format, format, type; };
+    auto convert_gl(address_mode mode) { switch(mode) { default: fail_fast();
+        #define RHI_ADDRESS_MODE(CASE, VK, DX, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_gl(primitive_topology topology) { switch(topology) { default: fail_fast();
+        #define RHI_PRIMITIVE_TOPOLOGY(CASE, VK, DX, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_gl(compare_op op) { switch(op) { default: fail_fast();
+        #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_gl(blend_op op) { switch(op) { default: fail_fast();
+        #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_gl(blend_factor factor) { switch(factor) { default: fail_fast();
+        #define RHI_BLEND_FACTOR(CASE, VK, DX, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_gl(image_format format) { switch(format) { default: fail_fast();
+        #define RHI_IMAGE_FORMAT(CASE, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case CASE: return gl_format{GLI, GLF, GLT};
+        #include "rhi-tables.inl"
+    }}
+
     struct gl_pipeline;
     struct gl_device : device
     {
@@ -197,10 +224,12 @@ void gl_device::bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline)
                 glVertexArrayAttribBinding(vertex_array, attrib.index, buf.index);
                 switch(attrib.type)
                 {
-                case attribute_format::float1: glVertexArrayAttribFormat(vertex_array, attrib.index, 1, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                case attribute_format::float2: glVertexArrayAttribFormat(vertex_array, attrib.index, 2, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                case attribute_format::float3: glVertexArrayAttribFormat(vertex_array, attrib.index, 3, GL_FLOAT, GL_FALSE, attrib.offset); break;
-                case attribute_format::float4: glVertexArrayAttribFormat(vertex_array, attrib.index, 4, GL_FLOAT, GL_FALSE, attrib.offset); break;
+                #define RHI_ATTRIBUTE_FORMAT(CASE, VK, DX, GL_SIZE, GL_TYPE, GL_NORMALIZED) case CASE: \
+                    if(GL_TYPE != GL_FLOAT && !GL_NORMALIZED) glVertexArrayAttribIFormat(vertex_array, attrib.index, GL_SIZE, GL_TYPE, attrib.offset); \
+                    else glVertexArrayAttribFormat(vertex_array, attrib.index, GL_SIZE, GL_TYPE, GL_NORMALIZED, attrib.offset); \
+                    break;
+                #include "rhi-tables.inl"
+                default: fail_fast();
                 }                
             }
         }
@@ -249,6 +278,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
             {
                 if(auto op = std::get_if<clear_depth>(&c.pass.depth_attachment->load_op))
                 {
+                    glDepthMask(GL_TRUE);
                     glClearDepthf(op->depth);
                     glClearStencil(op->stencil);
                     glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -337,18 +367,6 @@ gl_buffer::~gl_buffer()
 
 gl_sampler::gl_sampler(gl_device * device, const sampler_desc & desc) : device{device}
 { 
-    auto convert_mode = [](rhi::address_mode mode)
-    {
-        switch(mode)
-        {
-        case rhi::address_mode::repeat: return GL_REPEAT;
-        case rhi::address_mode::mirrored_repeat: return GL_MIRRORED_REPEAT;
-        case rhi::address_mode::clamp_to_edge: return GL_CLAMP_TO_EDGE;
-        case rhi::address_mode::mirror_clamp_to_edge: return GL_MIRROR_CLAMP_TO_EDGE;
-        case rhi::address_mode::clamp_to_border: return GL_CLAMP_TO_BORDER;
-        default: fail_fast();
-        }
-    };
     auto convert_filter = [](rhi::filter filter)
     {
         switch(filter)
@@ -360,9 +378,9 @@ gl_sampler::gl_sampler(gl_device * device, const sampler_desc & desc) : device{d
     };
 
     glCreateSamplers(1, &sampler_object);
-    glSamplerParameteri(sampler_object, GL_TEXTURE_WRAP_S, convert_mode(desc.wrap_s));
-    glSamplerParameteri(sampler_object, GL_TEXTURE_WRAP_T, convert_mode(desc.wrap_t));
-    glSamplerParameteri(sampler_object, GL_TEXTURE_WRAP_R, convert_mode(desc.wrap_r));
+    glSamplerParameteri(sampler_object, GL_TEXTURE_WRAP_S, convert_gl(desc.wrap_s));
+    glSamplerParameteri(sampler_object, GL_TEXTURE_WRAP_T, convert_gl(desc.wrap_t));
+    glSamplerParameteri(sampler_object, GL_TEXTURE_WRAP_R, convert_gl(desc.wrap_r));
     glSamplerParameteri(sampler_object, GL_TEXTURE_MAG_FILTER, convert_filter(desc.mag_filter));
     if(desc.mip_filter)
     {
@@ -378,21 +396,10 @@ gl_sampler::~gl_sampler()
     glDeleteSamplers(1, &sampler_object);
 }
 
-struct gl_format { GLenum internal_format, format, type; };
-static gl_format get_gl_format(image_format format)
-{
-    switch(format)
-    {
-    #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return {GLI, GLF, GLT};
-    #include "rhi-format.inl"
-    #undef X
-    default: fail_fast();
-    }
-}
-
 gl_image::gl_image(gl_device * device, const image_desc & desc, std::vector<const void *> initial_data) : device{device}, is_layered{desc.shape == rhi::image_shape::cube}
 {
-    auto glf = get_gl_format(desc.format);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    auto glf = convert_gl(desc.format);
     switch(desc.shape)
     {
     case rhi::image_shape::_1d:
@@ -547,9 +554,8 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
     // Rasterizer state
     switch(desc.topology)
     {
-    case primitive_topology::points: primitive_mode = GL_POINTS; break;
-    case primitive_topology::lines: primitive_mode = GL_LINES; break;
-    case primitive_topology::triangles: primitive_mode = GL_TRIANGLES; break;
+    #define RHI_PRIMITIVE_TOPOLOGY(TOPOLOGY, VK, DX, GL) case TOPOLOGY: primitive_mode = GL; break;
+    #include "rhi-tables.inl"
     default: fail_fast();
     }
     switch(desc.front_face)

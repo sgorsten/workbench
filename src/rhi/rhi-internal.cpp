@@ -11,9 +11,8 @@ attachment_type rhi::get_attachment_type(image_format format)
 {
     switch(format)
     {
-    #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return TYPE;
-    #include "rhi-format.inl"
-    #undef X
+    #define RHI_IMAGE_FORMAT(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return TYPE;
+    #include "rhi-tables.inl"
     default: fail_fast();
     }
 }
@@ -22,9 +21,8 @@ size_t rhi::get_pixel_size(image_format format)
 {
     switch(format)
     {
-    #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return SIZE;
-    #include "rhi-format.inl"
-    #undef X
+    #define RHI_IMAGE_FORMAT(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return SIZE;
+    #include "rhi-tables.inl"
     default: fail_fast();
     }
 }

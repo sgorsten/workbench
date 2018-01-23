@@ -28,6 +28,7 @@ namespace gfx
         rhi::ptr<rhi::buffer> buffer;
         size_t size;
     public:
+        static_buffer() : size{0} {}
         static_buffer(rhi::device & dev, rhi::buffer_usage usage, binary_view contents) : buffer{dev.create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
 
         operator rhi::buffer_range() const { return {*buffer, 0, size}; }

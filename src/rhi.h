@@ -7,6 +7,46 @@ struct GLFWwindow;
 
 namespace rhi
 {
+    ///////////////////////////////////////
+    // Forward declarations of API types //
+    ///////////////////////////////////////
+
+    struct object;
+    struct device;
+    struct buffer;
+    struct sampler;
+    struct image;
+    struct framebuffer;
+    struct window;
+    struct descriptor_set_layout;
+    struct pipeline_layout;
+    struct shader;
+    struct pipeline;
+    struct descriptor_pool;
+    struct descriptor_set;
+    struct command_buffer;
+
+    using image_flags = int;
+
+    enum class layout : int;
+    enum class buffer_usage : int;
+    enum class image_format : int;
+    enum class image_shape : int;
+    enum class filter : int;
+    enum class address_mode : int;
+    enum class descriptor_type : int;
+    enum class attribute_format : int;
+    enum class primitive_topology : int;
+    enum class compare_op : int;
+    enum class front_face : int;
+    enum class cull_mode : int;
+    enum class blend_op : int;
+    enum class blend_factor : int;
+
+    /////////////////////////////////////////////////////
+    // Reference counted smart pointer for API objects //
+    /////////////////////////////////////////////////////
+
     template<class T> class ptr
     {
         T * p {nullptr};
@@ -27,10 +67,107 @@ namespace rhi
         T * operator -> () const { return p; }
     };
 
+    /////////////////////////
+    // Description structs //
+    /////////////////////////
+    
+    struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
+
+    struct image_desc
+    {
+        image_shape shape;
+        int3 dimensions;
+        int mip_levels;
+        image_format format;
+        image_flags flags;
+        // Not yet supported: multisampling, arrays
+    };
+
+    struct sampler_desc
+    {
+        filter mag_filter, min_filter;
+        std::optional<filter> mip_filter;
+        address_mode wrap_s, wrap_t, wrap_r;
+    };
+
+    struct framebuffer_attachment_desc { ptr<image> image; int mip, layer; };
+    struct framebuffer_desc
+    {
+        int2 dimensions;
+        std::vector<framebuffer_attachment_desc> color_attachments;
+        std::optional<framebuffer_attachment_desc> depth_attachment;
+    };
+
+    struct descriptor_binding { int index; descriptor_type type; int count; };
+
+    struct vertex_attribute_desc { int index; attribute_format type; int offset; };
+    struct vertex_binding_desc { int index, stride; std::vector<vertex_attribute_desc> attributes; }; // TODO: per_vertex/per_instance
+    struct blend_equation { blend_factor source_factor; blend_op op; blend_factor dest_factor; };
+    struct blend_state { bool enable; blend_equation color, alpha; };
+    struct pipeline_desc
+    {
+        ptr<pipeline_layout> layout;            // descriptors
+        std::vector<vertex_binding_desc> input; // input state
+        std::vector<ptr<shader>> stages;        // programmable stages
+        primitive_topology topology;            // rasterizer state
+        front_face front_face;       
+        cull_mode cull_mode;
+        std::optional<compare_op> depth_test;   // depth state
+        bool depth_write;
+        std::vector<blend_state> blend;         // blending state
+    };
+   
+    struct dont_care {};
+    struct clear_color { float r,g,b,a; };
+    struct clear_depth { float depth; uint8_t stencil; };
+    struct load { layout initial_layout; };
+    struct store { layout final_layout; };
+    struct color_attachment_desc { std::variant<dont_care, clear_color, load> load_op; std::variant<dont_care, store> store_op; };
+    struct depth_attachment_desc { std::variant<dont_care, clear_depth, load> load_op; std::variant<dont_care, store> store_op; };
+    struct render_pass_desc 
+    {
+        std::vector<color_attachment_desc> color_attachments;
+        std::optional<depth_attachment_desc> depth_attachment;
+    };
+    
+    struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
+    struct backend_info
+    {
+        std::string name;
+        std::function<rhi::ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
+    };
+
+    ////////////////
+    // Device API //
+    ////////////////
+
     struct object
     {
         virtual void add_ref() = 0;
         virtual void release() = 0;
+    };
+
+    struct device : object
+    {
+        virtual auto get_info() const -> device_info = 0;
+
+        virtual ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
+        virtual ptr<sampler> create_sampler(const sampler_desc & desc) = 0;
+        virtual ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0; // one ptr for non-cube, six ptrs in +x,-x,+y,-y,+z,-z order for cube
+        virtual ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) = 0;
+        virtual ptr<window> create_window(const int2 & dimensions, std::string_view title) = 0;
+
+        virtual ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
+        virtual ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) = 0;
+        virtual ptr<shader> create_shader(const shader_module & module) = 0;
+        virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
+
+        virtual ptr<descriptor_pool> create_descriptor_pool() = 0;
+        virtual ptr<command_buffer> create_command_buffer() = 0;
+
+        virtual uint64_t submit(command_buffer & cmd) = 0;
+        virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) = 0; // Submit commands to execute when the next frame is available, followed by a present
+        virtual void wait_until_complete(uint64_t submit_id) = 0;
     };
 
     struct buffer : object { virtual char * get_mapped_memory() = 0; };
@@ -58,22 +195,8 @@ namespace rhi
     {
         virtual void reset() = 0;
         virtual ptr<descriptor_set> alloc(descriptor_set_layout & layout) = 0;
-    };
+    };    
 
-    // Render pass creation info
-    enum class layout { attachment_optimal, shader_read_only_optimal, present_source };
-    struct dont_care {};
-    struct clear_color { float r,g,b,a; };
-    struct clear_depth { float depth; uint8_t stencil; };
-    struct load { layout initial_layout; };
-    struct store { layout final_layout; };
-    struct color_attachment_desc { std::variant<dont_care, clear_color, load> load_op; std::variant<dont_care, store> store_op; };
-    struct depth_attachment_desc { std::variant<dont_care, clear_depth, load> load_op; std::variant<dont_care, store> store_op; };
-    struct render_pass_desc 
-    {
-        std::vector<color_attachment_desc> color_attachments;
-        std::optional<depth_attachment_desc> depth_attachment;
-    };
     struct command_buffer : object
     {
         virtual void generate_mipmaps(image & image) = 0;
@@ -87,11 +210,27 @@ namespace rhi
         virtual void end_render_pass() = 0;
     };
 
-    // Buffer creation info
-    enum class buffer_usage { vertex, index, uniform, storage };
-    struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
+    size_t get_pixel_size(image_format format);
 
-    // Image creation info
+    //////////////////////
+    // Enumerated types //
+    //////////////////////
+
+    enum image_flag : image_flags
+    {
+        sampled_image_bit    = 1<<0, // Image can be bound to a sampler
+        color_attachment_bit = 1<<1, // Image can be bound to a framebuffer as a color attachment
+        depth_attachment_bit = 1<<2, // Image can be bound to a framebuffer as the depth/stencil attachment
+    };
+
+    enum class buffer_usage { vertex, index, uniform, storage };
+    enum class image_shape
+    { 
+        _1d,
+        _2d,
+        _3d,
+        cube
+    };
     enum class image_format 
     {
         rgba_unorm8,
@@ -139,99 +278,67 @@ namespace rhi
         depth_float32,
         depth_float32_stencil8,
     };
-    enum class image_shape { _1d, _2d, _3d, cube };
-    enum image_flag
-    {
-        sampled_image_bit    = 1<<0, // Image can be bound to a sampler
-        color_attachment_bit = 1<<1, // Image can be bound to a framebuffer as a color attachment
-        depth_attachment_bit = 1<<2, // Image can be bound to a framebuffer as the depth/stencil attachment
-    };
-    using image_flags = int;
-    struct image_desc
-    {
-        image_shape shape;
-        int3 dimensions;
-        int mip_levels;
-        image_format format;
-        image_flags flags;
-        // Not yet supported: multisampling, arrays
-    };
-
-    // Sampler creation info
+    enum class layout { attachment_optimal, shader_read_only_optimal, present_source };
     enum class filter { nearest, linear };
-    enum class address_mode { repeat, mirrored_repeat, clamp_to_edge, mirror_clamp_to_edge, clamp_to_border };
-    struct sampler_desc
-    {
-        filter mag_filter, min_filter;
-        std::optional<filter> mip_filter;
-        address_mode wrap_s, wrap_t, wrap_r;
+    enum class address_mode 
+    { 
+        repeat,
+        mirrored_repeat,
+        clamp_to_edge,
+        mirror_clamp_to_edge,
+        clamp_to_border,
     };
-
-    // Framebuffer creation info
-    struct framebuffer_attachment_desc { ptr<image> image; int mip, layer; };
-    struct framebuffer_desc
-    {
-        int2 dimensions;
-        std::vector<framebuffer_attachment_desc> color_attachments;
-        std::optional<framebuffer_attachment_desc> depth_attachment;
-    };
-
-    // Descriptor set layout creation info
     enum class descriptor_type { combined_image_sampler, uniform_buffer };
-    struct descriptor_binding { int index; descriptor_type type; int count; };
-
-    // Input layout creation info
     enum class attribute_format { float1, float2, float3, float4 };
-    struct vertex_attribute_desc { int index; attribute_format type; int offset; };
-    struct vertex_binding_desc { int index, stride; std::vector<vertex_attribute_desc> attributes; }; // TODO: per_vertex/per_instance
-
-    // Pipeline creation info
-    enum class primitive_topology { points, lines, triangles };
-    enum class compare_op { never, less, equal, less_or_equal, greater, not_equal, greater_or_equal, always };
-    enum class front_face { counter_clockwise, clockwise };
-    enum class cull_mode { none, back, front };
-    struct pipeline_desc
-    {
-        ptr<pipeline_layout> layout;            // descriptors
-        std::vector<vertex_binding_desc> input; // input state
-        std::vector<ptr<shader>> stages;        // programmable stages
-        primitive_topology topology;            // rasterizer state
-        front_face front_face;       
-        cull_mode cull_mode;
-        std::optional<compare_op> depth_test;   // depth state
-        bool depth_write;
+    enum class primitive_topology 
+    { 
+        points, 
+        lines, 
+        triangles,
     };
-
-    struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
-
-    struct device : object
-    {
-        virtual auto get_info() const -> device_info = 0;
-
-        virtual ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) = 0;
-        virtual ptr<sampler> create_sampler(const sampler_desc & desc) = 0;
-        virtual ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) = 0; // one ptr for non-cube, six ptrs in +x,-x,+y,-y,+z,-z order for cube
-        virtual ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) = 0;
-        virtual ptr<window> create_window(const int2 & dimensions, std::string_view title) = 0;
-
-        virtual ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
-        virtual ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) = 0;
-        virtual ptr<shader> create_shader(const shader_module & module) = 0;
-        virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
-
-        virtual ptr<descriptor_pool> create_descriptor_pool() = 0;
-        virtual ptr<command_buffer> create_command_buffer() = 0;
-
-        virtual uint64_t submit(command_buffer & cmd) = 0;
-        virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) = 0; // Submit commands to execute when the next frame is available, followed by a present
-        virtual void wait_until_complete(uint64_t submit_id) = 0;
+    enum class front_face 
+    { 
+        counter_clockwise, 
+        clockwise,
     };
-
-    struct backend_info
-    {
-        std::string name;
-        std::function<rhi::ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
+    enum class cull_mode
+    { 
+        none,
+        back,
+        front,
     };
-
-    size_t get_pixel_size(image_format format);
+    enum class compare_op 
+    { 
+        never,            // false
+        less,             // a < b
+        equal,            // a == b
+        less_or_equal,    // a <= b
+        greater,          // a > b
+        not_equal,        // a != b
+        greater_or_equal, // a >= b
+        always,           // true
+    };
+    enum class blend_op 
+    { 
+        add,              // src + dst
+        subtract,         // src - dst
+        reverse_subtract, // dst - src
+        min,              // min(src, dst)
+        max,              // max(src, dst)
+    };
+    enum class blend_factor
+    {
+        zero,                       // {   0,    0,    0,    0}
+        one,                        // {   1,    1,    1,    1}
+        constant_color,             // {  cr,   cg,   cb,   ca}
+        one_minus_constant_color,   // {1-cr, 1-cg, 1-cb, 1-ca}
+        source_color,               // {  sr,   sg,   sb,   sa}
+        one_minus_source_color,     // {1-sr, 1-sg, 1-sb, 1-sa}
+        dest_color,                 // {  dr,   dg,   db,   da}
+        one_minus_dest_color,       // {1-dr, 1-dg, 1-db, 1-da}
+        source_alpha,               // {  sa,   sa,   sa,   sa}
+        one_minus_source_alpha,     // {1-sa, 1-sa, 1-sa, 1-sa}
+        dest_alpha,                 // {  da,   da,   da,   da}
+        one_minus_dest_alpha,       // {1-da, 1-da, 1-da, 1-da}
+    };
 }

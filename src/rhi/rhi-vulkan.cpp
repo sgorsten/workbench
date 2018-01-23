@@ -15,6 +15,32 @@ bool operator < (const VkAttachmentReference & a, const VkAttachmentReference & 
 
 namespace rhi
 {
+    // Initialize tables
+    auto convert_vk(address_mode mode) { switch(mode) { default: fail_fast();
+        #define RHI_ADDRESS_MODE(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_vk(primitive_topology topology) { switch(topology) { default: fail_fast();
+        #define RHI_PRIMITIVE_TOPOLOGY(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_vk(compare_op op) { switch(op) { default: fail_fast();
+        #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_vk(blend_op op) { switch(op) { default: fail_fast();
+        #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_vk(blend_factor factor) { switch(factor) { default: fail_fast();
+        #define RHI_BLEND_FACTOR(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_vk(image_format format) { switch(format) { default: fail_fast();
+        #define RHI_IMAGE_FORMAT(CASE, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+
     struct vk_render_pass_desc
     {
         std::vector<VkAttachmentDescription> attachments;
@@ -368,17 +394,6 @@ namespace rhi
         }
         throw std::runtime_error("no suitable Vulkan device present");
     }
-
-    VkFormat get_vk_format(image_format format)
-    {
-        switch(format)
-        {
-        #define X(FORMAT, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case FORMAT: return VK;
-        #include "rhi-format.inl"
-        #undef X
-        default: fail_fast();
-        }
-    }
 }
 
 ////////////////
@@ -581,7 +596,7 @@ vk_image::vk_image(vk_device * device, const image_desc & desc, std::vector<cons
     default: fail_fast();
     }
 
-    image_info.format = get_vk_format(desc.format);
+    image_info.format = convert_vk(desc.format);
     image_info.extent = {static_cast<uint32_t>(desc.dimensions.x), static_cast<uint32_t>(desc.dimensions.y), static_cast<uint32_t>(desc.dimensions.z)};
     image_info.mipLevels = desc.mip_levels;        
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -677,18 +692,6 @@ VkImageView vk_image::create_view(int mip, int layer) const
 
 vk_sampler::vk_sampler(vk_device * device, const sampler_desc & desc) : device{device}
 {
-    auto convert_mode = [](rhi::address_mode mode)
-    {
-        switch(mode)
-        {
-        case rhi::address_mode::repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        case rhi::address_mode::mirrored_repeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
-        case rhi::address_mode::clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        case rhi::address_mode::mirror_clamp_to_edge: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
-        case rhi::address_mode::clamp_to_border: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        default: fail_fast();
-        }
-    };
     auto convert_filter = [](rhi::filter filter)
     {
         switch(filter)
@@ -709,9 +712,9 @@ vk_sampler::vk_sampler(vk_device * device, const sampler_desc & desc) : device{d
     };
 
     VkSamplerCreateInfo sampler_info = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    sampler_info.addressModeU = convert_mode(desc.wrap_s);
-    sampler_info.addressModeV = convert_mode(desc.wrap_t);
-    sampler_info.addressModeW = convert_mode(desc.wrap_r);
+    sampler_info.addressModeU = convert_vk(desc.wrap_s);
+    sampler_info.addressModeV = convert_vk(desc.wrap_t);
+    sampler_info.addressModeW = convert_vk(desc.wrap_r);
     sampler_info.magFilter = convert_filter(desc.mag_filter);
     sampler_info.minFilter = convert_filter(desc.min_filter);
     sampler_info.maxAnisotropy = 1.0;
@@ -734,14 +737,14 @@ vk_framebuffer::vk_framebuffer(vk_device * device, const framebuffer_desc & desc
     rhi::render_pass_desc pass_desc;
     for(auto & color_attachment : desc.color_attachments) 
     {
-        color_formats.push_back(get_vk_format(static_cast<vk_image &>(*color_attachment.image).desc.format));
+        color_formats.push_back(convert_vk(static_cast<vk_image &>(*color_attachment.image).desc.format));
         views.push_back(static_cast<vk_image &>(*color_attachment.image).create_view(color_attachment.mip, color_attachment.layer));
         pass_desc.color_attachments.push_back({dont_care{}, dont_care{}});
         
     }
     if(desc.depth_attachment) 
     {
-        depth_format = get_vk_format(static_cast<vk_image &>(*desc.depth_attachment->image).desc.format);
+        depth_format = convert_vk(static_cast<vk_image &>(*desc.depth_attachment->image).desc.format);
         views.push_back(static_cast<vk_image &>(*desc.depth_attachment->image).create_view(desc.depth_attachment->mip, desc.depth_attachment->layer));
         pass_desc.depth_attachment = {dont_care{}, dont_care{}};
     }
@@ -783,7 +786,7 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
     VkSwapchainCreateInfoKHR swapchain_info {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     swapchain_info.surface = surface;
     swapchain_info.minImageCount = device->selection.swap_image_count;
-    swapchain_info.imageFormat = get_vk_format(format);
+    swapchain_info.imageFormat = convert_vk(format);
     swapchain_info.imageColorSpace = VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; //selection.surface_format.colorSpace;
     swapchain_info.imageExtent = swap_extent;
     swapchain_info.imageArrayLayers = 1;
@@ -807,7 +810,7 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
         VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view_info.image = swapchain_images[i];
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format = get_vk_format(format);
+        view_info.format = convert_vk(format);
         view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info.subresourceRange.baseMipLevel = 0;
         view_info.subresourceRange.levelCount = 1;
@@ -819,8 +822,8 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
     // Create swapchain framebuffer
     dims = dimensions;
     framebuffers.resize(views.size());
-    color_formats = {get_vk_format(format)};
-    depth_format = get_vk_format(rhi::image_format::depth_float32);
+    color_formats = {convert_vk(format)};
+    depth_format = convert_vk(rhi::image_format::depth_float32);
     auto render_pass = device->get_render_pass(get_render_pass_desc({{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}}));
     for(size_t i=0; i<views.size(); ++i)
     {
@@ -967,13 +970,7 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
     if(pipe) return pipe;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    switch(desc.topology)
-    {
-    case primitive_topology::points: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
-    case primitive_topology::lines: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
-    case primitive_topology::triangles: inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
-    }
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+    inputAssembly.topology = convert_vk(desc.topology);
 
     const VkViewport viewport {};
     const VkRect2D scissor {};

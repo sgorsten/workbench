@@ -212,7 +212,9 @@
     <None Include="..\..\assets\skybox.vert" />
     <None Include="..\..\assets\static-mesh.vert" />
     <None Include="..\..\assets\textured-pbr.frag" />
-    <None Include="..\..\src\rhi\rhi-format.inl" />
+    <None Include="..\..\assets\ui.frag" />
+    <None Include="..\..\assets\ui.vert" />
+    <None Include="..\..\src\rhi\rhi-tables.inl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -47,7 +47,7 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
     });
     op_pipeline_layout = dev->create_pipeline_layout({op_set_layout});
     empty_pipeline_layout = dev->create_pipeline_layout({});
-
+    
     compute_brdf_integral_image_pipeline = create_image_pipeline(*empty_pipeline_layout, *compute_brdf_integral_image_fragment_shader);
     copy_cubemap_from_spheremap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *copy_cubemap_from_spheremap_fragment_shader);
     compute_irradiance_cubemap_pipeline = create_cubemap_pipeline(*op_pipeline_layout, *compute_irradiance_cubemap_fragment_shader);

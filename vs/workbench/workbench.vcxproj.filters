@@ -86,9 +86,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\src\rhi\rhi-format.inl">
-      <Filter>src\rhi</Filter>
-    </None>
     <None Include="..\..\assets\colored-unlit.frag">
       <Filter>shaders</Filter>
     </None>
@@ -127,6 +124,15 @@
     </None>
     <None Include="..\..\assets\textured-pbr.frag">
       <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\ui.frag">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\assets\ui.vert">
+      <Filter>shaders</Filter>
+    </None>
+    <None Include="..\..\src\rhi\rhi-tables.inl">
+      <Filter>src\rhi</Filter>
     </None>
   </ItemGroup>
 </Project>
