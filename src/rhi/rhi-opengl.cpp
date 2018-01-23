@@ -10,6 +10,10 @@ namespace rhi
 {
     // Initialize tables
     struct gl_format { GLenum internal_format, format, type; };
+    GLenum convert_gl(shader_stage stage) { switch(stage) { default: fail_fast();
+        #define RHI_SHADER_STAGE(CASE, VK, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
     GLenum convert_gl(address_mode mode) { switch(mode) { default: fail_fast();
         #define RHI_ADDRESS_MODE(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
@@ -64,7 +68,7 @@ namespace rhi
         
         ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
         ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
-        ptr<shader> create_shader(const shader_module & module) override;
+        ptr<shader> create_shader(const shader_desc & desc) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
 
         ptr<descriptor_pool> create_descriptor_pool() override { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
@@ -131,9 +135,9 @@ namespace rhi
 
     struct gl_shader : shader
     {
-        shader_module module;
+        shader_desc desc;
         
-        gl_shader(const shader_module & module) : module{module} {}
+        gl_shader(const shader_desc & desc) : desc{desc} {}
     };
 
     struct gl_pipeline : pipeline
@@ -247,7 +251,7 @@ ptr<sampler> gl_device::create_sampler(const sampler_desc & desc) { return new d
 ptr<image> gl_device::create_image(const image_desc & desc, std::vector<const void *> initial_data) { return new delete_when_unreferenced<gl_image>{this, desc, initial_data}; }
 ptr<framebuffer> gl_device::create_framebuffer(const framebuffer_desc & desc) { return new delete_when_unreferenced<gl_framebuffer>{this, desc}; }
 ptr<window> gl_device::create_window(const int2 & dimensions, std::string_view title) { return new delete_when_unreferenced<gl_window>{this, dimensions, std::string{title}}; }
-ptr<shader> gl_device::create_shader(const shader_module & module) { return new delete_when_unreferenced<gl_shader>{module}; }
+ptr<shader> gl_device::create_shader(const shader_desc & desc) { return new delete_when_unreferenced<gl_shader>{desc}; }
 ptr<pipeline> gl_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<gl_pipeline>{this, desc}; }
 
 uint64_t gl_device::submit(command_buffer & cmd)
@@ -505,7 +509,7 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
     for(auto s : desc.stages)
     {
         auto & shader = static_cast<gl_shader &>(*s);
-        spirv_cross::CompilerGLSL compiler(shader.module.spirv);
+        spirv_cross::CompilerGLSL compiler(shader.desc.spirv);
 	    spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	    for(auto & resource : resources.uniform_buffers)
 	    {
@@ -523,15 +527,7 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
         GLint length = exactly(glsl.length());
         //debug_callback(source);
 
-        GLuint shader_object = glCreateShader([&shader]() 
-        {
-            switch(shader.module.stage)
-            {
-            case shader_stage::vertex: return GL_VERTEX_SHADER;
-            case shader_stage::fragment: return GL_FRAGMENT_SHADER;
-            default: fail_fast();
-            }
-        }());
+        GLuint shader_object = glCreateShader(convert_gl(shader.desc.stage));
         glShaderSource(shader_object, 1, &source, &length);
         glCompileShader(shader_object);
         shaders.push_back(shader_object);

@@ -6,6 +6,17 @@
 //   default: fail_fast();
 //   }
 
+// #define RHI_SHADER_STAGE(CASE, VK, GL)
+#ifdef RHI_SHADER_STAGE
+RHI_SHADER_STAGE(rhi::shader_stage::vertex,                 VK_SHADER_STAGE_VERTEX_BIT,                  GL_VERTEX_SHADER)
+RHI_SHADER_STAGE(rhi::shader_stage::tesselation_control,    VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,    GL_TESS_CONTROL_SHADER)
+RHI_SHADER_STAGE(rhi::shader_stage::tesselation_evaluation, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, GL_TESS_EVALUATION_SHADER)
+RHI_SHADER_STAGE(rhi::shader_stage::geometry,               VK_SHADER_STAGE_GEOMETRY_BIT,                GL_GEOMETRY_SHADER)
+RHI_SHADER_STAGE(rhi::shader_stage::fragment,               VK_SHADER_STAGE_FRAGMENT_BIT,                GL_FRAGMENT_SHADER)
+RHI_SHADER_STAGE(rhi::shader_stage::compute,                VK_SHADER_STAGE_COMPUTE_BIT,                 GL_COMPUTE_SHADER)
+#undef RHI_SHADER_STAGE
+#endif
+
 // #define RHI_ADDRESS_MODE(CASE, VK, DX, GL)
 #ifdef RHI_ADDRESS_MODE
 RHI_ADDRESS_MODE(rhi::address_mode::repeat,               VK_SAMPLER_ADDRESS_MODE_REPEAT,               D3D11_TEXTURE_ADDRESS_WRAP,        GL_REPEAT)

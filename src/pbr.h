@@ -1,5 +1,6 @@
 #pragma once
 #include "graphics.h"
+#include "shader.h"
 
 struct render_image_vertex
 {
@@ -28,14 +29,14 @@ struct render_cubemap_vertex
 struct standard_shaders
 {
     // Standard image operations
-    shader_module render_image_vertex_shader;
-    shader_module compute_brdf_integral_image_fragment_shader;
+    rhi::shader_desc render_image_vertex_shader;
+    rhi::shader_desc compute_brdf_integral_image_fragment_shader;
 
     // Standard cubemap operations
-    shader_module render_cubemap_vertex_shader;
-    shader_module copy_cubemap_from_spheremap_fragment_shader;
-    shader_module compute_irradiance_cubemap_fragment_shader;
-    shader_module compute_reflectance_cubemap_fragment_shader;
+    rhi::shader_desc render_cubemap_vertex_shader;
+    rhi::shader_desc copy_cubemap_from_spheremap_fragment_shader;
+    rhi::shader_desc compute_irradiance_cubemap_fragment_shader;
+    rhi::shader_desc compute_reflectance_cubemap_fragment_shader;
 
     static standard_shaders compile(shader_compiler & compiler);
 };

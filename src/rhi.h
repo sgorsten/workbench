@@ -1,6 +1,9 @@
 #pragma once
-#include "shader.h"
+#include "core.h"
 #include "geometry.h"
+#include <vector>
+#include <variant>
+#include <optional>
 #include <functional>
 
 struct GLFWwindow;
@@ -28,6 +31,7 @@ namespace rhi
 
     using image_flags = int;
 
+    enum class shader_stage : int;
     enum class layout : int;
     enum class buffer_usage : int;
     enum class image_format : int;
@@ -100,6 +104,8 @@ namespace rhi
 
     struct descriptor_binding { int index; descriptor_type type; int count; };
 
+    struct shader_desc { shader_stage stage; std::vector<uint32_t> spirv; };
+
     struct vertex_attribute_desc { int index; attribute_format type; int offset; };
     struct vertex_binding_desc { int index, stride; std::vector<vertex_attribute_desc> attributes; }; // TODO: per_vertex/per_instance
     struct blend_equation { blend_factor source_factor; blend_op op; blend_factor dest_factor; };
@@ -159,7 +165,7 @@ namespace rhi
 
         virtual ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
         virtual ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) = 0;
-        virtual ptr<shader> create_shader(const shader_module & module) = 0;
+        virtual ptr<shader> create_shader(const shader_desc & desc) = 0;
         virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
 
         virtual ptr<descriptor_pool> create_descriptor_pool() = 0;
@@ -221,6 +227,16 @@ namespace rhi
         sampled_image_bit    = 1<<0, // Image can be bound to a sampler
         color_attachment_bit = 1<<1, // Image can be bound to a framebuffer as a color attachment
         depth_attachment_bit = 1<<2, // Image can be bound to a framebuffer as the depth/stencil attachment
+    };
+
+    enum class shader_stage : int
+    {
+        vertex,                
+        tesselation_control,   
+        tesselation_evaluation,
+        geometry,              
+        fragment,              
+        compute,
     };
 
     enum class buffer_usage { vertex, index, uniform, storage };

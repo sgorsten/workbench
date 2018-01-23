@@ -121,7 +121,7 @@ namespace rhi
         
         ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
         ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
-        ptr<shader> create_shader(const shader_module & module) override;
+        ptr<shader> create_shader(const shader_desc & module) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
 
         ptr<descriptor_pool> create_descriptor_pool() override { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
@@ -186,9 +186,9 @@ namespace rhi
 
     struct d3d_shader : shader
     {
-        shader_module module;
+        shader_desc desc;
         
-        d3d_shader(const shader_module & module) : module{module} {}
+        d3d_shader(const shader_desc & desc) : desc{desc} {}
     };
     
     struct d3d_pipeline : pipeline
@@ -213,7 +213,7 @@ ptr<sampler> d3d_device::create_sampler(const sampler_desc & desc) { return new 
 ptr<image> d3d_device::create_image(const image_desc & desc, std::vector<const void *> initial_data) { return new delete_when_unreferenced<d3d_image>{*dev, desc, initial_data}; }
 ptr<framebuffer> d3d_device::create_framebuffer(const framebuffer_desc & desc) { return new delete_when_unreferenced<d3d_framebuffer>{*dev, desc}; }
 ptr<window> d3d_device::create_window(const int2 & dimensions, std::string_view title) { return new delete_when_unreferenced<d3d_window>{*this, dimensions, std::string{title}}; }
-ptr<shader> d3d_device::create_shader(const shader_module & module) { return new delete_when_unreferenced<d3d_shader>{module}; }
+ptr<shader> d3d_device::create_shader(const shader_desc & desc) { return new delete_when_unreferenced<d3d_shader>{desc}; }
 ptr<pipeline> d3d_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<d3d_pipeline>{*dev, desc}; }
 
 uint64_t d3d_device::submit(command_buffer & cmd)
@@ -479,7 +479,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
         auto & shader = static_cast<d3d_shader &>(*s);
 
         // Compile SPIR-V to HLSL
-        spirv_cross::CompilerHLSL compiler(shader.module.spirv);
+        spirv_cross::CompilerHLSL compiler(shader.desc.spirv);
 	    spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	    for(auto & resource : resources.uniform_buffers)
 	    {
@@ -499,7 +499,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
 
         // Compile HLSL and create shader stages and input layout
         ID3DBlob * shader_blob, * error_blob;
-        switch(shader.module.stage)
+        switch(shader.desc.stage)
         {
                     
         default: throw std::logic_error("invalid shader_stage");

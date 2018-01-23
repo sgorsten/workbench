@@ -1,11 +1,57 @@
 #include "shader.h"
 #include "load.h"
 #include <map>
+#include <vector>
+#include <variant>
+#include <optional>
 #include "../dep/glslang/glslang/Public/ShaderLang.h"
 #include "../dep/glslang/SPIRV/GlslangToSpv.h"
 #include "../dep/glslang/StandAlone/ResourceLimits.h"
 #include "../dep/glslang/SPIRV/spirv.hpp"
 
+enum class sampler_dim { _1d, _2d, _3d, cube, rect, buffer, subpass_data };
+
+template<class T> class indirect
+{
+    std::unique_ptr<T> value;
+public:
+    indirect() : value{std::make_unique<T>()} {}
+    indirect(const T & r) : value{std::make_unique<T>(r)} {}
+    indirect(const indirect & r) : value{std::make_unique<T>(*r.value)} {}
+
+    indirect & operator = (const T & r) { value = std::make_unique<T>(r); return *this; }
+    indirect & operator = (const indirect & r) { value = std::make_unique<T>(*r.value); return *this; }
+
+    T & operator * () { return *value; }
+    T * operator -> () { return value.get(); }
+    const T & operator * () const { return *value; }
+    const T * operator -> () const { return value.get(); }
+};
+
+// Reflection information for a single shader
+struct shader_module
+{
+    enum scalar_type { uint_, int_, float_, double_ };
+    struct type;
+    struct matrix_layout { uint32_t stride; bool row_major; };
+    struct structure_member { std::string name; indirect<type> type; std::optional<uint32_t> offset; };   
+    struct sampler { scalar_type channel; sampler_dim dim; bool arrayed, multisampled, shadow; };
+    struct numeric { scalar_type scalar; uint32_t row_count, column_count; std::optional<matrix_layout> matrix_layout; };
+    struct array { indirect<type> element; uint32_t length; std::optional<uint32_t> stride; };
+    struct structure { std::string name; std::vector<structure_member> members; };
+    struct type { std::variant<sampler, numeric, array, structure> contents; };
+    struct interface { uint32_t location; std::string name; type type; };
+    struct descriptor { uint32_t set, binding; std::string name; type type; };
+
+    std::vector<uint32_t> spirv;
+    // Note: For now, only one entry point supported
+    rhi::shader_stage stage;
+    std::string name;
+    std::vector<descriptor> descriptors;
+    std::vector<interface> inputs, outputs;
+};
+
+std::ostream & operator << (std::ostream & out, const shader_module::type & t);
 std::ostream & operator << (std::ostream & out, const shader_module::scalar_type & s)
 {
     switch(s)
@@ -190,6 +236,47 @@ struct spirv_parser
     }
 };
 
+shader_module load_shader_info_from_spirv(const std::vector<uint32_t> & words)
+{
+    // Analyze SPIR-V
+    spirv_parser mod(words);
+    if(mod.entrypoints.size() != 1) throw std::runtime_error("SPIR-V module should have exactly one entrypoint");
+    auto & entrypoint = mod.entrypoints.begin()->second;
+
+    // Determine shader stage
+    shader_module info {words};
+    switch(entrypoint.execution_model)
+    {
+    case spv::ExecutionModelVertex: info.stage = rhi::shader_stage::vertex; break;
+    case spv::ExecutionModelTessellationControl: info.stage = rhi::shader_stage::tesselation_control; break;
+    case spv::ExecutionModelTessellationEvaluation: info.stage = rhi::shader_stage::tesselation_evaluation; break;
+    case spv::ExecutionModelGeometry: info.stage = rhi::shader_stage::geometry; break;
+    case spv::ExecutionModelFragment: info.stage = rhi::shader_stage::fragment; break;
+    case spv::ExecutionModelGLCompute: info.stage = rhi::shader_stage::compute; break;
+    default: throw std::runtime_error("invalid execution model");
+    }
+    info.name = entrypoint.name;
+
+    // Harvest descriptors
+    for(auto & v : mod.variables)
+    {
+        auto & meta = mod.metadatas[v.first];
+        auto set = meta.get_decoration(spv::DecorationDescriptorSet);
+        auto binding = meta.get_decoration(spv::DecorationBinding);
+        if(set && binding) info.descriptors.push_back({*set, *binding, meta.name, mod.get_pointee_type(v.second.type)});
+
+        if(auto loc = meta.get_decoration(spv::DecorationLocation))
+        {
+            if(v.second.storage_class == spv::StorageClass::StorageClassInput) info.inputs.push_back({*loc, meta.name, mod.get_pointee_type(v.second.type)});
+            if(v.second.storage_class == spv::StorageClass::StorageClassOutput) info.outputs.push_back({*loc, meta.name, mod.get_pointee_type(v.second.type)});
+        }
+    }
+    std::sort(begin(info.descriptors), end(info.descriptors), [](const shader_module::descriptor & a, const shader_module::descriptor & b) { return std::tie(a.set, a.binding) < std::tie(b.set, b.binding); });
+    std::sort(begin(info.inputs), end(info.inputs), [](const shader_module::interface & a, const shader_module::interface & b) { return a.location < b.location; });
+    std::sort(begin(info.outputs), end(info.outputs), [](const shader_module::interface & a, const shader_module::interface & b) { return a.location < b.location; });
+    return info;
+}
+
 struct shader_compiler_impl : glslang::TShader::Includer
 {
     struct result_text
@@ -252,55 +339,18 @@ shader_compiler::~shader_compiler()
     glslang::FinalizeProcess();
 }
 
-shader_module load_shader_info_from_spirv(const std::vector<uint32_t> & words)
-{
-    // Analyze SPIR-V
-    spirv_parser mod(words);
-    if(mod.entrypoints.size() != 1) throw std::runtime_error("SPIR-V module should have exactly one entrypoint");
-    auto & entrypoint = mod.entrypoints.begin()->second;
-
-    // Determine shader stage
-    shader_module info {words};
-    switch(entrypoint.execution_model)
-    {
-    case spv::ExecutionModelVertex: info.stage = shader_stage::vertex; break;
-    //case spv::ExecutionModelTessellationControl: info.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT; break;
-    //case spv::ExecutionModelTessellationEvaluation: info.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT; break;
-    //case spv::ExecutionModelGeometry: info.stage = VK_SHADER_STAGE_GEOMETRY_BIT; break;
-    case spv::ExecutionModelFragment: info.stage = shader_stage::fragment; break;
-    //case spv::ExecutionModelGLCompute: info.stage = VK_SHADER_STAGE_COMPUTE_BIT; break;
-    default: throw std::runtime_error("invalid execution model");
-    }
-    info.name = entrypoint.name;
-
-    // Harvest descriptors
-    for(auto & v : mod.variables)
-    {
-        auto & meta = mod.metadatas[v.first];
-        auto set = meta.get_decoration(spv::DecorationDescriptorSet);
-        auto binding = meta.get_decoration(spv::DecorationBinding);
-        if(set && binding) info.descriptors.push_back({*set, *binding, meta.name, mod.get_pointee_type(v.second.type)});
-
-        if(auto loc = meta.get_decoration(spv::DecorationLocation))
-        {
-            if(v.second.storage_class == spv::StorageClass::StorageClassInput) info.inputs.push_back({*loc, meta.name, mod.get_pointee_type(v.second.type)});
-            if(v.second.storage_class == spv::StorageClass::StorageClassOutput) info.outputs.push_back({*loc, meta.name, mod.get_pointee_type(v.second.type)});
-        }
-    }
-    std::sort(begin(info.descriptors), end(info.descriptors), [](const shader_module::descriptor & a, const shader_module::descriptor & b) { return std::tie(a.set, a.binding) < std::tie(b.set, b.binding); });
-    std::sort(begin(info.inputs), end(info.inputs), [](const shader_module::interface & a, const shader_module::interface & b) { return a.location < b.location; });
-    std::sort(begin(info.outputs), end(info.outputs), [](const shader_module::interface & a, const shader_module::interface & b) { return a.location < b.location; });
-    return info;
-}
-
-shader_module shader_compiler::compile_file(shader_stage stage, const std::string & filename)
+rhi::shader_desc shader_compiler::compile_file(rhi::shader_stage stage, const std::string & filename)
 {
     glslang::TShader shader([stage]()
     {
         switch(stage)
         {
-        case shader_stage::vertex: return EShLangVertex;
-        case shader_stage::fragment: return EShLangFragment;
+        case rhi::shader_stage::vertex: return EShLangVertex;
+        case rhi::shader_stage::tesselation_control: return EShLangTessControl;
+        case rhi::shader_stage::tesselation_evaluation: return EShLangTessEvaluation;
+        case rhi::shader_stage::geometry: return EShLangGeometry;
+        case rhi::shader_stage::fragment: return EShLangFragment;
+        case rhi::shader_stage::compute: return EShLangCompute;
         default: throw std::logic_error("unsupported shader_stage");
         }
     }());
@@ -325,35 +375,5 @@ shader_module shader_compiler::compile_file(shader_stage stage, const std::strin
 
     std::vector<uint32_t> spirv;
     glslang::GlslangToSpv(*program.getIntermediate(shader.getStage()), spirv, nullptr);
-    return load_shader_info_from_spirv(spirv);
-}
-
-shader_module shader_compiler::compile(shader_stage stage, const std::string & glsl)
-{
-    glslang::TShader shader([stage]()
-    {
-        switch(stage)
-        {
-        case shader_stage::vertex: return EShLangVertex;
-        case shader_stage::fragment: return EShLangFragment;
-        default: throw std::logic_error("unsupported shader_stage");
-        }
-    }());
-    const char * text = glsl.c_str();
-    shader.setStrings(&text, 1);
-    if(!shader.parse(&glslang::DefaultTBuiltInResource, 450, ECoreProfile, false, false, static_cast<EShMessages>(EShMsgSpvRules|EShMsgVulkanRules), *impl))
-    {
-        throw std::runtime_error(std::string("GLSL compile failure: ") + shader.getInfoLog() + "\nsource:\n" + text);
-    }
-    
-    glslang::TProgram program;
-    program.addShader(&shader);
-    if(!program.link(EShMsgVulkanRules))
-    {
-        throw std::runtime_error(std::string("GLSL link failure: ") + program.getInfoLog());
-    }
-
-    std::vector<uint32_t> spirv;
-    glslang::GlslangToSpv(*program.getIntermediate(shader.getStage()), spirv, nullptr);
-    return load_shader_info_from_spirv(spirv);
+    return {stage, spirv};
 }

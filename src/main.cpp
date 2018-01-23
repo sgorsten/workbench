@@ -114,8 +114,8 @@ struct common_assets
     coord_system game_coords;
     standard_shaders standard;
     mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
-    shader_module vs, fs, fs_unlit, ui_vs, ui_fs;
-    shader_module skybox_vs, skybox_fs_cubemap;
+    rhi::shader_desc vs, fs, fs_unlit, ui_vs, ui_fs;
+    rhi::shader_desc skybox_vs, skybox_fs_cubemap;
     image env_spheremap;
 
     common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
@@ -125,19 +125,15 @@ struct common_assets
         shader_compiler compiler{loader};
         standard = standard_shaders::compile(compiler);
 
-        vs = compiler.compile_file(shader_stage::vertex, "static-mesh.vert");
-        fs = compiler.compile_file(shader_stage::fragment, "textured-pbr.frag");
-        fs_unlit = compiler.compile_file(shader_stage::fragment, "colored-unlit.frag");
+        vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
+        fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+        fs_unlit = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
 
-        skybox_vs = compiler.compile_file(shader_stage::vertex, "skybox.vert");
-        skybox_fs_cubemap = compiler.compile_file(shader_stage::fragment, "skybox.frag");
+        skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
+        skybox_fs_cubemap = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
 
-        ui_vs = compiler.compile_file(shader_stage::vertex, "ui.vert");
-        ui_fs = compiler.compile_file(shader_stage::fragment, "ui.frag");
-
-        //for(auto & desc : vs.descriptors) { std::cout << "layout(set=" << desc.set << ", binding=" << desc.binding << ") uniform " << desc.name << " : " << desc.type << std::endl; }
-        //for(auto & v : vs.inputs) { std::cout << "layout(location=" << v.location << ") in " << v.name << " : " << v.type << std::endl; }
-        //for(auto & v : vs.outputs) { std::cout << "layout(location=" << v.location << ") out " << v.name << " : " << v.type << std::endl; }
+        ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
+        ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
 
         basis_mesh = make_basis_mesh();
         ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
