@@ -64,12 +64,14 @@ struct standard_device_objects
 
     rhi::ptr<rhi::pipeline> create_image_pipeline(rhi::pipeline_layout & pipeline_layout, rhi::shader & fragment_shader)
     {
-        return dev->create_pipeline({&pipeline_layout, {render_image_vertex::get_binding(0)}, {render_image_vertex_shader, &fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false});
+        const rhi::blend_state opaque {false};
+        return dev->create_pipeline({&pipeline_layout, {render_image_vertex::get_binding(0)}, {render_image_vertex_shader, &fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false, {opaque}});
     }
 
     rhi::ptr<rhi::pipeline> create_cubemap_pipeline(rhi::pipeline_layout & pipeline_layout, rhi::shader & fragment_shader)
     {
-        return dev->create_pipeline({&pipeline_layout, {render_cubemap_vertex::get_binding(0)}, {render_cubemap_vertex_shader, &fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false});
+        const rhi::blend_state opaque {false};
+        return dev->create_pipeline({&pipeline_layout, {render_cubemap_vertex::get_binding(0)}, {render_cubemap_vertex_shader, &fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false, {opaque}});
     }
 
     template<class F> void render_to_image(rhi::image & target_image, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)

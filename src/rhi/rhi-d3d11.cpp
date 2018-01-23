@@ -22,6 +22,10 @@ namespace rhi
         #define RHI_PRIMITIVE_TOPOLOGY(CASE, VK, DX, GL) case CASE: return DX;
         #include "rhi-tables.inl"
     }}
+    auto convert_dx(cull_mode mode) { switch(mode) { default: fail_fast();
+        #define RHI_CULL_MODE(CASE, VK, DX, GL_ENABLED, GL_CULL_FACE) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
     auto convert_dx(compare_op op) { switch(op) { default: fail_fast();
         #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return DX;
         #include "rhi-tables.inl"
@@ -32,6 +36,10 @@ namespace rhi
     }}
     auto convert_dx(blend_factor factor) { switch(factor) { default: fail_fast();
         #define RHI_BLEND_FACTOR(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_dx(attribute_format format) { switch(format) { default: fail_fast();
+        #define RHI_ATTRIBUTE_FORMAT(CASE, VK, DX, GL_SIZE, GL_TYPE, GL_NORMALIZED) case CASE: return DX;
         #include "rhi-tables.inl"
     }}
     auto convert_dx(image_format format) { switch(format) { default: fail_fast();
@@ -191,6 +199,7 @@ namespace rhi
         com_ptr<ID3D11PixelShader> ps;
         com_ptr<ID3D11RasterizerState> rasterizer_state;
         com_ptr<ID3D11DepthStencilState> depth_stencil_state;
+        com_ptr<ID3D11BlendState> blend_state;
         D3D11_PRIMITIVE_TOPOLOGY topology;
 
         d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc);
@@ -246,6 +255,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         },
         [this,&current_pipeline](const bind_pipeline_command & c)
         {
+            const float blend_factor[] {0,0,0,0};
             current_pipeline = &static_cast<d3d_pipeline &>(*c.pipe);
             ctx->IASetInputLayout(current_pipeline->layout);
             ctx->IASetPrimitiveTopology(current_pipeline->topology);
@@ -253,6 +263,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             ctx->RSSetState(current_pipeline->rasterizer_state);
             ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
             ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, 0);
+            ctx->OMSetBlendState(current_pipeline->blend_state, blend_factor, 0xF);
         },
         [this](const bind_descriptor_set_command & c)
         {
@@ -343,15 +354,6 @@ d3d_buffer::d3d_buffer(ID3D11Device & device, ID3D11DeviceContext & ctx, const b
 
 d3d_sampler::d3d_sampler(ID3D11Device & device, const sampler_desc & desc)
 {
-    auto convert_mode = [](rhi::address_mode mode)
-    {
-        switch(mode)
-        {
-        #define RHI_ADDRESS_MODE(MODE, VK, DX, GL) case MODE: return DX;
-        #include "rhi-tables.inl"
-        default: fail_fast();
-        }
-    };
     D3D11_SAMPLER_DESC samp_desc {};
     if(desc.mag_filter == filter::linear) samp_desc.Filter = static_cast<D3D11_FILTER>(samp_desc.Filter|D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT);
     if(desc.min_filter == filter::linear) samp_desc.Filter = static_cast<D3D11_FILTER>(samp_desc.Filter|D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT);
@@ -360,9 +362,9 @@ d3d_sampler::d3d_sampler(ID3D11Device & device, const sampler_desc & desc)
         samp_desc.MaxLOD = 1000;
         if(desc.mip_filter == filter::linear) samp_desc.Filter = static_cast<D3D11_FILTER>(samp_desc.Filter|D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR);
     }
-    samp_desc.AddressU = convert_mode(desc.wrap_s);
-    samp_desc.AddressV = convert_mode(desc.wrap_t);
-    samp_desc.AddressW = convert_mode(desc.wrap_r);
+    samp_desc.AddressU = convert_dx(desc.wrap_s);
+    samp_desc.AddressV = convert_dx(desc.wrap_t);
+    samp_desc.AddressW = convert_dx(desc.wrap_r);
     check("ID3D11Device::CreateSamplerState", device.CreateSamplerState(&samp_desc, sampler_state.init()));
 }
     
@@ -509,42 +511,17 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
             check("D3DCompile", D3DCompile(hlsl.c_str(), hlsl.size(), "spirv-cross.hlsl", nullptr, nullptr, "main", "vs_5_0", 0, 0, &shader_blob, &error_blob));
             check("ID3D11Device::CreateVertexShader", device.CreateVertexShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, vs.init()));           
             std::vector<D3D11_INPUT_ELEMENT_DESC> input_descs;  
-            for(auto & buf : desc.input)
-            {
-                for(auto & attrib : buf.attributes)
-                {
-                    switch(attrib.type)
-                    {
-                    case attribute_format::float1: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case attribute_format::float2: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case attribute_format::float3: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    case attribute_format::float4: input_descs.push_back({"TEXCOORD", (UINT)attrib.index, DXGI_FORMAT_R32G32B32A32_FLOAT, (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0}); break;
-                    default: throw std::logic_error("invalid attribute_format");
-                    }
-                }
-            }
+            for(auto & buf : desc.input) for(auto & attrib : buf.attributes) input_descs.push_back({"TEXCOORD", (UINT)attrib.index, convert_dx(attrib.type), (UINT)buf.index, (UINT)attrib.offset, D3D11_INPUT_PER_VERTEX_DATA, 0});
             check("ID3D11Device::CreateInputLayout", device.CreateInputLayout(input_descs.data(), exactly(input_descs.size()), shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), layout.init()));
             break;
         }
     }
 
-    switch(desc.topology)
-    {
-    case primitive_topology::points: topology = D3D11_PRIMITIVE_TOPOLOGY_POINTLIST; break;
-    case primitive_topology::lines: topology = D3D11_PRIMITIVE_TOPOLOGY_LINELIST; break;
-    case primitive_topology::triangles: topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST; break;
-    default: fail_fast();
-    }
+    topology = convert_dx(desc.topology);
 
     D3D11_RASTERIZER_DESC rasterizer_desc {};
     rasterizer_desc.FillMode = D3D11_FILL_SOLID;
-    switch(desc.cull_mode)
-    {
-    case rhi::cull_mode::none: rasterizer_desc.CullMode = D3D11_CULL_NONE; break;
-    case rhi::cull_mode::back: rasterizer_desc.CullMode = D3D11_CULL_BACK; break;
-    case rhi::cull_mode::front: rasterizer_desc.CullMode = D3D11_CULL_FRONT; break;
-    default: fail_fast();
-    }
+    rasterizer_desc.CullMode = convert_dx(desc.cull_mode);
     rasterizer_desc.FrontCounterClockwise = desc.front_face == rhi::front_face::counter_clockwise;
     rasterizer_desc.DepthClipEnable = TRUE;
     check("ID3D11Device::CreateRasterizerState", device.CreateRasterizerState(&rasterizer_desc, rasterizer_state.init()));
@@ -557,4 +534,14 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
     }
     depth_stencil_desc.DepthWriteMask = desc.depth_write ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
     check("ID3D11Device::CreateDepthStencilState", device.CreateDepthStencilState(&depth_stencil_desc, depth_stencil_state.init()));
+
+    D3D11_BLEND_DESC blend_desc {};
+    if(desc.blend.size() > countof(blend_desc.RenderTarget)) throw std::logic_error("too many blend_state in pipeline_desc");
+    blend_desc.IndependentBlendEnable = TRUE;
+    for(size_t i=0; i<desc.blend.size(); ++i)
+    {
+        auto & b = desc.blend[i];
+        blend_desc.RenderTarget[i] = {b.enable, convert_dx(b.color.source_factor), convert_dx(b.color.dest_factor), convert_dx(b.color.op), convert_dx(b.alpha.source_factor), convert_dx(b.alpha.dest_factor), convert_dx(b.alpha.op), 0xF};
+    }
+    check("ID3D11Device::CreateBlendState", device.CreateBlendState(&blend_desc, blend_state.init()));
 }

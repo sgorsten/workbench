@@ -10,28 +10,28 @@ namespace rhi
 {
     // Initialize tables
     struct gl_format { GLenum internal_format, format, type; };
-    auto convert_gl(address_mode mode) { switch(mode) { default: fail_fast();
+    GLenum convert_gl(address_mode mode) { switch(mode) { default: fail_fast();
         #define RHI_ADDRESS_MODE(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
     }}
-    auto convert_gl(primitive_topology topology) { switch(topology) { default: fail_fast();
+    GLenum convert_gl(primitive_topology topology) { switch(topology) { default: fail_fast();
         #define RHI_PRIMITIVE_TOPOLOGY(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
     }}
-    auto convert_gl(compare_op op) { switch(op) { default: fail_fast();
+    GLenum convert_gl(compare_op op) { switch(op) { default: fail_fast();
         #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
     }}
-    auto convert_gl(blend_op op) { switch(op) { default: fail_fast();
+    GLenum convert_gl(blend_op op) { switch(op) { default: fail_fast();
         #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
     }}
-    auto convert_gl(blend_factor factor) { switch(factor) { default: fail_fast();
+    GLenum convert_gl(blend_factor factor) { switch(factor) { default: fail_fast();
         #define RHI_BLEND_FACTOR(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
     }}
-    auto convert_gl(image_format format) { switch(format) { default: fail_fast();
-        #define RHI_IMAGE_FORMAT(CASE, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case CASE: return gl_format{GLI, GLF, GLT};
+    gl_format convert_gl(image_format format) { switch(format) { default: fail_fast();
+        #define RHI_IMAGE_FORMAT(CASE, SIZE, TYPE, VK, DX, GLI, GLF, GLT) case CASE: return {GLI, GLF, GLT};
         #include "rhi-tables.inl"
     }}
 
@@ -138,12 +138,17 @@ namespace rhi
 
     struct gl_pipeline : pipeline
     {
+        struct gl_blend { GLenum color_op, alpha_op, src_color, dst_color, src_alpha, dst_alpha; };
         ptr<gl_device> device;
         GLuint program_object = 0;
         std::vector<rhi::vertex_binding_desc> input;
+
+        // Fixed function state
         std::vector<GLenum> enable, disable;
         GLenum primitive_mode, front_face, cull_face, depth_func;
         GLboolean depth_mask;
+        std::vector<gl_blend> blend;
+
         gl_pipeline(gl_device * device, const pipeline_desc & desc);
         ~gl_pipeline();
     };
@@ -287,17 +292,24 @@ uint64_t gl_device::submit(command_buffer & cmd)
         },
         [&](const bind_pipeline_command & c)
         {
-            current_pipeline = &static_cast<gl_pipeline &>(*c.pipe);
-            glUseProgram(current_pipeline->program_object);
-            bind_vertex_array(context, *current_pipeline);
+            auto & pipe = static_cast<gl_pipeline &>(*c.pipe);
+            glUseProgram(pipe.program_object);
+            bind_vertex_array(context, pipe);
             glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
-            for(auto cap : current_pipeline->enable) glEnable(cap);
-            for(auto cap : current_pipeline->disable) glDisable(cap);
-            glFrontFace(current_pipeline->front_face);
-            glCullFace(current_pipeline->cull_face);
-            glDepthFunc(current_pipeline->depth_func);
-            glDepthMask(current_pipeline->depth_mask);
+            for(auto cap : pipe.enable) glEnable(cap);
+            for(auto cap : pipe.disable) glDisable(cap);
+            glFrontFace(pipe.front_face);
+            glCullFace(pipe.cull_face);
+            glDepthFunc(pipe.depth_func);
+            glDepthMask(pipe.depth_mask);
+            for(size_t i=0; i<pipe.blend.size(); ++i)
+            {
+                glBlendEquationSeparatei(exactly(i), pipe.blend[i].color_op, pipe.blend[i].alpha_op);
+                glBlendFuncSeparatei(exactly(i), pipe.blend[i].src_color, pipe.blend[i].dst_color, pipe.blend[i].src_alpha, pipe.blend[i].dst_alpha);
+            }
+
+            current_pipeline = &pipe;
         },
         [](const bind_descriptor_set_command & c)
         {
@@ -584,6 +596,20 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
         depth_func = GL_ALWAYS;
     }
     depth_mask = desc.depth_write ? GL_TRUE : GL_FALSE;
+
+    // Blending state
+    bool enable_blend = false;
+    for(auto & b : desc.blend)
+    {
+        if(b.enable)
+        {
+            enable_blend = true;
+            blend.push_back({convert_gl(b.color.op), convert_gl(b.alpha.op), convert_gl(b.color.source_factor), convert_gl(b.color.dest_factor), convert_gl(b.alpha.source_factor), convert_gl(b.alpha.dest_factor)});
+        }
+        else blend.push_back({GL_FUNC_ADD, GL_FUNC_ADD, GL_ONE, GL_ZERO, GL_ONE, GL_ZERO});
+    }
+    if(enable_blend) enable.push_back(GL_BLEND);
+    else disable.push_back(GL_BLEND);
 }
 gl_pipeline::~gl_pipeline()
 {

@@ -303,9 +303,9 @@ namespace rhi
     };
     enum class cull_mode
     { 
-        none,
-        back,
-        front,
+        none,  // front face visible, back face visible
+        back,  // front face visible, back face culled
+        front, // front face culled, back face visible
     };
     enum class compare_op 
     { 

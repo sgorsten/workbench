@@ -24,6 +24,14 @@ RHI_PRIMITIVE_TOPOLOGY(rhi::primitive_topology::triangles, VK_PRIMITIVE_TOPOLOGY
 #undef RHI_PRIMITIVE_TOPOLOGY
 #endif
 
+// #define RHI_CULL_MODE(CASE, VK, DX, GL_ENABLED, GL_CULL_FACE)
+#ifdef RHI_CULL_MODE
+RHI_CULL_MODE(rhi::cull_mode::none,  VK_CULL_MODE_NONE,      D3D11_CULL_NONE,  false, GL_BACK)
+RHI_CULL_MODE(rhi::cull_mode::back,  VK_CULL_MODE_BACK_BIT,  D3D11_CULL_BACK,  true,  GL_BACK)
+RHI_CULL_MODE(rhi::cull_mode::front, VK_CULL_MODE_FRONT_BIT, D3D11_CULL_FRONT, true,  GL_FRONT)
+#undef RHI_CULL_MODE
+#endif
+
 // #define RHI_BLEND_OP(CASE, VK, DX, GL)
 #ifdef RHI_COMPARE_OP
 RHI_COMPARE_OP(rhi::compare_op::never,            VK_COMPARE_OP_NEVER,            D3D11_COMPARISON_NEVER,         GL_NEVER)

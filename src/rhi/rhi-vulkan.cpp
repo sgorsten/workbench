@@ -24,6 +24,10 @@ namespace rhi
         #define RHI_PRIMITIVE_TOPOLOGY(CASE, VK, DX, GL) case CASE: return VK;
         #include "rhi-tables.inl"
     }}
+    auto convert_vk(cull_mode mode) { switch(mode) { default: fail_fast();
+        #define RHI_CULL_MODE(CASE, VK, DX, GL_ENABLED, GL_CULL_FACE) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
     auto convert_vk(compare_op op) { switch(op) { default: fail_fast();
         #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return VK;
         #include "rhi-tables.inl"
@@ -34,6 +38,10 @@ namespace rhi
     }}
     auto convert_vk(blend_factor factor) { switch(factor) { default: fail_fast();
         #define RHI_BLEND_FACTOR(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
+    auto convert_vk(attribute_format format) { switch(format) { default: fail_fast();
+        #define RHI_ATTRIBUTE_FORMAT(CASE, VK, DX, GL_SIZE, GL_TYPE, GL_NORMALIZED) case CASE: return VK;
         #include "rhi-tables.inl"
     }}
     auto convert_vk(image_format format) { switch(format) { default: fail_fast();
@@ -985,12 +993,7 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    switch(desc.cull_mode)
-    {
-    case rhi::cull_mode::none: rasterizer.cullMode = VK_CULL_MODE_NONE; break;
-    case rhi::cull_mode::back: rasterizer.cullMode = VK_CULL_MODE_BACK_BIT; break;
-    case rhi::cull_mode::front: rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT; break;
-    }
+    rasterizer.cullMode = convert_vk(desc.cull_mode);
     switch(desc.front_face)
     {
     case rhi::front_face::counter_clockwise: rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; break;
@@ -1009,24 +1012,13 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
     multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
     multisampling.alphaToOneEnable = VK_FALSE; // Optional
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment {};
+    std::vector<VkPipelineColorBlendAttachmentState> blend_attachments;
+    for(auto & b : desc.blend) blend_attachments.push_back({b.enable, convert_vk(b.color.source_factor), convert_vk(b.color.dest_factor), convert_vk(b.color.op), convert_vk(b.alpha.source_factor), convert_vk(b.alpha.dest_factor), convert_vk(b.alpha.op), 0xF});
     VkPipelineColorBlendStateCreateInfo colorBlending {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
     colorBlending.logicOpEnable = VK_FALSE;
     colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
-    if(true) //render_pass.has_color_attachments())
-    {
-        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachment.blendEnable = VK_FALSE;
-        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        colorBlending.attachmentCount = 1;
-        colorBlending.pAttachments = &colorBlendAttachment;
-    }
+    colorBlending.attachmentCount = exactly(countof(blend_attachments));
+    colorBlending.pAttachments = blend_attachments.data();
     colorBlending.blendConstants[0] = 0.0f; // Optional
     colorBlending.blendConstants[1] = 0.0f; // Optional
     colorBlending.blendConstants[2] = 0.0f; // Optional
@@ -1057,16 +1049,7 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
     for(auto & b : desc.input)
     {
         bindings.push_back({(uint32_t)b.index, (uint32_t)b.stride, VK_VERTEX_INPUT_RATE_VERTEX});
-        for(auto & a : b.attributes)
-        {
-            switch(a.type)
-            {
-            case attribute_format::float1: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32_SFLOAT, (uint32_t)a.offset}); break;
-            case attribute_format::float2: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32_SFLOAT, (uint32_t)a.offset}); break;
-            case attribute_format::float3: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32_SFLOAT, (uint32_t)a.offset}); break;
-            case attribute_format::float4: attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, VK_FORMAT_R32G32B32A32_SFLOAT, (uint32_t)a.offset}); break;
-            }
-        }
+        for(auto & a : b.attributes) attributes.push_back({(uint32_t)a.index, (uint32_t)b.index, convert_vk(a.type), (uint32_t)a.offset});
     }
     VkPipelineVertexInputStateCreateInfo vertex_input_state {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, nullptr, 0, exactly(bindings.size()), bindings.data(), exactly(attributes.size()), attributes.data()};
 
