@@ -69,3 +69,22 @@ public:
     environment_map create_environment_map_from_cubemap(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap);
     environment_map create_environment_map_from_spheremap(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, int width, const coord_system & preferred_coords);
 };
+
+constexpr int pbr_per_scene_set_index = 0;
+constexpr int pbr_per_view_set_index = 1;
+constexpr int pbr_per_object_set_index = 2;
+
+struct pbr_per_scene_uniforms
+{
+    struct point_light { alignas(16) float3 position, light; };
+    point_light point_lights[4];
+};
+
+struct pbr_per_view_uniforms
+{
+    alignas(16) float4x4 view_proj_matrix;
+    alignas(16) float4x4 skybox_view_proj_matrix;
+    alignas(16) float3 eye_position;
+    alignas(16) float3 right_vector;
+    alignas(16) float3 down_vector;
+};

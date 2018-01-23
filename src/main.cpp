@@ -160,8 +160,8 @@ class device_session
     gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer, sphere_vertex_buffer, sphere_index_buffer;
     gfx::static_buffer font_buffer;
 
-    rhi::ptr<rhi::descriptor_set_layout> per_scene_view_layout, per_object_layout, skybox_per_object_layout;
-    rhi::ptr<rhi::pipeline_layout> pipe_layout, skybox_pipe_layout;
+    rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
+    rhi::ptr<rhi::pipeline_layout> common_layout, pipe_layout, skybox_pipe_layout;
     rhi::ptr<rhi::pipeline> wire_pipe, solid_pipe, skybox_pipe_cubemap, ui_pipe;
 
     rhi::ptr<rhi::sampler> nearest;
@@ -187,11 +187,14 @@ public:
     {
         desc_pool = dev->create_descriptor_pool();
 
-        per_scene_view_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::combined_image_sampler, 1},
+        per_scene_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::uniform_buffer, 1},
             {1, rhi::descriptor_type::combined_image_sampler, 1},
             {2, rhi::descriptor_type::combined_image_sampler, 1},
-            {3, rhi::descriptor_type::uniform_buffer, 1}
+            {3, rhi::descriptor_type::combined_image_sampler, 1}
+        });
+        per_view_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::uniform_buffer, 1}
         });
         per_object_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::uniform_buffer, 1},
@@ -200,8 +203,9 @@ public:
         skybox_per_object_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::combined_image_sampler, 1}
         });
-        pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, per_object_layout});
-        skybox_pipe_layout = dev->create_pipeline_layout({per_scene_view_layout, skybox_per_object_layout});
+        common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
+        pipe_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
+        skybox_pipe_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
 
         auto vs = dev->create_shader(assets.vs);
         auto fs = dev->create_shader(assets.fs);
@@ -285,20 +289,34 @@ public:
         desc_pool->reset();
         uniform_buffer.reset();
 
-        // Set up per scene and per view uniforms
-        auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
-        const auto proj_matrix = linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range);
-        struct { float4x4 view_proj_matrix, skybox_view_proj_matrix; float3 eye_position; } per_view_uniforms;
-        per_view_uniforms.view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, fb.get_ndc_coords()), cam.get_view_matrix());
-        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, fb.get_ndc_coords()), cam.get_skybox_view_matrix());
-        per_view_uniforms.eye_position = cam.position;
-        auto per_scene_view_set = desc_pool->alloc(*per_scene_view_layout);
-        per_scene_view_set->write(0, standard.get_image_sampler(), standard.get_brdf_integral_image());
-        per_scene_view_set->write(1, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
-        per_scene_view_set->write(2, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
-        per_scene_view_set->write(3, uniform_buffer.write(per_view_uniforms));
+        // Set up per scene uniforms
+        struct pbr_per_scene_uniforms per_scene_uniforms {};
+        per_scene_uniforms.point_lights[0] = {{-3, -3, 8}, {23.47f, 21.31f, 20.79f}};
+        per_scene_uniforms.point_lights[1] = {{ 3, -3, 8}, {23.47f, 21.31f, 20.79f}};
+        per_scene_uniforms.point_lights[2] = {{ 3,  3, 8}, {23.47f, 21.31f, 20.79f}};
+        per_scene_uniforms.point_lights[3] = {{-3,  3, 8}, {23.47f, 21.31f, 20.79f}};
+
+        auto per_scene_set = desc_pool->alloc(*per_scene_layout);
+        per_scene_set->write(0, uniform_buffer.write(per_scene_uniforms));
+        per_scene_set->write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
+        per_scene_set->write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
+        per_scene_set->write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
 
         auto cmd = dev->create_command_buffer();
+
+        // Set up per-view uniforms for a specific framebuffer
+        auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
+        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range), make_transform_4x4(cam.coords, fb.get_ndc_coords()));
+
+        pbr_per_view_uniforms per_view_uniforms;
+        per_view_uniforms.view_proj_matrix = mul(proj_matrix, cam.get_view_matrix());
+        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, cam.get_skybox_view_matrix());
+        per_view_uniforms.eye_position = cam.position;
+        per_view_uniforms.right_vector = cam.get_direction(coord_axis::right);
+        per_view_uniforms.down_vector = cam.get_direction(coord_axis::down);
+
+        auto per_view_set = desc_pool->alloc(*per_view_layout);
+        per_view_set->write(0, uniform_buffer.write(per_view_uniforms));
 
         // Draw objects to our primary framebuffer
         rhi::render_pass_desc pass;
@@ -306,12 +324,15 @@ public:
         pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
         cmd->begin_render_pass(pass, fb);
 
+        // Bind common descriptors
+        cmd->bind_descriptor_set(*common_layout, pbr_per_scene_set_index, *per_scene_set);
+        cmd->bind_descriptor_set(*common_layout, pbr_per_view_set_index, *per_view_set);
+
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe_cubemap);
-        cmd->bind_descriptor_set(*skybox_pipe_layout, 0, *per_scene_view_set);
         auto skybox_set = desc_pool->alloc(*skybox_per_object_layout);
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
-        cmd->bind_descriptor_set(*skybox_pipe_layout, 1, *skybox_set);
+        cmd->bind_descriptor_set(*skybox_pipe_layout, pbr_per_object_set_index, *skybox_set);
         cmd->bind_vertex_buffer(0, box_vertex_buffer);
         cmd->bind_index_buffer(box_index_buffer);
         cmd->draw_indexed(0, 36);
@@ -321,7 +342,7 @@ public:
         auto basis_set = desc_pool->alloc(*per_object_layout);
         basis_set->write(0, uniform_buffer.write(float4x4{linalg::identity}));
         basis_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*pipe_layout, 1, *basis_set);
+        cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *basis_set);
         cmd->bind_vertex_buffer(0, basis_vertex_buffer);
         cmd->draw(0, 6);
 
@@ -335,7 +356,7 @@ public:
         auto ground_set = desc_pool->alloc(*per_object_layout);
         ground_set->write(0, uniform_buffer.write(per_object));
         ground_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*pipe_layout, 1, *ground_set);
+        cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *ground_set);
         cmd->bind_vertex_buffer(0, ground_vertex_buffer);
         cmd->bind_index_buffer(ground_index_buffer);
         cmd->draw_indexed(0, 6);
@@ -353,7 +374,7 @@ public:
                 auto sphere_set = desc_pool->alloc(*per_object_layout);
                 sphere_set->write(0, uniform_buffer.write(per_object));
                 sphere_set->write(1, *nearest, *checkerboard);
-                cmd->bind_descriptor_set(*pipe_layout, 1, *sphere_set);                      
+                cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *sphere_set);                      
                 cmd->draw_indexed(0, 32*32*6);
             }
         }
@@ -364,7 +385,7 @@ public:
         ui_set->write(0, uniform_buffer.write(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
         ui_set->write(1, *nearest, *font_image);
         cmd->bind_pipeline(*ui_pipe);
-        cmd->bind_descriptor_set(*pipe_layout, 1, *ui_set);
+        cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *ui_set);
         cmd->bind_vertex_buffer(0, font_buffer);
         cmd->draw(0, 6);
 

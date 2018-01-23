@@ -90,8 +90,16 @@ namespace rhi
         const auto & p = static_cast<emulated_pipeline_layout &>(layout);
         const auto & s = static_cast<emulated_descriptor_set &>(set);
         if(s.layout != p.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
-        for(size_t i=0; i<s.layout->num_buffers; ++i) bind_buffer(p.sets[set_index].buffer_offset + i, *s.buffer_bindings[i].buffer, s.buffer_bindings[i].offset, s.buffer_bindings[i].size);
-        for(size_t i=0; i<s.layout->num_images; ++i) bind_image(p.sets[set_index].image_offset + i, *s.image_bindings[i].sampler, *s.image_bindings[i].image);
+        for(size_t i=0; i<s.layout->num_buffers; ++i)
+        {
+            if(!s.buffer_bindings[i].buffer) continue;
+            bind_buffer(p.sets[set_index].buffer_offset + i, *s.buffer_bindings[i].buffer, s.buffer_bindings[i].offset, s.buffer_bindings[i].size);
+        }
+        for(size_t i=0; i<s.layout->num_images; ++i)
+        {
+            if(!s.image_bindings[i].image) continue;
+            bind_image(p.sets[set_index].image_offset + i, *s.image_bindings[i].sampler, *s.image_bindings[i].image);
+        }
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////

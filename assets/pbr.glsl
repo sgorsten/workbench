@@ -1,15 +1,29 @@
 #include "preamble.glsl"
 
-// This function computes the full lighting to apply to a single fragment
-layout(set=0,binding=0) uniform sampler2D u_brdf_integration_map;
-layout(set=0,binding=1) uniform samplerCube u_irradiance_map;
-layout(set=0,binding=2) uniform samplerCube u_reflectance_map;
-layout(set=0,binding=3) uniform PerView
+struct point_light { vec3 position, light; };
+
+// Per-scene descriptors
+const int PER_SCENE = 0;
+layout(set=PER_SCENE, binding=0) uniform PerScene { point_light u_point_lights[4]; }; 
+layout(set=PER_SCENE, binding=1) uniform sampler2D u_brdf_integration_map;
+layout(set=PER_SCENE, binding=2) uniform samplerCube u_irradiance_map;
+layout(set=PER_SCENE, binding=3) uniform samplerCube u_reflectance_map;
+
+// Per-view descriptors
+const int PER_VIEW = 1;
+layout(set=PER_VIEW, binding=0) uniform PerView
 {
     mat4 u_view_proj_matrix;
     mat4 u_skybox_view_proj_matrix;
     vec3 u_eye_position;
+	vec3 u_right_vector;
+	vec3 u_down_vector;
 };
+
+// Per-object descriptors should be defined in sets above this index
+const int PER_OBJECT = 2;
+
+// This function computes the full lighting to apply to a single fragment
 const float MAX_REFLECTANCE_LOD = 4.0;
 vec3 compute_lighting(vec3 position, vec3 normal, vec3 albedo, float roughness, float metalness, float ambient_occlusion)
 {
@@ -33,14 +47,12 @@ vec3 compute_lighting(vec3 position, vec3 normal, vec3 albedo, float roughness, 
     }
 
     // Add contributions from direct lights
-    const vec3 light_positions[4] = {vec3(-3, -3, 8), vec3(3, -3, 8), vec3(3, 3, 8), vec3(-3, 3, 8)};
-    const vec3 light_colors[4] = {vec3(23.47, 21.31, 20.79), vec3(23.47, 21.31, 20.79), vec3(23.47, 21.31, 20.79), vec3(23.47, 21.31, 20.79)};
     for(int i=0; i<4; ++i)
     {
         // Evaluate light vector, half-angle vector, and radiance of light source at the current distance
-        const vec3 L = normalize(light_positions[i] - position);
+        const vec3 L = normalize(u_point_lights[i].position - position);
         const vec3 H = normalize(V + L);
-        const vec3 radiance = light_colors[i] / length2(light_positions[i] - position);
+        const vec3 radiance = u_point_lights[i].light / length2(u_point_lights[i].position - position);
         light += radiance * cook_torrance(N, V, L, H, albedo, F0, alpha, metalness);
     }
     return light;

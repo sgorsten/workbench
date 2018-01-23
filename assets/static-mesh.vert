@@ -2,7 +2,7 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
 #include "pbr.glsl"
-layout(set=1,binding=0) uniform PerObject 
+layout(set=PER_OBJECT,binding=0) uniform PerObject 
 { 
 	mat4 u_model_matrix;
 	vec2 u_material; // roughness, metalness
