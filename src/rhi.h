@@ -1,5 +1,4 @@
 #pragma once
-#include "core.h"
 #include "geometry.h" // For coord_system
 
 struct GLFWwindow;

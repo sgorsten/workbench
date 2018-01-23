@@ -23,7 +23,18 @@ public:
     void seek(int64_t offset);
 };
 
-struct image { int2 dimensions; rhi::image_format format; std::shared_ptr<void> pixels; };
+struct image 
+{ 
+    int2 dimensions; rhi::image_format format; std::shared_ptr<void> pixels;
+    const uint8_t * get_pixels() const { return static_cast<uint8_t *>(pixels.get()); }
+    uint8_t * get_pixels() { return static_cast<uint8_t *>(pixels.get()); }
+    static image allocate(int2 dimensions, rhi::image_format format)
+    {
+        auto memory = std::malloc(product(dimensions) * get_pixel_size(format));
+        if(!memory) throw std::bad_alloc();
+        return {dimensions, format, std::shared_ptr<void>(memory, std::free)};
+    }
+};
 class loader
 {
     std::vector<std::string> roots;

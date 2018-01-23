@@ -37,12 +37,17 @@
     <ClCompile Include="..\..\src\load.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\mesh.cpp">
+      <Filter>src\gfx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sprite.cpp">
+      <Filter>src\gfx</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\rhi\rhi-internal.h">
       <Filter>src\rhi</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\test.h" />
     <ClInclude Include="..\..\src\core.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -63,6 +68,12 @@
     </ClInclude>
     <ClInclude Include="..\..\src\load.h">
       <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\mesh.h">
+      <Filter>src\gfx</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sprite.h">
+      <Filter>src\gfx</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

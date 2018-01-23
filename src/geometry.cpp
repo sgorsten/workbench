@@ -1,5 +1,4 @@
 #include "geometry.h"
-#include "test.h"
 
 static constexpr coord_axis all_axes[] {coord_axis::forward, coord_axis::back, coord_axis::left, coord_axis::right, coord_axis::up, coord_axis::down};
 

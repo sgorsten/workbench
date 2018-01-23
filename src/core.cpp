@@ -1,6 +1,8 @@
 #include "core.h"
-#include "test.h"
 #include <iostream>
+
+#define DOCTEST_CONFIG_IMPLEMENT
+#include <doctest.h>
 
 void fail_fast()
 {

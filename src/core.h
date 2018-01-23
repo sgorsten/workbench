@@ -8,6 +8,13 @@
 #include <sstream>
 #include <functional>
 
+// globally include doctest when compiling in debug mode
+#ifdef NDEBUG
+#define DOCTEST_CONFIG_DISABLE
+#endif
+#define DOCTEST_CONFIG_NO_SHORT_MACRO_NAMES
+#include <doctest.h>
+
 [[noreturn]] void fail_fast(); // Call debug_break() and then exit
 void debug_break(); // If a debugger is attached, break, otherwise do nothing
 

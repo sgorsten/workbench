@@ -1,9 +1,8 @@
-#include "graphics.h"
-#include "io.h"
 #include "pbr.h"
 #include "load.h"
-#define DOCTEST_CONFIG_IMPLEMENT
-#include <doctest.h>
+#include "mesh.h"
+#include "sprite.h"
+
 #include <chrono>
 #include <iostream>
 
@@ -24,180 +23,91 @@ struct camera
     void move(coord_axis direction, float distance) { position += get_direction(direction) * distance; }
 };
 
-struct mesh_vertex
-{
-    float3 position, color, normal; float2 texcoord;
-    static rhi::vertex_binding_desc get_binding(int index)
-    {
-        return gfx::vertex_binder<mesh_vertex>(index)
-            .attribute(0, &mesh_vertex::position)
-            .attribute(1, &mesh_vertex::color)
-            .attribute(2, &mesh_vertex::normal)
-            .attribute(3, &mesh_vertex::texcoord);
-    }
-};
-
-struct ui_vertex
-{
-    float2 position, texcoord; float4 color;
-    static rhi::vertex_binding_desc get_binding(int index)
-    {
-        return gfx::vertex_binder<ui_vertex>(index)
-            .attribute(0, &ui_vertex::position)
-            .attribute(1, &ui_vertex::texcoord)
-            .attribute(2, &ui_vertex::color);
-    }
-};
-
-struct mesh
-{
-    std::vector<mesh_vertex> vertices;
-    std::vector<int2> lines;
-    std::vector<int3> triangles;
-};
-
-mesh make_basis_mesh()
-{
-    mesh m;
-    m.vertices = {{{0,0,0},{1,0,0}}, {{1,0,0},{1,0,0}}, {{0,0,0},{0,1,0}}, {{0,1,0},{0,1,0}}, {{0,0,0},{0,0,1}}, {{0,0,1},{0,0,1}}};
-    m.lines = {{0,1},{2,3},{4,5}};
-    return m;
-}
-
-mesh make_box_mesh(const float3 & color, const float3 & a, const float3 & b)
-{
-    mesh m;
-    m.vertices = {
-        {{a.x,a.y,a.z}, color, {-1,0,0}, {0,0}}, {{a.x,a.y,b.z}, color, {-1,0,0}, {0,1}}, {{a.x,b.y,b.z}, color, {-1,0,0}, {1,1}}, {{a.x,b.y,a.z}, color, {-1,0,0}, {1,0}},
-        {{b.x,b.y,a.z}, color, {+1,0,0}, {0,0}}, {{b.x,b.y,b.z}, color, {+1,0,0}, {0,1}}, {{b.x,a.y,b.z}, color, {+1,0,0}, {1,1}}, {{b.x,a.y,a.z}, color, {+1,0,0}, {1,0}},
-        {{a.x,a.y,a.z}, color, {0,-1,0}, {0,0}}, {{b.x,a.y,a.z}, color, {0,-1,0}, {0,1}}, {{b.x,a.y,b.z}, color, {0,-1,0}, {1,1}}, {{a.x,a.y,b.z}, color, {0,-1,0}, {1,0}},
-        {{a.x,b.y,b.z}, color, {0,+1,0}, {0,0}}, {{b.x,b.y,b.z}, color, {0,+1,0}, {0,1}}, {{b.x,b.y,a.z}, color, {0,+1,0}, {1,1}}, {{a.x,b.y,a.z}, color, {0,+1,0}, {1,0}},
-        {{a.x,a.y,a.z}, color, {0,0,-1}, {0,0}}, {{a.x,b.y,a.z}, color, {0,0,-1}, {0,1}}, {{b.x,b.y,a.z}, color, {0,0,-1}, {1,1}}, {{b.x,a.y,a.z}, color, {0,0,-1}, {1,0}},
-        {{b.x,a.y,b.z}, color, {0,0,+1}, {0,0}}, {{b.x,b.y,b.z}, color, {0,0,+1}, {0,1}}, {{a.x,b.y,b.z}, color, {0,0,+1}, {1,1}}, {{a.x,a.y,b.z}, color, {0,0,+1}, {1,0}},
-    };
-    m.triangles = {{0,1,2},{0,2,3},{4,5,6},{4,6,7},{8,9,10},{8,10,11},{12,13,14},{12,14,15},{16,17,18},{16,18,19},{20,21,22},{20,22,23}};
-    return m;
-}
-
-mesh make_sphere_mesh(int slices, int stacks, float radius)
-{
-    const auto make_vertex = [slices, stacks, radius](int i, int j)
-    {
-        const float tau = 6.2831853f, longitude = i*tau/slices, latitude = (j-(stacks*0.5f))*tau/2/stacks;
-        const float3 normal {cos(longitude)*cos(latitude), sin(latitude), sin(longitude)*cos(latitude)}; // Poles at +/-y
-        return mesh_vertex{normal*radius, {1,1,1}, normal, {(float)i/slices, (float)j/stacks}};
-    };
-
-    mesh m;
-    for(int i=0; i<slices; ++i)
-    {
-        for(int j=0; j<stacks; ++j)
-        {
-            int base = exactly(m.vertices.size());
-            m.vertices.push_back(make_vertex(i,j));
-            m.vertices.push_back(make_vertex(i,j+1));
-            m.vertices.push_back(make_vertex(i+1,j+1));
-            m.vertices.push_back(make_vertex(i+1,j));
-            m.triangles.push_back(base+int3(0,1,2));
-            m.triangles.push_back(base+int3(0,2,3));
-        }
-    }
-    return m;
-}
-
-mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3 & tangent_t)
-{
-    const auto normal = normalize(cross(tangent_s, tangent_t));
-    mesh m;
-    m.vertices =
-    {
-        {-tangent_s-tangent_t, color, normal, {0,0}},
-        {+tangent_s-tangent_t, color, normal, {1,0}},
-        {+tangent_s+tangent_t, color, normal, {1,1}},
-        {-tangent_s+tangent_t, color, normal, {0,1}}
-    };
-    m.triangles = {{0,1,2},{0,2,3}};
-    return m;
-}
-
-#define STB_TRUETYPE_IMPLEMENTATION  // force following include to generate implementation
-#include "stb_truetype.h"
-
 struct common_assets
 {
     coord_system game_coords;
     standard_shaders standard;
-    mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
-    rhi::shader_desc vs, fs, fs_unlit, ui_vs, ui_fs;
-    rhi::shader_desc skybox_vs, skybox_fs_cubemap;
+    rhi::shader_desc vs, lit_fs, unlit_fs, skybox_vs, skybox_fs, ui_vs, ui_fs;
     image env_spheremap;
-    std::vector<std::byte> font_buffer;
+    mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
 
-    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
+    sprite_sheet sheet;
+    gui_sprites sprites;
+    font_face face;
+
+    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up},
+        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20}
     {
-        env_spheremap = loader.load_image("monument-valley.hdr");
-
         shader_compiler compiler{loader};
         standard = standard_shaders::compile(compiler);
-
         vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
-        fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
-        fs_unlit = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
-
+        lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+        unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
         skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
-        skybox_fs_cubemap = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
-
+        skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
         ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
         ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
+
+        env_spheremap = loader.load_image("monument-valley.hdr");
 
         basis_mesh = make_basis_mesh();
         ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
         box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
         sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
 
-        font_buffer = loader.load_binary_file("arialbd.ttf");
+        sheet.prepare_sheet();
     }
 };
 
 class device_session
 {
+    const common_assets & assets;
     rhi::ptr<rhi::device> dev;
     standard_device_objects standard;
     rhi::device_info info;
     rhi::ptr<rhi::descriptor_pool> desc_pool;
     gfx::dynamic_buffer uniform_buffer;
-    uint64_t transient_resource_fence=0;
+    uint64_t transient_resource_fence;
 
-    gfx::static_buffer basis_vertex_buffer, ground_vertex_buffer, ground_index_buffer, box_vertex_buffer, box_index_buffer, sphere_vertex_buffer, sphere_index_buffer;
-    gfx::static_buffer font_buffer;
+    gui_context gui;
 
-    rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
-    rhi::ptr<rhi::pipeline_layout> common_layout, pipe_layout, skybox_pipe_layout;
-    rhi::ptr<rhi::pipeline> wire_pipe, solid_pipe, skybox_pipe_cubemap, ui_pipe;
+    gfx::simple_mesh basis, ground, box, sphere;
+
+    rhi::ptr<rhi::image> font_image;
+    rhi::ptr<rhi::image> checkerboard;
+    environment_map env;
 
     rhi::ptr<rhi::sampler> nearest;
 
-    rhi::ptr<rhi::image> font_image;
-
-    rhi::ptr<rhi::image> checkerboard;
-    environment_map env;
+    rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
+    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
+    rhi::ptr<rhi::pipeline> wire_pipe, solid_pipe, skybox_pipe, ui_pipe;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
-    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) :
+    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : assets{assets},
         dev{dev}, standard{dev, assets.standard}, info{dev->get_info()},
-        uniform_buffer{*dev, rhi::buffer_usage::uniform, 1024*1024},
-        basis_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.basis_mesh.vertices},
-        ground_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.ground_mesh.vertices},
-        box_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.box_mesh.vertices},
-        sphere_vertex_buffer{*dev, rhi::buffer_usage::vertex, assets.sphere_mesh.vertices},
-        ground_index_buffer{*dev, rhi::buffer_usage::index, assets.ground_mesh.triangles},
-        box_index_buffer{*dev, rhi::buffer_usage::index, assets.box_mesh.triangles},
-        sphere_index_buffer{*dev, rhi::buffer_usage::index, assets.sphere_mesh.triangles}
+        desc_pool{dev->create_descriptor_pool()}, uniform_buffer{*dev, rhi::buffer_usage::uniform, 1024*1024}, transient_resource_fence{0},
+        gui{assets.sprites, {512,512}, *dev}
     {
-        desc_pool = dev->create_descriptor_pool();
+        // Buffers
+        basis = {*dev, assets.basis_mesh.vertices, assets.basis_mesh.lines};
+        ground = {*dev, assets.ground_mesh.vertices, assets.ground_mesh.triangles};
+        box = {*dev, assets.box_mesh.vertices, assets.box_mesh.triangles};
+        sphere = {*dev, assets.sphere_mesh.vertices, assets.sphere_mesh.triangles};
 
+        // Samplers
+        nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+
+        // Images
+        const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
+        checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
+        font_image = dev->create_image({rhi::image_shape::_2d, {assets.sheet.img.dimensions,1}, 1, assets.sheet.img.format, rhi::sampled_image_bit}, {assets.sheet.img.get_pixels()});
+        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.get_pixels()});
+        env = standard.create_environment_map_from_spheremap(*desc_pool, uniform_buffer, *env_spheremap, 512, assets.game_coords);
+
+        // Descriptor set layouts
         per_scene_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::uniform_buffer, 1},
             {1, rhi::descriptor_type::combined_image_sampler, 1},
@@ -214,56 +124,48 @@ public:
         skybox_per_object_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::combined_image_sampler, 1}
         });
+
+        // Pipeline layouts
         common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
-        pipe_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
-        skybox_pipe_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
+        object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
+        skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
 
-        auto vs = dev->create_shader(assets.vs);
-        auto fs = dev->create_shader(assets.fs);
-        auto fs_unlit = dev->create_shader(assets.fs_unlit);
-        auto skybox_vs = dev->create_shader(assets.skybox_vs);
-        auto skybox_fs_cubemap = dev->create_shader(assets.skybox_fs_cubemap);
+        const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
+            .attribute(0, &mesh_vertex::position)
+            .attribute(1, &mesh_vertex::color)
+            .attribute(2, &mesh_vertex::normal)
+            .attribute(3, &mesh_vertex::texcoord);
+        const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
+            .attribute(0, &ui_vertex::position)
+            .attribute(1, &ui_vertex::texcoord)
+            .attribute(2, &ui_vertex::color);        
 
-        auto ui_vs = dev->create_shader(assets.ui_vs);
-        auto ui_fs = dev->create_shader(assets.ui_fs);
+        // Shaders
+        auto vs = dev->create_shader(assets.vs), lit_fs = dev->create_shader(assets.lit_fs), unlit_fs = dev->create_shader(assets.unlit_fs);
+        auto skybox_vs = dev->create_shader(assets.skybox_vs), skybox_fs = dev->create_shader(assets.skybox_fs);
+        auto ui_vs = dev->create_shader(assets.ui_vs), ui_fs = dev->create_shader(assets.ui_fs);
 
+        // Blend states
         const rhi::blend_state opaque {false};
         const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
-        wire_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs_unlit}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
-        solid_pipe = dev->create_pipeline({pipe_layout, {mesh_vertex::get_binding(0)}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
-        skybox_pipe_cubemap = dev->create_pipeline({skybox_pipe_layout, {mesh_vertex::get_binding(0)}, {skybox_vs,skybox_fs_cubemap}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-        ui_pipe = dev->create_pipeline({pipe_layout, {ui_vertex::get_binding(0)}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
+        // Pipelines
+        wire_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
+        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
+        ui_pipe = dev->create_pipeline({object_layout, {ui_vertex_binding}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
 
-        nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
-
+        ui_vertex verts[]
         {
-            stbtt_fontinfo font;
-            auto font_data = reinterpret_cast<const uint8_t *>(assets.font_buffer.data());
-            stbtt_InitFont(&font, font_data, stbtt_GetFontOffsetForIndex(font_data, 0));
+            {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
+            {{+0.5f,-0.5f}, {1,0}, {1,0,0,1}},
+            {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
+            {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
+            {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
+            {{-0.5f,+0.5f}, {0,1}, {1,0,0,1}}
+        };
 
-            int width, height;
-            auto bitmap = stbtt_GetCodepointBitmap(&font, 0, stbtt_ScaleForPixelHeight(&font, 64), 'A', &width, &height, 0,0);
-            font_image = dev->create_image({rhi::image_shape::_2d, {width,height,1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {bitmap});
-
-            ui_vertex verts[]
-            {
-                {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
-                {{+0.5f,-0.5f}, {1,0}, {1,0,0,1}},
-                {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
-                {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
-                {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
-                {{-0.5f,+0.5f}, {0,1}, {1,0,0,1}}
-            };
-            font_buffer = gfx::static_buffer{*dev, rhi::buffer_usage::vertex, verts};
-        }
-
-        const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
-        checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
-
-        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels.get()});
-        env = standard.create_environment_map_from_spheremap(*desc_pool, uniform_buffer, *env_spheremap, 512, assets.game_coords);
-
+        // Window
         gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));
         gwindow->set_pos(window_pos); 
     }
@@ -340,22 +242,19 @@ public:
         cmd->bind_descriptor_set(*common_layout, pbr_per_view_set_index, *per_view_set);
 
         // Draw skybox
-        cmd->bind_pipeline(*skybox_pipe_cubemap);
+        cmd->bind_pipeline(*skybox_pipe);
         auto skybox_set = desc_pool->alloc(*skybox_per_object_layout);
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
-        cmd->bind_descriptor_set(*skybox_pipe_layout, pbr_per_object_set_index, *skybox_set);
-        cmd->bind_vertex_buffer(0, box_vertex_buffer);
-        cmd->bind_index_buffer(box_index_buffer);
-        cmd->draw_indexed(0, 36);
+        cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
+        box.draw(*cmd);
 
         // Draw basis
         cmd->bind_pipeline(*wire_pipe);
         auto basis_set = desc_pool->alloc(*per_object_layout);
         basis_set->write(0, uniform_buffer.write(float4x4{linalg::identity}));
         basis_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *basis_set);
-        cmd->bind_vertex_buffer(0, basis_vertex_buffer);
-        cmd->draw(0, 6);
+        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *basis_set);
+        basis.draw(*cmd);
 
         // Draw the ground
         cmd->bind_pipeline(*solid_pipe);
@@ -367,14 +266,10 @@ public:
         auto ground_set = desc_pool->alloc(*per_object_layout);
         ground_set->write(0, uniform_buffer.write(per_object));
         ground_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *ground_set);
-        cmd->bind_vertex_buffer(0, ground_vertex_buffer);
-        cmd->bind_index_buffer(ground_index_buffer);
-        cmd->draw_indexed(0, 6);
+        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ground_set);
+        ground.draw(*cmd);
 
         // Draw a bunch of spheres
-        cmd->bind_vertex_buffer(0, sphere_vertex_buffer);
-        cmd->bind_index_buffer(sphere_index_buffer);
         for(int i=0; i<6; ++i)
         {
             for(int j=0; j<6; ++j)
@@ -385,8 +280,8 @@ public:
                 auto sphere_set = desc_pool->alloc(*per_object_layout);
                 sphere_set->write(0, uniform_buffer.write(per_object));
                 sphere_set->write(1, *nearest, *checkerboard);
-                cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *sphere_set);                      
-                cmd->draw_indexed(0, 32*32*6);
+                cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *sphere_set);
+                sphere.draw(*cmd);
             }
         }
 
@@ -396,9 +291,12 @@ public:
         ui_set->write(0, uniform_buffer.write(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
         ui_set->write(1, *nearest, *font_image);
         cmd->bind_pipeline(*ui_pipe);
-        cmd->bind_descriptor_set(*pipe_layout, pbr_per_object_set_index, *ui_set);
-        cmd->bind_vertex_buffer(0, font_buffer);
-        cmd->draw(0, 6);
+        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ui_set);
+
+        gui.begin_frame();
+        gui.draw_rounded_rect({10,10,140,44}, 6, {0,0,0,0.8f});
+        gui.draw_shadowed_text(assets.face, {1,1,1,1}, 20, 34, "This is a test");
+        gui.end_frame(*cmd);
 
         cmd->end_render_pass();
         transient_resource_fence = dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());

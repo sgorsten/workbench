@@ -23,15 +23,30 @@ namespace gfx
         template<class T> binary_view(const std::vector<T> & vec) : binary_view{vec.size()*sizeof(T), vec.data()} { static_assert(std::is_trivially_copyable_v<T>, "binary_view supports only trivially_copyable types"); }
     };
 
-    class static_buffer
+    struct static_buffer
     {
         rhi::ptr<rhi::buffer> buffer;
         size_t size;
-    public:
+
         static_buffer() : size{0} {}
         static_buffer(rhi::device & dev, rhi::buffer_usage usage, binary_view contents) : buffer{dev.create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
 
         operator rhi::buffer_range() const { return {*buffer, 0, size}; }
+    };
+
+    struct simple_mesh
+    {
+        gfx::static_buffer vertex_buffer, index_buffer;
+
+        simple_mesh() = default;
+        simple_mesh(rhi::device & dev, binary_view vertices, binary_view indices) : vertex_buffer{dev, rhi::buffer_usage::vertex, vertices}, index_buffer{dev, rhi::buffer_usage::index, indices} {}
+
+        void draw(rhi::command_buffer & cmd) const
+        {
+            cmd.bind_vertex_buffer(0, vertex_buffer);
+            cmd.bind_index_buffer(index_buffer);
+            cmd.draw_indexed(0, exactly(index_buffer.size/sizeof(int)));
+        }
     };
 
     class dynamic_buffer

@@ -169,23 +169,26 @@
     <ClCompile Include="..\..\src\graphics.cpp" />
     <ClCompile Include="..\..\src\load.cpp" />
     <ClCompile Include="..\..\src\main.cpp" />
+    <ClCompile Include="..\..\src\mesh.cpp" />
     <ClCompile Include="..\..\src\pbr.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-d3d11.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-internal.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-opengl.cpp" />
     <ClCompile Include="..\..\src\rhi\rhi-vulkan.cpp" />
     <ClCompile Include="..\..\src\shader.cpp" />
+    <ClCompile Include="..\..\src\sprite.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\core.h" />
     <ClInclude Include="..\..\src\geometry.h" />
     <ClInclude Include="..\..\src\graphics.h" />
     <ClInclude Include="..\..\src\load.h" />
+    <ClInclude Include="..\..\src\mesh.h" />
     <ClInclude Include="..\..\src\pbr.h" />
     <ClInclude Include="..\..\src\rhi.h" />
     <ClInclude Include="..\..\src\rhi\rhi-internal.h" />
     <ClInclude Include="..\..\src\shader.h" />
-    <ClInclude Include="..\..\src\test.h" />
+    <ClInclude Include="..\..\src\sprite.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\dep\glfw-3.2.1\glfw.vcxproj">
