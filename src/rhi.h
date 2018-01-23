@@ -1,10 +1,6 @@
 #pragma once
 #include "core.h"
-#include "geometry.h"
-#include <vector>
-#include <variant>
-#include <optional>
-#include <functional>
+#include "geometry.h" // For coord_system
 
 struct GLFWwindow;
 

@@ -109,6 +109,9 @@ mesh make_quad_mesh(const float3 & color, const float3 & tangent_s, const float3
     return m;
 }
 
+#define STB_TRUETYPE_IMPLEMENTATION  // force following include to generate implementation
+#include "stb_truetype.h"
+
 struct common_assets
 {
     coord_system game_coords;
@@ -117,6 +120,7 @@ struct common_assets
     rhi::shader_desc vs, fs, fs_unlit, ui_vs, ui_fs;
     rhi::shader_desc skybox_vs, skybox_fs_cubemap;
     image env_spheremap;
+    std::vector<std::byte> font_buffer;
 
     common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}
     {
@@ -139,12 +143,10 @@ struct common_assets
         ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
         box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
         sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
+
+        font_buffer = loader.load_binary_file("arialbd.ttf");
     }
 };
-
-#define STB_TRUETYPE_IMPLEMENTATION  // force following include to generate implementation
-#include "stb_truetype.h"
-unsigned char ttf_buffer[1<<25];
 
 class device_session
 {
@@ -167,10 +169,7 @@ class device_session
     rhi::ptr<rhi::image> font_image;
 
     rhi::ptr<rhi::image> checkerboard;
-    rhi::ptr<rhi::image> env_cubemap;
-    rhi::ptr<rhi::image> env_cubemap2;
-    rhi::ptr<rhi::image> env_cubemap3;
-    rhi::ptr<rhi::image> brdf_integral;
+    environment_map env;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
@@ -224,11 +223,13 @@ public:
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
 
         {
-            int w, h, s=64;
             stbtt_fontinfo font;
-            stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer,0));
-            auto bitmap = stbtt_GetCodepointBitmap(&font, 0,stbtt_ScaleForPixelHeight(&font, s), 'A', &w, &h, 0,0);
-            font_image = dev->create_image({rhi::image_shape::_2d, {w,h,1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {bitmap});
+            auto font_data = reinterpret_cast<const uint8_t *>(assets.font_buffer.data());
+            stbtt_InitFont(&font, font_data, stbtt_GetFontOffsetForIndex(font_data, 0));
+
+            int width, height;
+            auto bitmap = stbtt_GetCodepointBitmap(&font, 0, stbtt_ScaleForPixelHeight(&font, 64), 'A', &width, &height, 0,0);
+            font_image = dev->create_image({rhi::image_shape::_2d, {width,height,1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {bitmap});
 
             render_image_vertex verts[]
             {
@@ -246,10 +247,7 @@ public:
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
 
         auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.pixels});
-        env_cubemap = standard.create_cubemap_from_spheremap(512, *desc_pool, uniform_buffer, *env_spheremap, assets.game_coords);
-        env_cubemap2 = standard.create_irradiance_cubemap(32, *desc_pool, uniform_buffer, *env_cubemap);
-        env_cubemap3 = standard.create_reflectance_cubemap(128, *desc_pool, uniform_buffer, *env_cubemap);
-        brdf_integral = standard.create_brdf_integral_image(*desc_pool, uniform_buffer);
+        env = standard.create_environment_map_from_spheremap(*desc_pool, uniform_buffer, *env_spheremap, 512, assets.game_coords);
 
         gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));
         gwindow->set_pos(window_pos); 
@@ -295,9 +293,9 @@ public:
         per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, make_transform_4x4(cam.coords, fb.get_ndc_coords()), cam.get_skybox_view_matrix());
         per_view_uniforms.eye_position = cam.position;
         auto per_scene_view_set = desc_pool->alloc(*per_scene_view_layout);
-        per_scene_view_set->write(0, *standard.image_sampler, *brdf_integral);
-        per_scene_view_set->write(1, *standard.cubemap_sampler, *env_cubemap2);
-        per_scene_view_set->write(2, *standard.cubemap_sampler, *env_cubemap3);
+        per_scene_view_set->write(0, standard.get_image_sampler(), standard.get_brdf_integral_image());
+        per_scene_view_set->write(1, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
+        per_scene_view_set->write(2, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
         per_scene_view_set->write(3, uniform_buffer.write(per_view_uniforms));
 
         auto cmd = dev->create_command_buffer();
@@ -312,7 +310,7 @@ public:
         cmd->bind_pipeline(*skybox_pipe_cubemap);
         cmd->bind_descriptor_set(*skybox_pipe_layout, 0, *per_scene_view_set);
         auto skybox_set = desc_pool->alloc(*skybox_per_object_layout);
-        skybox_set->write(0, *standard.cubemap_sampler, *env_cubemap);
+        skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         cmd->bind_descriptor_set(*skybox_pipe_layout, 1, *skybox_set);
         cmd->bind_vertex_buffer(0, box_vertex_buffer);
         cmd->bind_index_buffer(box_index_buffer);
@@ -386,23 +384,21 @@ int main(int argc, const char * argv[]) try
         if(dt_context.shouldExit()) return dt_return;
     }
 
+    // Register asset paths
     std::cout << "Running from " << get_program_binary_path() << std::endl;
-
-    fread(ttf_buffer, 1, 1<<25, fopen("c:/windows/fonts/arialbd.ttf", "rb"));
-
-    // Launch the workbench
     loader loader;
     loader.register_root(get_program_binary_path() + "../../assets");
-
+    loader.register_root("C:/windows/fonts");
+    
+    // Loader assets and initialize state
     common_assets assets{loader};
     camera cam {assets.game_coords};
     cam.pitch += 0.8f;
     cam.move(coord_axis::back, 10.0f);
     
-    // Create the devices
+    // Create a session for each device
     gfx::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
-
     int2 pos{100,100};
     std::vector<std::unique_ptr<device_session>> sessions;
     for(auto & backend : context.get_backends())
@@ -413,6 +409,7 @@ int main(int argc, const char * argv[]) try
         pos.x += 600;
     }
 
+    // Main loop
     auto t0 = std::chrono::high_resolution_clock::now();
     bool running = true;
     while(running)

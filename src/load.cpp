@@ -13,10 +13,10 @@ file::file(std::string_view path, file_mode mode) : path{path}, f{fopen_utf8(pat
 file::~file() { if(f) fclose(f); }
 file::operator bool () const { return f != nullptr; }
 bool file::eof() const { return f ? feof(f) : 1; }
-size_t file::read(char * buffer, size_t size) { return f ? fread(buffer, 1, size, f) : 0; }
+size_t file::read(void * buffer, size_t size) { return f ? fread(buffer, 1, size, f) : 0; }
 void file::seek(int64_t offset) { if(f) fseek(f, exactly(offset), SEEK_CUR); }
 
-file loader::open_file(std::string_view filename, file_mode mode)
+file loader::open_file(std::string_view filename, file_mode mode) const
 {
     for(auto & root : roots)
     {
@@ -26,7 +26,15 @@ file loader::open_file(std::string_view filename, file_mode mode)
     throw std::runtime_error(to_string("failed to find file \"", filename, '"'));
 }
 
-std::vector<char> loader::load_text_file(std::string_view filename)
+std::vector<std::byte> loader::load_binary_file(std::string_view filename) const
+{
+    auto f = open_file(filename, file_mode::binary);
+    std::vector<std::byte> buffer(f.get_length());
+    buffer.resize(f.read(buffer.data(), buffer.size()));
+    return buffer;
+}
+
+std::vector<char> loader::load_text_file(std::string_view filename) const
 {
     auto f = open_file(filename, file_mode::text);
     std::vector<char> buffer(f.get_length());

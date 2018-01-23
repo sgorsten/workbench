@@ -1,6 +1,4 @@
 #pragma once
-#include <memory>
-#include <string>
 #include "rhi.h"
 
 class loader;

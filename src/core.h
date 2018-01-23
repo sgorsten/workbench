@@ -2,7 +2,11 @@
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <variant>
+#include <optional>
+#include <string_view>
 #include <sstream>
+#include <functional>
 
 [[noreturn]] void fail_fast(); // Call debug_break() and then exit
 void debug_break(); // If a debugger is attached, break, otherwise do nothing

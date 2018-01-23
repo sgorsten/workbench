@@ -1,8 +1,5 @@
 #pragma once
-#include "core.h"
-#include "rhi.h"
-#include <string_view>
-#include <optional>
+#include "rhi.h" // For rhi::image_format
 
 enum class file_mode { binary, text };
 class file
@@ -22,7 +19,7 @@ public:
     const std::string & get_path() const { return path; }
     size_t get_length() const { return length; }
     bool eof() const;
-    size_t read(char * buffer, size_t size);
+    size_t read(void * buffer, size_t size);
     void seek(int64_t offset);
 };
 
@@ -32,9 +29,11 @@ class loader
     std::vector<std::string> roots;
 public:
     void register_root(std::string_view root) { roots.push_back(to_string(root, '/')); }
-    file open_file(std::string_view filename, file_mode mode);
 
-    std::vector<char> load_text_file(std::string_view filename);
+    file open_file(std::string_view filename, file_mode mode) const;
+    std::vector<std::byte> load_binary_file(std::string_view filename) const;
+    std::vector<char> load_text_file(std::string_view filename) const;
+
     image load_image(std::string_view filename);
 };
 
