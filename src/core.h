@@ -65,6 +65,9 @@ template<class First, class... Rest> struct overload_set<First,Rest...> : First,
 };
 template<class... F> overload_set<F...> overload(F... f) { return {f...}; }
 
+// Round an integral value up to the next whole multiple of the alignment parameter
+template<class T> T round_up(T value, T alignment) { return (value+alignment-1)/alignment*alignment; }
+
 // Helper for forming strings via an ostringstream
 template<class... T> std::string to_string(T && ... args)
 {

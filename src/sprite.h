@@ -60,21 +60,17 @@ struct gui_sprites
     gui_sprites(sprite_sheet & sheet);
 };
 
+#include "graphics.h"
 struct ui_vertex { float2 position, texcoord; float4 color; };
 struct gui_context
 {
     const gui_sprites & sprites;
-    uint2 dims;
-    uint32_t num_quads;
+    gfx::transient_resource_pool & pool;
+    int2 dims;
+    uint32_t quad_count;
 
-    rhi::ptr<rhi::buffer> vertex_buffer, index_buffer;
-    ui_vertex * out_verts;
-    uint3 * out_tris;
-
-    gui_context(const gui_sprites & sprites, const uint2 & dims, rhi::device & device);
-
-    void begin_frame();
-
+    gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims);
+    
     void draw_sprite_sheet(const int2 & p);
     void draw_sprite(const rect & r, float s0, float t0, float s1, float t1, const float4 & color);
 
@@ -84,5 +80,6 @@ struct gui_context
     
     void draw_text(const font_face & font, const float4 & color, int x, int y, std::string_view text);
     void draw_shadowed_text(const font_face & font, const float4 & color, int x, int y, std::string_view text);
-    void end_frame(rhi::command_buffer & cmd);
+
+    void draw(rhi::command_buffer & cmd);
 };

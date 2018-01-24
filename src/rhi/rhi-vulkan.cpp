@@ -81,6 +81,7 @@ namespace rhi
         physical_device_selection selection {};
         VkDevice dev {};
         VkQueue queue {};
+        VkPhysicalDeviceProperties device_props {};
         VkPhysicalDeviceMemoryProperties mem_props {};
 
         // Resources for staging memory
@@ -147,6 +148,7 @@ namespace rhi
 
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
+        uint64_t get_last_submission_id() override { return submitted_index; }
         void wait_until_complete(uint64_t submit_id) override;
     };
 
@@ -162,6 +164,7 @@ namespace rhi
         vk_buffer(vk_device * device, const buffer_desc & desc, const void * initial_data);
         ~vk_buffer();
 
+        size_t get_offset_alignment() override { return exactly(device->device_props.limits.minUniformBufferOffsetAlignment); }
         char * get_mapped_memory() override { return mapped; }
     };
 
@@ -444,6 +447,7 @@ vk_device::vk_device(std::function<void(const char *)> debug_callback) : debug_c
     const VkDeviceCreateInfo device_info {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, nullptr, {}, 1, queue_infos, 1, layers, exactly(device_extensions.size()), device_extensions.data()};
     check("vkCreateDevice", vkCreateDevice(selection.physical_device, &device_info, nullptr, &dev));
     vkGetDeviceQueue(dev, selection.queue_family, 0, &queue);
+    vkGetPhysicalDeviceProperties(selection.physical_device, &device_props);
     vkGetPhysicalDeviceMemoryProperties(selection.physical_device, &mem_props);
 
     // Set up staging buffer
@@ -538,10 +542,10 @@ vk_buffer::vk_buffer(vk_device * device, const buffer_desc & desc, const void * 
     // Create buffer with appropriate usage flags
     VkBufferCreateInfo buffer_info {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     buffer_info.size = desc.size;
-    if(desc.usage == buffer_usage::vertex) buffer_info.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    if(desc.usage == buffer_usage::index) buffer_info.usage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if(desc.usage == buffer_usage::uniform) buffer_info.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    if(desc.usage == buffer_usage::storage) buffer_info.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if(desc.flags & rhi::vertex_buffer_bit) buffer_info.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    if(desc.flags & rhi::index_buffer_bit) buffer_info.usage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    if(desc.flags & rhi::uniform_buffer_bit) buffer_info.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    if(desc.flags & rhi::storage_buffer_bit) buffer_info.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     if(initial_data) buffer_info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     check("vkCreateBuffer", vkCreateBuffer(device->dev, &buffer_info, nullptr, &buffer_object));
@@ -550,7 +554,7 @@ vk_buffer::vk_buffer(vk_device * device, const buffer_desc & desc, const void * 
     VkMemoryRequirements mem_reqs;
     vkGetBufferMemoryRequirements(device->dev, buffer_object, &mem_reqs);
     VkMemoryPropertyFlags memory_property_flags = 0;
-    if(desc.dynamic) memory_property_flags |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    if(desc.flags & rhi::mapped_memory_bit) memory_property_flags |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     else memory_property_flags |= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     memory_object = device->allocate(mem_reqs, memory_property_flags);
     check("vkBindBufferMemory", vkBindBufferMemory(device->dev, buffer_object, memory_object, 0));
@@ -566,7 +570,7 @@ vk_buffer::vk_buffer(vk_device * device, const buffer_desc & desc, const void * 
     }
 
     // Map memory if requested to do so
-    if(desc.dynamic)
+    if(desc.flags & rhi::mapped_memory_bit)
     {
         check("vkMapMemory", vkMapMemory(device->dev, memory_object, 0, desc.size, 0, reinterpret_cast<void**>(&mapped)));
     }        

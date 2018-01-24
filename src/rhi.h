@@ -24,11 +24,11 @@ namespace rhi
     struct descriptor_set;
     struct command_buffer;
 
+    using buffer_flags = int;
     using image_flags = int;
 
     enum class shader_stage : int;
     enum class layout : int;
-    enum class buffer_usage : int;
     enum class image_format : int;
     enum class image_shape : int;
     enum class filter : int;
@@ -70,7 +70,11 @@ namespace rhi
     // Description structs //
     /////////////////////////
     
-    struct buffer_desc { size_t size; buffer_usage usage; bool dynamic; };
+    struct buffer_desc 
+    { 
+        size_t size; 
+        buffer_flags flags;
+    };
 
     struct image_desc
     {
@@ -168,10 +172,15 @@ namespace rhi
 
         virtual uint64_t submit(command_buffer & cmd) = 0;
         virtual uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) = 0; // Submit commands to execute when the next frame is available, followed by a present
-        virtual void wait_until_complete(uint64_t submit_id) = 0;
+        virtual uint64_t get_last_submission_id() = 0;
+        virtual void wait_until_complete(uint64_t submission_id) = 0;
     };
 
-    struct buffer : object { virtual char * get_mapped_memory() = 0; };
+    struct buffer : object 
+    { 
+        virtual size_t get_offset_alignment() = 0;
+        virtual char * get_mapped_memory() = 0; 
+    };
     struct sampler : object {};
     struct image : object {};
     struct framebuffer : object { virtual coord_system get_ndc_coords() const = 0; };
@@ -217,6 +226,15 @@ namespace rhi
     // Enumerated types //
     //////////////////////
 
+    enum buffer_flag : buffer_flags
+    {
+        vertex_buffer_bit  = 1<<0, // Buffer can supply vertex attributes
+        index_buffer_bit   = 1<<1, // Buffer can supply indices during indexed draw calls
+        uniform_buffer_bit = 1<<2, // Buffer can supply the contents of uniform blocks
+        storage_buffer_bit = 1<<3, // Buffer can supply the contents of buffer blocks
+        mapped_memory_bit  = 1<<4, // Buffer is permanently mapped into the client's address space
+    };
+
     enum image_flag : image_flags
     {
         sampled_image_bit    = 1<<0, // Image can be bound to a sampler
@@ -234,7 +252,6 @@ namespace rhi
         compute,
     };
 
-    enum class buffer_usage { vertex, index, uniform, storage };
     enum class image_shape
     { 
         _1d,

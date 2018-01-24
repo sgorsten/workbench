@@ -32,9 +32,9 @@ class standard_device_objects
 
     template<class F> void render_to_image(rhi::image & target_image, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline);
     template<class F> void render_to_cubemap(rhi::image & target_cube_map, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline);
-    rhi::ptr<rhi::image> create_cubemap_from_spheremap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, const coord_system & preferred_coords);
-    rhi::ptr<rhi::image> create_irradiance_cubemap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap);
-    rhi::ptr<rhi::image> create_reflectance_cubemap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap);
+    rhi::ptr<rhi::image> create_cubemap_from_spheremap(gfx::transient_resource_pool & pool, int width, rhi::image & spheremap, const coord_system & preferred_coords);
+    rhi::ptr<rhi::image> create_irradiance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap);
+    rhi::ptr<rhi::image> create_reflectance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap);
 public:
     standard_device_objects(rhi::ptr<rhi::device> dev, const standard_shaders & standard);
 
@@ -42,8 +42,8 @@ public:
     rhi::sampler & get_cubemap_sampler() { return *cubemap_sampler; }
     rhi::image & get_brdf_integral_image() { return *brdf_integral_image; }
     
-    environment_map create_environment_map_from_cubemap(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap);
-    environment_map create_environment_map_from_spheremap(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, int width, const coord_system & preferred_coords);
+    environment_map create_environment_map_from_cubemap(gfx::transient_resource_pool & pool, rhi::image & cubemap);
+    environment_map create_environment_map_from_spheremap(gfx::transient_resource_pool & pool, rhi::image & spheremap, int width, const coord_system & preferred_coords);
 };
 
 constexpr int pbr_per_scene_set_index = 0;

@@ -129,6 +129,7 @@ namespace rhi
 
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
+        uint64_t get_last_submission_id() override { return submitted_index; }
         void wait_until_complete(uint64_t submit_id) override;
     };
 
@@ -140,6 +141,7 @@ namespace rhi
         char * mapped = 0;
 
         d3d_buffer(ID3D11Device & device, ID3D11DeviceContext & ctx, const buffer_desc & desc, const void * initial_data);
+        size_t get_offset_alignment() override { return 256; } // 16 constants * 4 channels * 4 bytes per channel
         char * get_mapped_memory() override { return mapped; }
     };
 
@@ -270,7 +272,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer & buffer, size_t offset, size_t size)
             { 
                 ID3D11Buffer * buf = static_cast<d3d_buffer &>(buffer).buffer_object;
-                const UINT first_constant = exactly(offset/16), num_constants = exactly((size+255)/256*16);
+                const UINT first_constant = exactly(offset/16), num_constants = exactly(round_up<size_t>(size,256)/16);
                 ctx->VSSetConstantBuffers1(exactly(index), 1, &buf, &first_constant, &num_constants);
                 ctx->PSSetConstantBuffers1(exactly(index), 1, &buf, &first_constant, &num_constants);
             }, [this](size_t index, sampler & sampler, image & image) 
@@ -329,22 +331,22 @@ d3d_buffer::d3d_buffer(ID3D11Device & device, ID3D11DeviceContext & ctx, const b
 {
     D3D11_BUFFER_DESC buffer_desc {};
     buffer_desc.ByteWidth = exactly(desc.size);
-    buffer_desc.Usage = desc.dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
-    buffer_desc.BindFlags = 0;
-    switch(desc.usage)
+    buffer_desc.Usage = D3D11_USAGE_IMMUTABLE;
+    if(desc.flags & rhi::vertex_buffer_bit) buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER;
+    if(desc.flags & rhi::index_buffer_bit) buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER;
+    if(desc.flags & rhi::uniform_buffer_bit) buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER;
+    if(desc.flags & rhi::storage_buffer_bit) buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+    if(desc.flags & rhi::mapped_memory_bit)
     {
-    case buffer_usage::vertex: buffer_desc.BindFlags |= D3D11_BIND_VERTEX_BUFFER; break;
-    case buffer_usage::index: buffer_desc.BindFlags |= D3D11_BIND_INDEX_BUFFER; break;
-    case buffer_usage::uniform: buffer_desc.BindFlags |= D3D11_BIND_CONSTANT_BUFFER; break;
-    case buffer_usage::storage: buffer_desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE; break;
+        buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+        buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     }
-    buffer_desc.CPUAccessFlags = desc.dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
 
     D3D11_SUBRESOURCE_DATA data {};
     data.pSysMem = initial_data;
     check("ID3D11Device::CreateBuffer", device.CreateBuffer(&buffer_desc, initial_data ? &data : 0, buffer_object.init()));
 
-    if(desc.dynamic)
+    if(desc.flags & rhi::mapped_memory_bit)
     {
         D3D11_MAPPED_SUBRESOURCE sub;
         check("ID3D11DeviceContext::Map", ctx.Map(buffer_object, 0, D3D11_MAP_WRITE_DISCARD, 0, &sub));

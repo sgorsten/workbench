@@ -29,7 +29,7 @@ namespace gfx
         size_t size;
 
         static_buffer() : size{0} {}
-        static_buffer(rhi::device & dev, rhi::buffer_usage usage, binary_view contents) : buffer{dev.create_buffer({contents.size, usage, false}, contents.data)}, size(contents.size) {}
+        static_buffer(rhi::device & dev, rhi::buffer_flags flags, binary_view contents) : buffer{dev.create_buffer({contents.size, flags & ~rhi::mapped_memory_bit}, contents.data)}, size(contents.size) {}
 
         operator rhi::buffer_range() const { return {*buffer, 0, size}; }
     };
@@ -39,7 +39,7 @@ namespace gfx
         gfx::static_buffer vertex_buffer, index_buffer;
 
         simple_mesh() = default;
-        simple_mesh(rhi::device & dev, binary_view vertices, binary_view indices) : vertex_buffer{dev, rhi::buffer_usage::vertex, vertices}, index_buffer{dev, rhi::buffer_usage::index, indices} {}
+        simple_mesh(rhi::device & dev, binary_view vertices, binary_view indices) : vertex_buffer{dev, rhi::vertex_buffer_bit, vertices}, index_buffer{dev, rhi::index_buffer_bit, indices} {}
 
         void draw(rhi::command_buffer & cmd) const
         {
@@ -52,19 +52,52 @@ namespace gfx
     class dynamic_buffer
     {
         rhi::ptr<rhi::buffer> buffer;
+        size_t size, alignment;
         char * mapped;
-        size_t size, used;
+        
+        size_t offset, used;
     public:
-        dynamic_buffer(rhi::device & dev, rhi::buffer_usage usage, size_t size) : buffer{dev.create_buffer({size, usage, true}, nullptr)}, mapped{buffer->get_mapped_memory()}, size{size}, used{0} {}
+        dynamic_buffer(rhi::device & dev, rhi::buffer_flags flags, size_t size) : buffer{dev.create_buffer({size, flags | rhi::mapped_memory_bit}, nullptr)}, size{size}, alignment{buffer->get_offset_alignment()}, mapped{buffer->get_mapped_memory()}, offset{0}, used{0} {}
 
-        void reset() { used = 0; }
-        rhi::buffer_range write(binary_view contents)
+        void reset() { offset = used = 0; }
+
+        void begin() { offset = used = round_up(used, alignment); }
+        void write(binary_view contents)
         {
-            const rhi::buffer_range range {*buffer, (used+255)/256*256, contents.size};
-            used = range.offset + range.size;
-            if(used > size) throw std::runtime_error("out of memory");
-            memcpy(mapped + range.offset, contents.data, static_cast<size_t>(range.size));       
-            return range;
+            if(used + contents.size > size) throw std::runtime_error("out of memory");
+            memcpy(mapped + used, contents.data, contents.size);
+            used += contents.size;
+        }
+        rhi::buffer_range end() { return {*buffer, offset, used-offset}; }
+
+        rhi::buffer_range upload(binary_view contents) { begin(); write(contents); return end(); }
+    };
+
+    struct transient_resource_pool
+    {
+        rhi::ptr<rhi::descriptor_pool> descriptors;
+        dynamic_buffer uniforms, vertices, indices;
+        uint64_t last_submission_id=0;
+
+        transient_resource_pool() = default;
+        transient_resource_pool(rhi::device & dev) : 
+            descriptors{dev.create_descriptor_pool()}, 
+            uniforms{dev, rhi::uniform_buffer_bit, 1024*1024},
+            vertices{dev, rhi::vertex_buffer_bit, 1024*1024},
+            indices{dev, rhi::index_buffer_bit, 1024*1024} {}
+
+        void begin_frame(rhi::device & dev)
+        {
+            dev.wait_until_complete(last_submission_id);
+            descriptors->reset();
+            uniforms.reset();
+            vertices.reset();
+            indices.reset();
+        }
+
+        void end_frame(rhi::device & dev)
+        {
+            last_submission_id = dev.get_last_submission_id();
         }
     };
 

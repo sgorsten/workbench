@@ -138,18 +138,10 @@ gui_sprites::gui_sprites(sprite_sheet & sheet) : sheet{sheet}
 // gui_context //
 /////////////////
 
-gui_context::gui_context(const gui_sprites & sprites, const uint2 & dims, rhi::device & device) : sprites{sprites}, dims{dims},
-    vertex_buffer{device.create_buffer({1024*1024, rhi::buffer_usage::vertex, true}, nullptr)},
-    index_buffer{device.create_buffer({1024*1024, rhi::buffer_usage::index, true}, nullptr)}
+gui_context::gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims) : sprites{sprites}, pool{pool}, dims{dims}, quad_count{0}
 {
-
-}
-
-void gui_context::begin_frame()
-{
-    out_verts = reinterpret_cast<ui_vertex *>(vertex_buffer->get_mapped_memory());
-    out_tris = reinterpret_cast<uint3 *>(index_buffer->get_mapped_memory());
-    num_quads = 0;
+    pool.vertices.begin();
+    pool.indices.begin();
 }
 
 void gui_context::draw_sprite(const rect & r, float s0, float t0, float s1, float t1, const float4 & color)
@@ -158,13 +150,13 @@ void gui_context::draw_sprite(const rect & r, float s0, float t0, float s1, floa
     const float fy0 = r.y0*2.0f/dims.y-1;
     const float fx1 = r.x1*2.0f/dims.x-1;
     const float fy1 = r.y1*2.0f/dims.y-1;
-    *out_verts++ = {{fx0,fy0},{s0,t0},color};
-    *out_verts++ = {{fx0,fy1},{s0,t1},color};
-    *out_verts++ = {{fx1,fy1},{s1,t1},color};
-    *out_verts++ = {{fx1,fy0},{s1,t0},color};
-    *out_tris++ = (num_quads*4+uint3{0,1,2});
-    *out_tris++ = (num_quads*4+uint3{0,2,3});
-    ++num_quads;
+    pool.vertices.write(ui_vertex{{fx0,fy0}, {s0,t0}, color});
+    pool.vertices.write(ui_vertex{{fx0,fy1}, {s0,t1}, color});
+    pool.vertices.write(ui_vertex{{fx1,fy1}, {s1,t1}, color});
+    pool.vertices.write(ui_vertex{{fx1,fy0}, {s1,t0}, color});
+    pool.indices.write(quad_count*4 + uint3{0,1,2});
+    pool.indices.write(quad_count*4 + uint3{0,2,3});
+    ++quad_count;
 }
 
 void gui_context::draw_sprite_sheet(const int2 & p)
@@ -229,11 +221,11 @@ void gui_context::draw_shadowed_text(const font_face & font, const float4 & colo
     draw_text(font,color,x,y,text);
 }
 
-void gui_context::end_frame(rhi::command_buffer & cmd)
+void gui_context::draw(rhi::command_buffer & cmd)
 {
-    cmd.bind_vertex_buffer(0, {*vertex_buffer, 0, exactly(reinterpret_cast<char *>(out_verts) - vertex_buffer->get_mapped_memory())});
-    cmd.bind_index_buffer({*index_buffer, 0, exactly(reinterpret_cast<char *>(out_tris) - index_buffer->get_mapped_memory())});
-    cmd.draw_indexed(0, num_quads*6);
+    cmd.bind_vertex_buffer(0, pool.vertices.end());
+    cmd.bind_index_buffer(pool.indices.end());
+    cmd.draw_indexed(0, quad_count*6);
 }
 
 #define STB_TRUETYPE_IMPLEMENTATION

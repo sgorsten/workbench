@@ -65,11 +65,8 @@ class device_session
     rhi::ptr<rhi::device> dev;
     standard_device_objects standard;
     rhi::device_info info;
-    rhi::ptr<rhi::descriptor_pool> desc_pool;
-    gfx::dynamic_buffer uniform_buffer;
-    uint64_t transient_resource_fence;
-
-    gui_context gui;
+    gfx::transient_resource_pool pools[3];
+    int pool_index=0;
 
     gfx::simple_mesh basis, ground, box, sphere;
 
@@ -86,10 +83,8 @@ class device_session
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
-    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : assets{assets},
-        dev{dev}, standard{dev, assets.standard}, info{dev->get_info()},
-        desc_pool{dev->create_descriptor_pool()}, uniform_buffer{*dev, rhi::buffer_usage::uniform, 1024*1024}, transient_resource_fence{0},
-        gui{assets.sprites, {512,512}, *dev}
+    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : 
+        assets{assets}, dev{dev}, standard{dev, assets.standard}, info{dev->get_info()}, pools{*dev, *dev, *dev}
     {
         // Buffers
         basis = {*dev, assets.basis_mesh.vertices, assets.basis_mesh.lines};
@@ -105,7 +100,6 @@ public:
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
         font_image = dev->create_image({rhi::image_shape::_2d, {assets.sheet.img.dimensions,1}, 1, assets.sheet.img.format, rhi::sampled_image_bit}, {assets.sheet.img.get_pixels()});
         auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.get_pixels()});
-        env = standard.create_environment_map_from_spheremap(*desc_pool, uniform_buffer, *env_spheremap, 512, assets.game_coords);
 
         // Descriptor set layouts
         per_scene_layout = dev->create_descriptor_set_layout({
@@ -155,25 +149,14 @@ public:
         skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
         ui_pipe = dev->create_pipeline({object_layout, {ui_vertex_binding}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
 
-        ui_vertex verts[]
-        {
-            {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
-            {{+0.5f,-0.5f}, {1,0}, {1,0,0,1}},
-            {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
-            {{-0.5f,-0.5f}, {0,0}, {1,0,0,1}},
-            {{+0.5f,+0.5f}, {1,1}, {1,0,0,1}},
-            {{-0.5f,+0.5f}, {0,1}, {1,0,0,1}}
-        };
+        // Do some initial work
+        pools[pool_index].begin_frame(*dev);
+        env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, assets.game_coords);
+        pools[pool_index].end_frame(*dev);
 
         // Window
         gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));
         gwindow->set_pos(window_pos); 
-    }
-
-    ~device_session()
-    {
-        dev->wait_until_complete(transient_resource_fence);
-        gwindow.reset();
     }
 
     bool update(camera & cam, float timestep)
@@ -198,9 +181,9 @@ public:
     void render_frame(const camera & cam)
     {       
         // Reset resources
-        dev->wait_until_complete(transient_resource_fence);
-        desc_pool->reset();
-        uniform_buffer.reset();
+        pool_index = (pool_index+1)%3;
+        auto & pool = pools[pool_index];
+        pool.begin_frame(*dev);
 
         // Set up per scene uniforms
         struct pbr_per_scene_uniforms per_scene_uniforms {};
@@ -209,8 +192,8 @@ public:
         per_scene_uniforms.point_lights[2] = {{ 3,  3, 8}, {23.47f, 21.31f, 20.79f}};
         per_scene_uniforms.point_lights[3] = {{-3,  3, 8}, {23.47f, 21.31f, 20.79f}};
 
-        auto per_scene_set = desc_pool->alloc(*per_scene_layout);
-        per_scene_set->write(0, uniform_buffer.write(per_scene_uniforms));
+        auto per_scene_set = pool.descriptors->alloc(*per_scene_layout);
+        per_scene_set->write(0, pool.uniforms.upload(per_scene_uniforms));
         per_scene_set->write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
         per_scene_set->write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
         per_scene_set->write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
@@ -228,8 +211,8 @@ public:
         per_view_uniforms.right_vector = cam.get_direction(coord_axis::right);
         per_view_uniforms.down_vector = cam.get_direction(coord_axis::down);
 
-        auto per_view_set = desc_pool->alloc(*per_view_layout);
-        per_view_set->write(0, uniform_buffer.write(per_view_uniforms));
+        auto per_view_set = pool.descriptors->alloc(*per_view_layout);
+        per_view_set->write(0, pool.uniforms.upload(per_view_uniforms));
 
         // Draw objects to our primary framebuffer
         rhi::render_pass_desc pass;
@@ -243,15 +226,15 @@ public:
 
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe);
-        auto skybox_set = desc_pool->alloc(*skybox_per_object_layout);
+        auto skybox_set = pool.descriptors->alloc(*skybox_per_object_layout);
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
         box.draw(*cmd);
 
         // Draw basis
         cmd->bind_pipeline(*wire_pipe);
-        auto basis_set = desc_pool->alloc(*per_object_layout);
-        basis_set->write(0, uniform_buffer.write(float4x4{linalg::identity}));
+        auto basis_set = pool.descriptors->alloc(*per_object_layout);
+        basis_set->write(0, pool.uniforms.upload(float4x4{linalg::identity}));
         basis_set->write(1, *nearest, *checkerboard);
         cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *basis_set);
         basis.draw(*cmd);
@@ -263,8 +246,8 @@ public:
         per_object.model_matrix = translation_matrix(cam.coords(coord_axis::down)*0.5f);
         per_object.roughness = 0.5f;
         per_object.metalness = 0.0f;
-        auto ground_set = desc_pool->alloc(*per_object_layout);
-        ground_set->write(0, uniform_buffer.write(per_object));
+        auto ground_set = pool.descriptors->alloc(*per_object_layout);
+        ground_set->write(0, pool.uniforms.upload(per_object));
         ground_set->write(1, *nearest, *checkerboard);
         cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ground_set);
         ground.draw(*cmd);
@@ -277,8 +260,8 @@ public:
                 per_object.model_matrix = translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f));
                 per_object.roughness = (j+0.5f)/6;
                 per_object.metalness = (i+0.5f)/6;
-                auto sphere_set = desc_pool->alloc(*per_object_layout);
-                sphere_set->write(0, uniform_buffer.write(per_object));
+                auto sphere_set = pool.descriptors->alloc(*per_object_layout);
+                sphere_set->write(0, pool.uniforms.upload(per_object));
                 sphere_set->write(1, *nearest, *checkerboard);
                 cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *sphere_set);
                 sphere.draw(*cmd);
@@ -286,20 +269,22 @@ public:
         }
 
         // Draw the UI
+        gui_context gui = gui_context(assets.sprites, pool, gwindow->get_window_size());
+        gui.draw_rounded_rect({10,10,140,44}, 6, {0,0,0,0.8f});
+        gui.draw_shadowed_text(assets.face, {1,1,1,1}, 20, 34, "This is a test");
+
         const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
-        auto ui_set = desc_pool->alloc(*per_object_layout);
-        ui_set->write(0, uniform_buffer.write(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
+        auto ui_set = pool.descriptors->alloc(*per_object_layout);
+        ui_set->write(0, pool.uniforms.upload(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
         ui_set->write(1, *nearest, *font_image);
         cmd->bind_pipeline(*ui_pipe);
         cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ui_set);
-
-        gui.begin_frame();
-        gui.draw_rounded_rect({10,10,140,44}, 6, {0,0,0,0.8f});
-        gui.draw_shadowed_text(assets.face, {1,1,1,1}, 20, 34, "This is a test");
-        gui.end_frame(*cmd);
+        gui.draw(*cmd);
 
         cmd->end_render_pass();
-        transient_resource_fence = dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
+        dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
+
+        pool.end_frame(*dev);
     }
 };
 

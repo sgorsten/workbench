@@ -66,8 +66,8 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
         {{-1,-y},{-1,+1,+1}}, {{+1,-y},{+1,+1,+1}}, {{+1,+y},{+1,-1,+1}}, {{-1,-y},{-1,+1,+1}}, {{+1,+y},{+1,-1,+1}}, {{-1,+y},{-1,-1,+1}}, // standard positive z face
         {{-1,-y},{+1,+1,-1}}, {{+1,-y},{-1,+1,-1}}, {{+1,+y},{-1,-1,-1}}, {{-1,-y},{+1,+1,-1}}, {{+1,+y},{-1,-1,-1}}, {{-1,+y},{+1,-1,-1}}, // standard negative z face
     };
-    render_image_vertex_buffer = dev->create_buffer({sizeof(image_vertices), rhi::buffer_usage::vertex, false}, image_vertices);
-    render_cubemap_vertex_buffer = dev->create_buffer({sizeof(cubemap_vertices), rhi::buffer_usage::vertex, false}, cubemap_vertices);
+    render_image_vertex_buffer = dev->create_buffer({sizeof(image_vertices), rhi::vertex_buffer_bit}, image_vertices);
+    render_cubemap_vertex_buffer = dev->create_buffer({sizeof(cubemap_vertices), rhi::vertex_buffer_bit}, cubemap_vertices);
 
     auto render_image_vertex_shader = dev->create_shader(standard.render_image_vertex_shader);
     auto render_cubemap_vertex_shader = dev->create_shader(standard.render_cubemap_vertex_shader);
@@ -92,12 +92,12 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
     render_to_image(*brdf_integral_image, 0, {512,512}, false, [&](rhi::command_buffer & cmd) { cmd.bind_pipeline(*compute_brdf_integral_image_pipeline); });
 }
 
-rhi::ptr<rhi::image> standard_device_objects::create_cubemap_from_spheremap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, const coord_system & preferred_coords)
+rhi::ptr<rhi::image> standard_device_objects::create_cubemap_from_spheremap(gfx::transient_resource_pool & pool, int width, rhi::image & spheremap, const coord_system & preferred_coords)
 {
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, exactly(std::ceil(std::log2(width)+1)), rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
-    auto set = desc_pool.alloc(*op_set_layout);
+    auto set = pool.descriptors->alloc(*op_set_layout);
     set->write(0, *spheremap_sampler, spheremap);
-    set->write(1, uniform_buffer.write(make_transform_4x4(preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward})));
+    set->write(1, pool.uniforms.upload(make_transform_4x4(preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward})));
     render_to_cubemap(*target, 0, {width,width}, true, [&](rhi::command_buffer & cmd)
     {
         cmd.bind_pipeline(*copy_cubemap_from_spheremap_pipeline);
@@ -106,10 +106,10 @@ rhi::ptr<rhi::image> standard_device_objects::create_cubemap_from_spheremap(int 
     return target;
 }
 
-rhi::ptr<rhi::image> standard_device_objects::create_irradiance_cubemap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
+rhi::ptr<rhi::image> standard_device_objects::create_irradiance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap)
 {
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, 1, rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
-    auto set = desc_pool.alloc(*op_set_layout);
+    auto set = pool.descriptors->alloc(*op_set_layout);
     set->write(0, *cubemap_sampler, cubemap);
     render_to_cubemap(*target, 0, {width,width}, false, [&](rhi::command_buffer & cmd)
     {
@@ -119,14 +119,14 @@ rhi::ptr<rhi::image> standard_device_objects::create_irradiance_cubemap(int widt
     return target;
 }
 
-rhi::ptr<rhi::image> standard_device_objects::create_reflectance_cubemap(int width, rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
+rhi::ptr<rhi::image> standard_device_objects::create_reflectance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap)
 {
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, 5, rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
     for(int mip=0; mip<5; ++mip)
     {
-        auto set = desc_pool.alloc(*op_set_layout);
+        auto set = pool.descriptors->alloc(*op_set_layout);
         set->write(0, *cubemap_sampler, cubemap);
-        set->write(1, uniform_buffer.write(mip/4.0f));
+        set->write(1, pool.uniforms.upload(mip/4.0f));
         render_to_cubemap(*target, mip, {width,width}, false, [&](rhi::command_buffer & cmd)
         {
             cmd.bind_pipeline(*compute_reflectance_cubemap_pipeline);
@@ -137,13 +137,13 @@ rhi::ptr<rhi::image> standard_device_objects::create_reflectance_cubemap(int wid
     return target;    
 }
 
-environment_map standard_device_objects::create_environment_map_from_cubemap(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & cubemap)
+environment_map standard_device_objects::create_environment_map_from_cubemap(gfx::transient_resource_pool & pool, rhi::image & cubemap)
 {
-    return {&cubemap, create_irradiance_cubemap(32, desc_pool, uniform_buffer, cubemap), create_reflectance_cubemap(128, desc_pool, uniform_buffer, cubemap)};
+    return {&cubemap, create_irradiance_cubemap(pool, 32, cubemap), create_reflectance_cubemap(pool, 128, cubemap)};
 }
 
-environment_map standard_device_objects::create_environment_map_from_spheremap(rhi::descriptor_pool & desc_pool, gfx::dynamic_buffer & uniform_buffer, rhi::image & spheremap, int width, const coord_system & preferred_coords)
+environment_map standard_device_objects::create_environment_map_from_spheremap(gfx::transient_resource_pool & pool, rhi::image & spheremap, int width, const coord_system & preferred_coords)
 {
-    auto cubemap = create_cubemap_from_spheremap(width, desc_pool, uniform_buffer, spheremap, preferred_coords);
-    return create_environment_map_from_cubemap(desc_pool, uniform_buffer, *cubemap);
+    auto cubemap = create_cubemap_from_spheremap(pool, width, spheremap, preferred_coords);
+    return create_environment_map_from_cubemap(pool, *cubemap);
 }

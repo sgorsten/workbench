@@ -76,6 +76,7 @@ namespace rhi
 
         uint64_t submit(command_buffer & cmd) override;
         uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
+        uint64_t get_last_submission_id() override { return submitted_index; }
         void wait_until_complete(uint64_t submit_id) override;
     };
 
@@ -89,6 +90,7 @@ namespace rhi
 
         gl_buffer(gl_device * device, const buffer_desc & desc, const void * initial_data);
         ~gl_buffer();
+        size_t get_offset_alignment() override { GLint alignment; glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment); return alignment; }
         char * get_mapped_memory() override { return mapped; }
     };
 
@@ -371,9 +373,9 @@ gl_buffer::gl_buffer(gl_device * device, const buffer_desc & desc, const void * 
 {
     glCreateBuffers(1, &buffer_object);
     GLbitfield flags = 0;
-    if(desc.dynamic) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
+    if(desc.flags & rhi::mapped_memory_bit) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
     glNamedBufferStorage(buffer_object, desc.size, initial_data, flags);
-    if(desc.dynamic) mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer_object, GL_WRITE_ONLY));
+    if(desc.flags & rhi::mapped_memory_bit) mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer_object, GL_WRITE_ONLY));
 }
 gl_buffer::~gl_buffer()
 {
