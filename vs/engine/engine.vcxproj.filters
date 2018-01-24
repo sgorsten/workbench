@@ -1,0 +1,92 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{1421c855-f59b-4ae9-b56b-7caa56f46fb4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\rhi">
+      <UniqueIdentifier>{3c319e7d-aa03-4474-9f4d-2f6d7dc9f169}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="dep">
+      <UniqueIdentifier>{0772de11-404d-4a6d-a402-68384057c28e}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\dep\glad\src\glad.c">
+      <Filter>dep</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\core.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\geometry.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\graphics.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\load.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\mesh.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\pbr.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\shader.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\sprite.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\rhi\rhi-d3d11.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\rhi\rhi-internal.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\rhi\rhi-opengl.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\engine\rhi\rhi-vulkan.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\src\engine\core.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\geometry.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\graphics.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\load.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\mesh.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\pbr.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\rhi.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\shader.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\sprite.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\rhi\rhi-internal.h">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\src\engine\rhi\rhi-tables.inl">
+      <Filter>src\rhi</Filter>
+    </None>
+  </ItemGroup>
+</Project>

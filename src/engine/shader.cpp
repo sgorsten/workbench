@@ -4,10 +4,11 @@
 #include <vector>
 #include <variant>
 #include <optional>
-#include "../dep/glslang/glslang/Public/ShaderLang.h"
-#include "../dep/glslang/SPIRV/GlslangToSpv.h"
-#include "../dep/glslang/StandAlone/ResourceLimits.h"
-#include "../dep/glslang/SPIRV/spirv.hpp"
+#include "glslang/Public/ShaderLang.h"
+#include "SPIRV/GlslangToSpv.h"
+#include "SPIRV/spirv.hpp"
+#include "StandAlone/ResourceLimits.h"
+
 
 enum class sampler_dim { _1d, _2d, _3d, cube, rect, buffer, subpass_data };
 
