@@ -1,121 +1,121 @@
 #include "engine/pbr.h"
 #include "engine/mesh.h"
-#include "engine/sprite.h"
 #include "engine/camera.h"
+#include "engine/load.h"
 
 #include <chrono>
 #include <iostream>
 
 constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
-class device_session
+int main(int argc, const char * argv[]) try
 {
-    rhi::ptr<rhi::device> dev;
-    gfx::transient_resource_pool pools[3];
+    // Register asset paths
+    loader loader;
+    loader.register_root(get_program_binary_path() + "../../assets");
+
+    shader_compiler compiler{loader};
+    auto standard_sh = standard_shaders::compile(compiler);
+    auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
+    auto lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+    auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
+    auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
+    auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
+
+    auto env_spheremap_img = loader.load_image("monument-valley.hdr");
+    auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f);
+    auto box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
+    auto sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
+
+    camera cam {coords};
+    cam.pitch += 0.8f;
+    cam.move(coord_axis::back, 10.0f);
+    
+    // Create a session for each device
+    gfx::context context;
+    auto debug = [](const char * message) { std::cerr << message << std::endl; };
+    auto dev = context.get_backends().back().create_device(debug);
+
+    standard_device_objects standard = {dev, standard_sh};
+    gfx::simple_mesh ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};
+    gfx::simple_mesh box = {*dev, box_mesh.vertices, box_mesh.triangles};
+    gfx::simple_mesh sphere = {*dev, sphere_mesh.vertices, sphere_mesh.triangles};
+
+    // Samplers
+    auto nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+
+    // Images
+    const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
+    auto checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
+    auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
+
+    // Descriptor set layouts
+    auto per_scene_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+        {1, rhi::descriptor_type::combined_image_sampler, 1},
+        {2, rhi::descriptor_type::combined_image_sampler, 1},
+        {3, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+    auto per_view_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1}
+    });
+    auto per_object_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+        {1, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+    auto skybox_per_object_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+
+    // Pipeline layouts
+    auto common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
+    auto object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
+    auto skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
+
+    const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
+        .attribute(0, &mesh_vertex::position)
+        .attribute(1, &mesh_vertex::color)
+        .attribute(2, &mesh_vertex::normal)
+        .attribute(3, &mesh_vertex::texcoord);   
+
+    // Shaders
+    auto vss = dev->create_shader(vs), lit_fss = dev->create_shader(lit_fs), unlit_fss = dev->create_shader(unlit_fs);
+    auto skybox_vss = dev->create_shader(skybox_vs), skybox_fss = dev->create_shader(skybox_fs);
+
+    // Blend states
+    const rhi::blend_state opaque {false};
+    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
+
+    // Pipelines
+    auto light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
+
+    // Create transient resources
+    gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
     int pool_index=0;
 
-    standard_device_objects standard;
-    gfx::simple_mesh ground, box, sphere;
-    rhi::ptr<rhi::image> checkerboard;
-    environment_map env;
+    // Do some initial work
+    pools[pool_index].begin_frame(*dev);
+    auto env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, coords);
+    pools[pool_index].end_frame(*dev);
 
-    rhi::ptr<rhi::sampler> nearest;
-    rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
-    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
-    rhi::ptr<rhi::pipeline> light_pipe, solid_pipe, skybox_pipe;
+    // Window
+    auto gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - PBR Test"));
 
-    std::unique_ptr<gfx::window> gwindow;
+    // Main loop
     double2 last_cursor;
-public:
-    device_session(loader & loader, rhi::ptr<rhi::device> dev) : dev{dev}, pools{*dev, *dev, *dev}
+    auto t0 = std::chrono::high_resolution_clock::now();
+    while(!gwindow->should_close())
     {
-        shader_compiler compiler{loader};
-        auto standard_sh = standard_shaders::compile(compiler);
-        auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
-        auto lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
-        auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
-        auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
-        auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
-        auto ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
-        auto ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
+        // Poll events
+        context.poll_events();
 
-        standard = {dev, standard_sh};
+        // Compute timestep
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const auto timestep = std::chrono::duration<float>(t1-t0).count();
+        t0 = t1;
 
-        auto env_spheremap_img = loader.load_image("monument-valley.hdr");
-
-        auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f);
-        auto box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
-        auto sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
-
-        // Buffers
-        ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};
-        box = {*dev, box_mesh.vertices, box_mesh.triangles};
-        sphere = {*dev, sphere_mesh.vertices, sphere_mesh.triangles};
-
-        // Samplers
-        nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
-
-        // Images
-        const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
-        checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
-        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
-
-        // Descriptor set layouts
-        per_scene_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::uniform_buffer, 1},
-            {1, rhi::descriptor_type::combined_image_sampler, 1},
-            {2, rhi::descriptor_type::combined_image_sampler, 1},
-            {3, rhi::descriptor_type::combined_image_sampler, 1}
-        });
-        per_view_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::uniform_buffer, 1}
-        });
-        per_object_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::uniform_buffer, 1},
-            {1, rhi::descriptor_type::combined_image_sampler, 1}
-        });
-        skybox_per_object_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::combined_image_sampler, 1}
-        });
-
-        // Pipeline layouts
-        common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
-        object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
-        skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
-
-        const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
-            .attribute(0, &mesh_vertex::position)
-            .attribute(1, &mesh_vertex::color)
-            .attribute(2, &mesh_vertex::normal)
-            .attribute(3, &mesh_vertex::texcoord);
-        const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
-            .attribute(0, &ui_vertex::position)
-            .attribute(1, &ui_vertex::texcoord)
-            .attribute(2, &ui_vertex::color);        
-
-        // Shaders
-        auto vss = dev->create_shader(vs), lit_fss = dev->create_shader(lit_fs), unlit_fss = dev->create_shader(unlit_fs);
-        auto skybox_vss = dev->create_shader(skybox_vs), skybox_fss = dev->create_shader(skybox_fs);
-
-        // Blend states
-        const rhi::blend_state opaque {false};
-        const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
-
-        // Pipelines
-        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-
-        // Do some initial work
-        pools[pool_index].begin_frame(*dev);
-        env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, coords);
-        pools[pool_index].end_frame(*dev);
-
-        // Window
-        gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - PBR Test"));
-    }
-
-    bool update(camera & cam, float timestep)
-    {
+        // Handle input
         const double2 cursor = gwindow->get_cursor_pos();
         if(gwindow->get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
         {
@@ -130,11 +130,6 @@ public:
         if(gwindow->get_key(GLFW_KEY_S)) cam.move(coord_axis::back, cam_speed);
         if(gwindow->get_key(GLFW_KEY_D)) cam.move(coord_axis::right, cam_speed);
 
-        return !gwindow->should_close();
-    }
-
-    void render_frame(const camera & cam)
-    {       
         // Reset resources
         pool_index = (pool_index+1)%3;
         auto & pool = pools[pool_index];
@@ -225,47 +220,10 @@ public:
             }
         }
 
+        // Submit and end frame
         cmd->end_render_pass();
         dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
         pool.end_frame(*dev);
-    }
-};
-
-int main(int argc, const char * argv[]) try
-{
-    // Register asset paths
-    loader loader;
-    loader.register_root(get_program_binary_path() + "../../assets");
-    
-    // Loader assets and initialize state
-    camera cam {coords};
-    cam.pitch += 0.8f;
-    cam.move(coord_axis::back, 10.0f);
-    
-    // Create a session for each device
-    gfx::context context;
-    auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    auto dev = context.get_backends().back().create_device(debug);
-    device_session session {loader, dev};
-
-    // Main loop
-    auto t0 = std::chrono::high_resolution_clock::now();
-    bool running = true;
-    while(running)
-    {
-        // Render frame
-        session.render_frame(cam);
-
-        // Poll events
-        context.poll_events();
-
-        // Compute timestep
-        const auto t1 = std::chrono::high_resolution_clock::now();
-        const auto timestep = std::chrono::duration<float>(t1-t0).count();
-        t0 = t1;
-
-        // Handle input
-        if(!session.update(cam, timestep)) break;
     }
     return EXIT_SUCCESS;
 }
