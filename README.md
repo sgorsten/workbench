@@ -1,6 +1,6 @@
 # Overview
 
-Just some random programming experiments, based on some work in a few of my other repositories as well as some new stuff.
+Just some random programming experiments, based on some work in a few of my other repositories as well as some new stuff. Everything is work-in-progress, but some design notes and rationales are available [here](doc/design.md)
 
 # Dependencies
 
