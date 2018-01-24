@@ -197,6 +197,7 @@
     <ClCompile Include="..\..\src\engine\sprite.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\src\engine\camera.h" />
     <ClInclude Include="..\..\src\engine\core.h" />
     <ClInclude Include="..\..\src\engine\geometry.h" />
     <ClInclude Include="..\..\src\engine\graphics.h" />

@@ -1,72 +1,25 @@
 #include "engine/pbr.h"
 #include "engine/mesh.h"
 #include "engine/sprite.h"
+#include "engine/camera.h"
 
 #include <chrono>
 #include <iostream>
 
-// A viewpoint in space from which the scene will be viewed
-struct camera
+class device_session
 {
-    coord_system coords;
-    float3 position;
-    float pitch, yaw;
+    rhi::ptr<rhi::device> dev;
 
-    float4 get_orientation() const { return qmul(rotation_quat(coords.cross(coord_axis::forward, coord_axis::right), yaw), rotation_quat(coords.cross(coord_axis::forward, coord_axis::down), pitch)); }
-    float3 get_direction(coord_axis axis) const { return qrot(get_orientation(), coords(axis)); }
-
-    rigid_transform get_pose() const { return {get_orientation(), position}; }
-    float4x4 get_view_matrix() const { return get_pose().inverse().matrix(); }
-    float4x4 get_skybox_view_matrix() const { return rotation_matrix(qconj(get_orientation())); }
-
-    void move(coord_axis direction, float distance) { position += get_direction(direction) * distance; }
-};
-
-struct common_assets
-{
     coord_system game_coords;
-    standard_shaders standard;
-    rhi::shader_desc vs, lit_fs, unlit_fs, skybox_vs, skybox_fs, ui_vs, ui_fs;
-    image env_spheremap;
-    mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
-
     sprite_sheet sheet;
     gui_sprites sprites;
     font_face face;
 
-    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up},
-        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20}
-    {
-        shader_compiler compiler{loader};
-        standard = standard_shaders::compile(compiler);
-        vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
-        lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
-        unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
-        skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
-        skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
-        ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
-        ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
-
-        env_spheremap = loader.load_image("monument-valley.hdr");
-
-        basis_mesh = make_basis_mesh();
-        ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
-        box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
-        sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
-
-        sheet.prepare_sheet();
-    }
-};
-
-class device_session
-{
-    const common_assets & assets;
-    rhi::ptr<rhi::device> dev;
-    standard_device_objects standard;
     rhi::device_info info;
     gfx::transient_resource_pool pools[3];
     int pool_index=0;
 
+    standard_device_objects standard;
     gfx::simple_mesh basis, ground, box, sphere;
 
     rhi::ptr<rhi::image> font_image;
@@ -82,14 +35,35 @@ class device_session
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
-    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : 
-        assets{assets}, dev{dev}, standard{dev, assets.standard}, info{dev->get_info()}, pools{*dev, *dev, *dev}
+    device_session(loader & loader, rhi::ptr<rhi::device> dev) : dev{dev}, game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}, 
+        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20}, info{dev->get_info()}, pools{*dev, *dev, *dev}
     {
+        shader_compiler compiler{loader};
+        auto standard_sh = standard_shaders::compile(compiler);
+        auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
+        auto lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+        auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
+        auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
+        auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
+        auto ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
+        auto ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
+
+        standard = {dev, standard_sh};
+
+        auto env_spheremap_img = loader.load_image("monument-valley.hdr");
+
+        auto basis_mesh = make_basis_mesh();
+        auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
+        auto box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
+        auto sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
+
+        sheet.prepare_sheet();
+
         // Buffers
-        basis = {*dev, assets.basis_mesh.vertices, assets.basis_mesh.lines};
-        ground = {*dev, assets.ground_mesh.vertices, assets.ground_mesh.triangles};
-        box = {*dev, assets.box_mesh.vertices, assets.box_mesh.triangles};
-        sphere = {*dev, assets.sphere_mesh.vertices, assets.sphere_mesh.triangles};
+        basis = {*dev, basis_mesh.vertices, basis_mesh.lines};
+        ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};
+        box = {*dev, box_mesh.vertices, box_mesh.triangles};
+        sphere = {*dev, sphere_mesh.vertices, sphere_mesh.triangles};
 
         // Samplers
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
@@ -97,8 +71,8 @@ public:
         // Images
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
-        font_image = dev->create_image({rhi::image_shape::_2d, {assets.sheet.img.dimensions,1}, 1, assets.sheet.img.format, rhi::sampled_image_bit}, {assets.sheet.img.get_pixels()});
-        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.get_pixels()});
+        font_image = dev->create_image({rhi::image_shape::_2d, {sheet.img.dimensions,1}, 1, sheet.img.format, rhi::sampled_image_bit}, {sheet.img.get_pixels()});
+        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
 
         // Descriptor set layouts
         per_scene_layout = dev->create_descriptor_set_layout({
@@ -134,29 +108,28 @@ public:
             .attribute(2, &ui_vertex::color);        
 
         // Shaders
-        auto vs = dev->create_shader(assets.vs), lit_fs = dev->create_shader(assets.lit_fs), unlit_fs = dev->create_shader(assets.unlit_fs);
-        auto skybox_vs = dev->create_shader(assets.skybox_vs), skybox_fs = dev->create_shader(assets.skybox_fs);
-        auto ui_vs = dev->create_shader(assets.ui_vs), ui_fs = dev->create_shader(assets.ui_fs);
+        auto vss = dev->create_shader(vs), lit_fss = dev->create_shader(lit_fs), unlit_fss = dev->create_shader(unlit_fs);
+        auto skybox_vss = dev->create_shader(skybox_vs), skybox_fss = dev->create_shader(skybox_fs);
+        auto ui_vss = dev->create_shader(ui_vs), ui_fss = dev->create_shader(ui_fs);
 
         // Blend states
         const rhi::blend_state opaque {false};
         const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
         // Pipelines
-        wire_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
-        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-        ui_pipe = dev->create_pipeline({object_layout, {ui_vertex_binding}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
+        wire_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
+        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
+        ui_pipe = dev->create_pipeline({object_layout, {ui_vertex_binding}, {ui_vss,ui_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
 
         // Do some initial work
         pools[pool_index].begin_frame(*dev);
-        env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, assets.game_coords);
+        env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, game_coords);
         pools[pool_index].end_frame(*dev);
 
         // Window
-        gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));
-        gwindow->set_pos(window_pos); 
+        gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018"));
     }
 
     bool update(camera & cam, float timestep)
@@ -279,9 +252,9 @@ public:
         }
 
         // Draw the UI
-        gui_context gui = gui_context(assets.sprites, pool, gwindow->get_window_size());
+        gui_context gui = gui_context(sprites, pool, gwindow->get_window_size());
         gui.draw_rounded_rect({10,10,140,44}, 6, {0,0,0,0.8f});
-        gui.draw_shadowed_text(assets.face, {1,1,1,1}, 20, 34, "This is a test");
+        gui.draw_shadowed_text(face, {1,1,1,1}, 20, 34, "This is a test");
 
         const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
         auto ui_set = pool.descriptors->alloc(*per_object_layout);
@@ -316,23 +289,15 @@ int main(int argc, const char * argv[]) try
     loader.register_root("C:/windows/fonts");
     
     // Loader assets and initialize state
-    common_assets assets{loader};
-    camera cam {assets.game_coords};
+    camera cam {{coord_axis::right, coord_axis::forward, coord_axis::up}};
     cam.pitch += 0.8f;
     cam.move(coord_axis::back, 10.0f);
     
     // Create a session for each device
     gfx::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    int2 pos{100,100};
-    std::vector<std::unique_ptr<device_session>> sessions;
-    for(auto & backend : context.get_backends())
-    {
-        std::cout << "Initializing " << backend.name << " backend:\n";
-        sessions.push_back(std::make_unique<device_session>(assets, backend.name, backend.create_device(debug), pos));
-        std::cout << backend.name << " has been initialized." << std::endl;
-        pos.x += 600;
-    }
+    auto dev = context.get_backends().back().create_device(debug);
+    device_session session {loader, dev};
 
     // Main loop
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -340,7 +305,7 @@ int main(int argc, const char * argv[]) try
     while(running)
     {
         // Render frame
-        for(auto & s : sessions) s->render_frame(cam);
+        session.render_frame(cam);
 
         // Poll events
         context.poll_events();
@@ -351,7 +316,7 @@ int main(int argc, const char * argv[]) try
         t0 = t1;
 
         // Handle input
-        for(auto & s : sessions) if(!s->update(cam, timestep)) running = false;
+        if(!session.update(cam, timestep)) break;
     }
     return EXIT_SUCCESS;
 }

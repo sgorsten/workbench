@@ -36,6 +36,7 @@ class standard_device_objects
     rhi::ptr<rhi::image> create_irradiance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap);
     rhi::ptr<rhi::image> create_reflectance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap);
 public:
+    standard_device_objects() = default;
     standard_device_objects(rhi::ptr<rhi::device> dev, const standard_shaders & standard);
 
     rhi::sampler & get_image_sampler() { return *image_sampler; }

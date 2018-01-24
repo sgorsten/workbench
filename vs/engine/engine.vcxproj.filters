@@ -83,6 +83,9 @@
     <ClInclude Include="..\..\src\engine\rhi\rhi-internal.h">
       <Filter>src\rhi</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\engine\camera.h">
+      <Filter>src</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\engine\rhi\rhi-tables.inl">
