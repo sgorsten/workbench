@@ -78,7 +78,7 @@ class device_session
 
     rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
     rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
-    rhi::ptr<rhi::pipeline> wire_pipe, solid_pipe, skybox_pipe, ui_pipe;
+    rhi::ptr<rhi::pipeline> wire_pipe, light_pipe, solid_pipe, skybox_pipe, ui_pipe;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
@@ -145,6 +145,7 @@ public:
 
         // Pipelines
         wire_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
+        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
         ui_pipe = dev->create_pipeline({object_layout, {ui_vertex_binding}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
@@ -239,9 +240,19 @@ public:
         cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *basis_set);
         basis.draw(*cmd);
 
+        // Draw lights
+        cmd->bind_pipeline(*light_pipe);
+        for(auto & p : per_scene_uniforms.point_lights)
+        {
+            auto set = pool.descriptors->alloc(*per_object_layout);
+            set->write(0, pool.uniforms.upload(mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))));
+            set->write(1, *nearest, *checkerboard);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *set);
+            sphere.draw(*cmd);
+        }
+
         // Draw the ground
         cmd->bind_pipeline(*solid_pipe);
-
         struct { float4x4 model_matrix; float roughness, metalness; } per_object;
         per_object.model_matrix = translation_matrix(cam.coords(coord_axis::down)*0.5f);
         per_object.roughness = 0.5f;
