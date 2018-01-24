@@ -6,74 +6,50 @@
 #include <chrono>
 #include <iostream>
 
-struct common_assets
-{
-    coord_system game_coords;
-    standard_shaders standard;
-    rhi::shader_desc vs, lit_fs, unlit_fs, skybox_vs, skybox_fs, ui_vs, ui_fs;
-    image env_spheremap;
-    mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
-
-    sprite_sheet sheet;
-    gui_sprites sprites;
-    font_face face;
-
-    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up},
-        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20}
-    {
-        shader_compiler compiler{loader};
-        standard = standard_shaders::compile(compiler);
-        vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
-        lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
-        unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
-        skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
-        skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
-        ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
-        ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
-
-        env_spheremap = loader.load_image("monument-valley.hdr");
-
-        basis_mesh = make_basis_mesh();
-        ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
-        box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
-        sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
-
-        sheet.prepare_sheet();
-    }
-};
-
+constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
 class device_session
 {
-    const common_assets & assets;
     rhi::ptr<rhi::device> dev;
-    standard_device_objects standard;
-    rhi::device_info info;
     gfx::transient_resource_pool pools[3];
     int pool_index=0;
 
-    gfx::simple_mesh basis, ground, box, sphere;
-
-    rhi::ptr<rhi::image> font_image;
+    standard_device_objects standard;
+    gfx::simple_mesh ground, box, sphere;
     rhi::ptr<rhi::image> checkerboard;
     environment_map env;
 
     rhi::ptr<rhi::sampler> nearest;
-
     rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
-    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout, ui_layout;
-    rhi::ptr<rhi::pipeline> wire_pipe, light_pipe, solid_pipe, skybox_pipe, ui_pipe;
+    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
+    rhi::ptr<rhi::pipeline> light_pipe, solid_pipe, skybox_pipe;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
-    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : 
-        assets{assets}, dev{dev}, standard{dev, assets.standard}, info{dev->get_info()}, pools{*dev, *dev, *dev}
+    device_session(loader & loader, rhi::ptr<rhi::device> dev) : dev{dev}, pools{*dev, *dev, *dev}
     {
+        shader_compiler compiler{loader};
+        auto standard_sh = standard_shaders::compile(compiler);
+        auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
+        auto lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+        auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
+        auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
+        auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
+        auto ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
+        auto ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
+
+        standard = {dev, standard_sh};
+
+        auto env_spheremap_img = loader.load_image("monument-valley.hdr");
+
+        auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f);
+        auto box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
+        auto sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
+
         // Buffers
-        basis = {*dev, assets.basis_mesh.vertices, assets.basis_mesh.lines};
-        ground = {*dev, assets.ground_mesh.vertices, assets.ground_mesh.triangles};
-        box = {*dev, assets.box_mesh.vertices, assets.box_mesh.triangles};
-        sphere = {*dev, assets.sphere_mesh.vertices, assets.sphere_mesh.triangles};
+        ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};
+        box = {*dev, box_mesh.vertices, box_mesh.triangles};
+        sphere = {*dev, sphere_mesh.vertices, sphere_mesh.triangles};
 
         // Samplers
         nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
@@ -81,8 +57,7 @@ public:
         // Images
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
-        font_image = dev->create_image({rhi::image_shape::_2d, {assets.sheet.img.dimensions,1}, 1, assets.sheet.img.format, rhi::sampled_image_bit}, {assets.sheet.img.get_pixels()});
-        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.get_pixels()});
+        auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
 
         // Descriptor set layouts
         per_scene_layout = dev->create_descriptor_set_layout({
@@ -106,7 +81,6 @@ public:
         common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
         object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
         skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
-        ui_layout = dev->create_pipeline_layout({per_object_layout});
 
         const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
             .attribute(0, &mesh_vertex::position)
@@ -119,29 +93,25 @@ public:
             .attribute(2, &ui_vertex::color);        
 
         // Shaders
-        auto vs = dev->create_shader(assets.vs), lit_fs = dev->create_shader(assets.lit_fs), unlit_fs = dev->create_shader(assets.unlit_fs);
-        auto skybox_vs = dev->create_shader(assets.skybox_vs), skybox_fs = dev->create_shader(assets.skybox_fs);
-        auto ui_vs = dev->create_shader(assets.ui_vs), ui_fs = dev->create_shader(assets.ui_fs);
+        auto vss = dev->create_shader(vs), lit_fss = dev->create_shader(lit_fs), unlit_fss = dev->create_shader(unlit_fs);
+        auto skybox_vss = dev->create_shader(skybox_vs), skybox_fss = dev->create_shader(skybox_fs);
 
         // Blend states
         const rhi::blend_state opaque {false};
         const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
         // Pipelines
-        wire_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
-        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-        ui_pipe = dev->create_pipeline({ui_layout, {ui_vertex_binding}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
+        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
 
         // Do some initial work
         pools[pool_index].begin_frame(*dev);
-        env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, assets.game_coords);
+        env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, coords);
         pools[pool_index].end_frame(*dev);
 
         // Window
-        gwindow = std::make_unique<gfx::window>(*dev, int2{512,512}, to_string("Workbench 2018 Render Test (", name, ")"));
-        gwindow->set_pos(window_pos); 
+        gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - PBR Test"));
     }
 
     bool update(camera & cam, float timestep)
@@ -187,7 +157,7 @@ public:
 
         // Set up per-view uniforms for a specific framebuffer
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
-        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range), make_transform_4x4(cam.coords, fb.get_ndc_coords()));
+        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), make_transform_4x4(cam.coords, fb.get_ndc_coords()));
 
         pbr_per_view_uniforms per_view_uniforms;
         per_view_uniforms.view_proj_matrix = mul(proj_matrix, cam.get_view_matrix());
@@ -215,15 +185,7 @@ public:
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
         box.draw(*cmd);
-
-        // Draw basis
-        cmd->bind_pipeline(*wire_pipe);
-        auto basis_set = pool.descriptors->alloc(*per_object_layout);
-        basis_set->write(0, pool.uniforms.upload(float4x4{linalg::identity}));
-        basis_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *basis_set);
-        basis.draw(*cmd);
-
+        
         // Draw lights
         cmd->bind_pipeline(*light_pipe);
         for(auto & p : per_scene_uniforms.point_lights)
@@ -263,61 +225,28 @@ public:
             }
         }
 
-        // Draw the UI
-        gui_context gui = gui_context(assets.sprites, pool, gwindow->get_window_size());
-        gui.draw_rounded_rect({10,10,140,44}, 6, {0,0,0,0.8f});
-        gui.draw_shadowed_text(assets.face, {1,1,1,1}, 20, 34, "This is a test");
-
-        const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
-        auto ui_set = pool.descriptors->alloc(*per_object_layout);
-        ui_set->write(0, pool.uniforms.upload(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
-        ui_set->write(1, *nearest, *font_image);
-        cmd->bind_pipeline(*ui_pipe);
-        cmd->bind_descriptor_set(*ui_layout, 0, *ui_set);
-        gui.draw(*cmd);
-
         cmd->end_render_pass();
         dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
-
         pool.end_frame(*dev);
     }
 };
 
 int main(int argc, const char * argv[]) try
 {
-    // Run tests, if requested
-    if(argc > 1 && strcmp("--test", argv[1]) == 0)
-    {
-        doctest::Context dt_context;
-        dt_context.applyCommandLine(argc-1, argv+1);
-        const int dt_return = dt_context.run();
-        if(dt_context.shouldExit()) return dt_return;
-    }
-
     // Register asset paths
-    std::cout << "Running from " << get_program_binary_path() << std::endl;
     loader loader;
     loader.register_root(get_program_binary_path() + "../../assets");
-    loader.register_root("C:/windows/fonts");
     
     // Loader assets and initialize state
-    common_assets assets{loader};
-    camera cam {assets.game_coords};
+    camera cam {coords};
     cam.pitch += 0.8f;
     cam.move(coord_axis::back, 10.0f);
     
     // Create a session for each device
     gfx::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    int2 pos{100,100};
-    std::vector<std::unique_ptr<device_session>> sessions;
-    for(auto & backend : context.get_backends())
-    {
-        std::cout << "Initializing " << backend.name << " backend:\n";
-        sessions.push_back(std::make_unique<device_session>(assets, backend.name, backend.create_device(debug), pos));
-        std::cout << backend.name << " has been initialized." << std::endl;
-        pos.x += 600;
-    }
+    auto dev = context.get_backends().back().create_device(debug);
+    device_session session {loader, dev};
 
     // Main loop
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -325,7 +254,7 @@ int main(int argc, const char * argv[]) try
     while(running)
     {
         // Render frame
-        for(auto & s : sessions) s->render_frame(cam);
+        session.render_frame(cam);
 
         // Poll events
         context.poll_events();
@@ -336,7 +265,7 @@ int main(int argc, const char * argv[]) try
         t0 = t1;
 
         // Handle input
-        for(auto & s : sessions) if(!s->update(cam, timestep)) running = false;
+        if(!session.update(cam, timestep)) break;
     }
     return EXIT_SUCCESS;
 }

@@ -29,7 +29,7 @@ class device_session
     rhi::ptr<rhi::sampler> nearest;
 
     rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
-    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
+    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout, ui_layout;
     rhi::ptr<rhi::pipeline> wire_pipe, light_pipe, solid_pipe, skybox_pipe, ui_pipe;
 
     std::unique_ptr<gfx::window> gwindow;
@@ -96,6 +96,7 @@ public:
         common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
         object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
         skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
+        ui_layout = dev->create_pipeline_layout({per_object_layout});
 
         const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
             .attribute(0, &mesh_vertex::position)
@@ -121,7 +122,7 @@ public:
         light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-        ui_pipe = dev->create_pipeline({object_layout, {ui_vertex_binding}, {ui_vss,ui_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
+        ui_pipe = dev->create_pipeline({ui_layout, {ui_vertex_binding}, {ui_vss,ui_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
 
         // Do some initial work
         pools[pool_index].begin_frame(*dev);
@@ -261,7 +262,7 @@ public:
         ui_set->write(0, pool.uniforms.upload(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
         ui_set->write(1, *nearest, *font_image);
         cmd->bind_pipeline(*ui_pipe);
-        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ui_set);
+        cmd->bind_descriptor_set(*ui_layout, 0, *ui_set);
         gui.draw(*cmd);
 
         cmd->end_render_pass();
