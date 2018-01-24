@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26730.3
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "workbench", "vs\workbench\workbench.vcxproj", "{C259C7AA-2BC0-4052-BC71-FB736E5173D3}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "glfw", "dep\glfw-3.2.1\glfw.vcxproj", "{DD49FFD2-B9AF-4884-AF10-7E4DBB4CF949}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "glslang", "dep\glslang\glslang.vcxproj", "{D1BE33DC-7603-4B18-9A36-404BFA8A80FA}"
@@ -33,14 +31,6 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Debug|x64.ActiveCfg = Debug|x64
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Debug|x64.Build.0 = Debug|x64
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Debug|x86.ActiveCfg = Debug|Win32
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Debug|x86.Build.0 = Debug|Win32
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Release|x64.ActiveCfg = Release|x64
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Release|x64.Build.0 = Release|x64
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Release|x86.ActiveCfg = Release|Win32
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3}.Release|x86.Build.0 = Release|Win32
 		{DD49FFD2-B9AF-4884-AF10-7E4DBB4CF949}.Debug|x64.ActiveCfg = Debug|x64
 		{DD49FFD2-B9AF-4884-AF10-7E4DBB4CF949}.Debug|x64.Build.0 = Debug|x64
 		{DD49FFD2-B9AF-4884-AF10-7E4DBB4CF949}.Debug|x86.ActiveCfg = Debug|Win32
@@ -102,7 +92,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{C259C7AA-2BC0-4052-BC71-FB736E5173D3} = {7DE75E0D-FA7D-4A22-B1B6-BE75D4D9E0BB}
 		{DD49FFD2-B9AF-4884-AF10-7E4DBB4CF949} = {8B7B1207-D104-462C-8131-26E1D5C51EA3}
 		{D1BE33DC-7603-4B18-9A36-404BFA8A80FA} = {8B7B1207-D104-462C-8131-26E1D5C51EA3}
 		{BC591C12-3043-4761-A80A-D0ACFCD39D79} = {8B7B1207-D104-462C-8131-26E1D5C51EA3}

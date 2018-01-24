@@ -4,12 +4,12 @@
 standard_shaders standard_shaders::compile(shader_compiler & compiler)
 {
     standard_shaders standard;
-    standard.render_image_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "render-image.vert");
-    standard.compute_brdf_integral_image_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "compute-brdf-integral-image.frag");
-    standard.render_cubemap_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "render-cubemap.vert");
-    standard.copy_cubemap_from_spheremap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "copy-cubemap-from-spheremap.frag");
-    standard.compute_irradiance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "compute-irradiance-cubemap.frag");
-    standard.compute_reflectance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "compute-reflectance-cubemap.frag");
+    standard.render_image_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "standard/render-image.vert");
+    standard.compute_brdf_integral_image_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/compute-brdf-integral-image.frag");
+    standard.render_cubemap_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "standard/render-cubemap.vert");
+    standard.copy_cubemap_from_spheremap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/copy-cubemap-from-spheremap.frag");
+    standard.compute_irradiance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/compute-irradiance-cubemap.frag");
+    standard.compute_reflectance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/compute-reflectance-cubemap.frag");
     return standard;
 }
 

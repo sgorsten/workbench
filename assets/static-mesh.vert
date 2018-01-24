@@ -1,7 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
-#include "pbr.glsl"
+#include "standard/pbr.glsl"
 layout(set=PER_OBJECT,binding=0) uniform PerObject 
 { 
 	mat4 u_model_matrix;
