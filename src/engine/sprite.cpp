@@ -145,7 +145,7 @@ gui_sprites::gui_sprites(sprite_sheet & sheet) : sheet{sheet}
 // gui_context //
 /////////////////
 
-gui_context::gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims) : sprites{sprites}, pool{pool}, dims{dims}
+gui_context::gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims) : sprites{sprites}, pool{pool}, dims{dims}, vertex_count{0}
 {
     pool.vertices.begin();
     pool.indices.begin();
@@ -188,9 +188,10 @@ void gui_context::draw_quad(ui_vertex v0, ui_vertex v1, ui_vertex v2, ui_vertex 
     pool.vertices.write(v1);
     pool.vertices.write(v2);
     pool.vertices.write(v3);
-    pool.indices.write(lists.back().last*4 + uint3{0,1,2});
-    pool.indices.write(lists.back().last*4 + uint3{0,2,3});
-    ++lists.back().last;
+    pool.indices.write(vertex_count + uint3{0,1,2});
+    pool.indices.write(vertex_count + uint3{0,2,3});
+    vertex_count += 4;
+    lists.back().last += 6;
 }
 
 void gui_context::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color)
@@ -309,7 +310,11 @@ void gui_context::draw(rhi::command_buffer & cmd)
     std::sort(lists.begin(), lists.end(), [](const list & a, const list & b) { return a.level < b.level; });
     cmd.bind_vertex_buffer(0, pool.vertices.end());
     cmd.bind_index_buffer(pool.indices.end());
-    for(auto & list : lists) cmd.draw_indexed(list.first*6, (list.last-list.first)*6);
+    for(auto & list : lists) 
+    {
+        cmd.set_scissor_rect(list.scissor.x0, list.scissor.y0, list.scissor.x1, list.scissor.y1);
+        cmd.draw_indexed(list.first, list.last - list.first);
+    }
 }
 
 #define STB_TRUETYPE_IMPLEMENTATION

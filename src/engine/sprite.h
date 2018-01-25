@@ -64,7 +64,7 @@ struct gui_sprites
 
 #include "graphics.h"
 struct ui_vertex { float2 position, texcoord; float4 color; };
-struct gui_context
+class gui_context
 {
     struct list { rect scissor; uint32_t level,first,last; };
     const gui_sprites & sprites;
@@ -72,7 +72,8 @@ struct gui_context
     int2 dims;
     std::vector<list> lists;
     std::vector<rect> scissors;
-
+    uint32_t vertex_count;
+public:
     gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims);
     
     void begin_overlay();

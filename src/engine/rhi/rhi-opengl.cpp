@@ -261,6 +261,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
     GLFWwindow * context = hidden_window;
     gl_pipeline * current_pipeline = nullptr;
     const char * base_indices_pointer = 0;
+    int framebuffer_height = 0;
     glfwMakeContextCurrent(context);
     static_cast<const emulated_command_buffer &>(cmd).execute(overload(
         [](const generate_mipmaps_command & c)
@@ -270,11 +271,14 @@ uint64_t gl_device::submit(command_buffer & cmd)
         [&](const begin_render_pass_command & c)
         {
             auto & fb = static_cast<gl_framebuffer &>(*c.framebuffer);
+            framebuffer_height = fb.dims.y;
             context = fb.glfw_window ? fb.glfw_window : hidden_window;
             glfwMakeContextCurrent(context);
             glEnable(GL_FRAMEBUFFER_SRGB);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb.framebuffer_object);
             glViewport(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
+            glScissor(0, 0, exactly(fb.dims.x), exactly(fb.dims.y));
+            glEnable(GL_SCISSOR_TEST);
 
             // Clear render targets if specified by render pass
             for(size_t i=0; i<c.pass.color_attachments.size(); ++i)
@@ -295,6 +299,10 @@ uint64_t gl_device::submit(command_buffer & cmd)
                     glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
                 }
             }
+        },
+        [&](const set_scissor_rect_command & c)
+        {
+            glScissor(c.x0, framebuffer_height-c.y1, c.x1-c.x0, c.y1-c.y0);
         },
         [&](const bind_pipeline_command & c)
         {

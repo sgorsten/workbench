@@ -265,8 +265,8 @@ public:
 
         // Draw the UI
         gui_context gui = gui_context(assets.sprites, pool, gwindow->get_window_size());
-        gui.draw_rounded_rect({10,10,140,44}, 6, {0,0,0,0.8f});
-        gui.draw_shadowed_text(assets.face, {1,1,1,1}, 20, 34, "This is a test");
+        gui.draw_rounded_rect({10,10,140,30+assets.face.line_height}, 6, {0,0,0,0.8f});
+        gui.draw_shadowed_text(assets.face, {1,1,1,1}, {20,20}, "This is a test");
 
         const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
         auto ui_set = pool.descriptors->alloc(*per_object_layout);

@@ -254,6 +254,13 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             ctx->OMSetRenderTargets(exactly(views.size()), views.data(), fb.depth_stencil_view);
             D3D11_VIEWPORT vp {0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1};
             ctx->RSSetViewports(1, &vp);
+            const D3D11_RECT scissor {0, 0, fb.dims.x, fb.dims.y};
+            ctx->RSSetScissorRects(1, &scissor);
+        },
+        [&](const set_scissor_rect_command & c)
+        {
+            const D3D11_RECT scissor {c.x0, c.y0, c.x1, c.y1};
+            ctx->RSSetScissorRects(1, &scissor);
         },
         [this,&current_pipeline](const bind_pipeline_command & c)
         {
@@ -526,6 +533,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
     rasterizer_desc.CullMode = convert_dx(desc.cull_mode);
     rasterizer_desc.FrontCounterClockwise = desc.front_face == rhi::front_face::counter_clockwise;
     rasterizer_desc.DepthClipEnable = TRUE;
+    rasterizer_desc.ScissorEnable = TRUE;
     check("ID3D11Device::CreateRasterizerState", device.CreateRasterizerState(&rasterizer_desc, rasterizer_state.init()));
 
     D3D11_DEPTH_STENCIL_DESC depth_stencil_desc {};

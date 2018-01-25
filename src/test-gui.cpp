@@ -1,6 +1,5 @@
 #include "engine/shader.h"
 #include "engine/sprite.h"
-#include <iostream>
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
@@ -30,7 +29,7 @@ struct node_type
     void draw(gui_context & buffer, const font_face & face, const rect & r) const
     {
         buffer.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, {float3(srgb_to_linear(0.5f)),1}, true, true, false, false);
-        buffer.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, {float3(srgb_to_linear(0.3f)),1}, false, false, true, true);
+        buffer.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, {float3(srgb_to_linear(0.3f)),0.8f}, false, false, true, true);
         buffer.draw_shadowed_text(face, {1,1,1,1}, {r.x0+8, r.y0+6}, caption);
 
         for(size_t i=0; i<inputs.size(); ++i)
@@ -82,6 +81,7 @@ struct edge
     }
 };
 
+#include <iostream>
 int main(int argc, const char * argv[]) try
 {
     // Load assets
@@ -157,8 +157,8 @@ int main(int argc, const char * argv[]) try
 
         // Draw the UI
         gui_context gui = gui_context(sprites, pool, gwindow->get_window_size());
-        for(auto & n : nodes) n.draw(gui, face);
         for(auto & e : edges) e.draw(gui);
+        for(auto & n : nodes) n.draw(gui, face);
 
         // Set up descriptor set for UI global transform and font image
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
