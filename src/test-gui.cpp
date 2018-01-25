@@ -2,6 +2,86 @@
 #include "engine/sprite.h"
 #include <iostream>
 
+float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
+
+void draw_tooltip(gui_context & buffer, const font_face & face, const int2 & loc, std::string_view text)
+{
+    int w = face.get_text_width(text), h = face.line_height;
+
+    buffer.begin_overlay();
+    buffer.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, {float3(srgb_to_linear(0.5f)),1}, 0, 1, 1, 1);
+    buffer.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, {float3(srgb_to_linear(0.3f)),1}, 0, 1, 1, 1);
+    buffer.draw_shadowed_text(face, {1,1,1,1}, loc+int2(15,5), text);
+    buffer.end_overlay();
+}
+
+struct node_type
+{
+    static const int corner_radius = 10;
+    static const int title_height = 25;
+
+    std::string caption;
+    std::vector<std::string> inputs;
+    std::vector<std::string> outputs;
+
+    int2 get_input_location(const rect & r, size_t index) const { return {r.x0, r.y0 + title_height + 18 + 24 * (int)index}; }
+    int2 get_output_location(const rect & r, size_t index) const { return {r.x1, r.y0 + title_height + 18 + 24 * (int)index}; }
+
+    void draw(gui_context & buffer, const font_face & face, const rect & r) const
+    {
+        buffer.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, {float3(srgb_to_linear(0.5f)),1}, true, true, false, false);
+        buffer.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, {float3(srgb_to_linear(0.3f)),1}, false, false, true, true);
+        buffer.draw_shadowed_text(face, {1,1,1,1}, {r.x0+8, r.y0+6}, caption);
+
+        for(size_t i=0; i<inputs.size(); ++i)
+        {
+            const auto loc = get_input_location(r,i);
+            buffer.draw_circle(loc, 8, {1,1,1,1});
+            buffer.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
+            buffer.draw_shadowed_text(face, {1,1,1,1}, loc + int2(12, -face.line_height/2), inputs[i]);
+        }
+        for(size_t i=0; i<outputs.size(); ++i)
+        {
+            const auto loc = get_output_location(r,i);
+            buffer.draw_circle(loc, 8, {1,1,1,1});
+            buffer.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
+            buffer.draw_shadowed_text(face, {1,1,1,1}, loc + int2(-12 - face.get_text_width(outputs[i]), -face.line_height/2), outputs[i]);
+
+            if(i == 1) draw_tooltip(buffer, face, loc, "Tooltip in an overlay");
+        }
+    }
+};
+
+struct node
+{
+    const node_type * type;
+    rect placement;
+
+    int2 get_input_location(size_t index) const { return type->get_input_location(placement, index); }
+    int2 get_output_location(size_t index) const { return type->get_output_location(placement, index); }
+    void draw(gui_context & buffer, font_face & face) const { type->draw(buffer, face, placement); }
+};
+
+struct edge
+{
+    const node * output_node;
+    int output_index;
+    const node * input_node;
+    int input_index;
+    bool curved;
+
+    void draw(gui_context & buffer) const
+    {
+        const auto p0 = float2(output_node->get_output_location(output_index));
+        const auto p3 = float2(input_node->get_input_location(input_index));
+        const auto p1 = float2((p0.x+p3.x)/2, p0.y), p2 = float2((p0.x+p3.x)/2, p3.y);
+        buffer.draw_circle(output_node->get_output_location(output_index), 7, {1,1,1,1});
+        buffer.draw_circle(input_node->get_input_location(input_index), 7, {1,1,1,1});
+        if(curved) buffer.draw_bezier_curve(p0, p1, p2, p3, 3, {1,1,1,1});
+        else buffer.draw_line(p0, p3, 3, {1,1,1,1});
+    }
+};
+
 int main(int argc, const char * argv[]) try
 {
     // Load assets
@@ -15,8 +95,19 @@ int main(int argc, const char * argv[]) try
     
     sprite_sheet sheet;
     gui_sprites sprites{sheet};
-    font_face face{sheet, loader.load_binary_file("arial.ttf"), 20};
+    font_face face{sheet, loader.load_binary_file("arialbd.ttf"), 14};
     sheet.prepare_sheet();
+
+    // Set up graph state
+    const node_type type = {"Graph Node", {"Input 1", "Input 2"}, {"Output 1", "Output 2", "Output 3"}};
+    node nodes[] = {
+        {&type, {50,50,300,250}},
+        {&type, {650,150,900,350}}
+    };
+    const edge edges[] = {
+        {&nodes[0], 0, &nodes[1], 0, false},
+        {&nodes[0], 2, &nodes[1], 1, true}
+    };
 
     // Obtain a device and create device objects
     gfx::context context;
@@ -24,7 +115,7 @@ int main(int argc, const char * argv[]) try
     auto dev = context.get_backends().back().create_device(debug);
 
     auto font_image = dev->create_image({rhi::image_shape::_2d, {sheet.img.dimensions,1}, 1, sheet.img.format, rhi::sampled_image_bit}, {sheet.img.get_pixels()});
-    auto nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+    auto linear = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
     auto set_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1},
         {1, rhi::descriptor_type::combined_image_sampler, 1}
@@ -49,6 +140,16 @@ int main(int argc, const char * argv[]) try
         // Poll events
         context.poll_events();
 
+        int2 move {0,0};
+        if(gwindow->get_key(GLFW_KEY_W)) move.y -= 4;
+        if(gwindow->get_key(GLFW_KEY_A)) move.x -= 4;
+        if(gwindow->get_key(GLFW_KEY_S)) move.y += 4;
+        if(gwindow->get_key(GLFW_KEY_D)) move.x += 4;
+        nodes[1].placement.x0 += move.x;
+        nodes[1].placement.y0 += move.y;
+        nodes[1].placement.x1 += move.x;
+        nodes[1].placement.y1 += move.y;
+
         // Reset resources
         pool_index = (pool_index+1)%3;
         auto & pool = pools[pool_index];
@@ -56,21 +157,20 @@ int main(int argc, const char * argv[]) try
 
         // Draw the UI
         gui_context gui = gui_context(sprites, pool, gwindow->get_window_size());
-        gui.draw_rounded_rect({32,32,512,512}, 8, {1,1,1,1});
-        gui.draw_rounded_rect({34,34,510,510}, 6, {0,0,0.3f,1});
-        gui.draw_shadowed_text(face, {1,1,1,1}, 56, 56, "This is a test");
+        for(auto & n : nodes) n.draw(gui, face);
+        for(auto & e : edges) e.draw(gui);
 
         // Set up descriptor set for UI global transform and font image
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
         const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
         auto set = pool.descriptors->alloc(*set_layout);
         set->write(0, pool.uniforms.upload(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
-        set->write(1, *nearest, *font_image);
+        set->write(1, *linear, *font_image);
 
         // Encode our command buffer
         auto cmd = dev->create_command_buffer();
         rhi::render_pass_desc pass;
-        pass.color_attachments = {{rhi::clear_color{0.2f,0.2f,0.2f,1}, rhi::store{rhi::layout::present_source}}};
+        pass.color_attachments = {{rhi::clear_color{0,0,0,1}, rhi::store{rhi::layout::present_source}}};
         pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
         cmd->begin_render_pass(pass, fb);
         cmd->bind_pipeline(*pipe);

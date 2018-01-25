@@ -46,8 +46,10 @@ struct font_face
 {
     sprite_sheet & sheet;
     std::map<int, glyph_info> glyphs;
+    int line_height, baseline;
 
     font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_data, float pixel_height);
+    int get_text_width(std::string_view text) const;
 };
 
 // gui_sprites rasterizes a collection of useful shapes into a sprite_sheet
@@ -55,7 +57,7 @@ struct gui_sprites
 {
     sprite_sheet & sheet;
     size_t solid_pixel;
-    std::map<int, size_t> corner_sprites;
+    std::map<int, size_t> corner_sprites, line_sprites;
 
     gui_sprites(sprite_sheet & sheet);
 };
@@ -64,22 +66,33 @@ struct gui_sprites
 struct ui_vertex { float2 position, texcoord; float4 color; };
 struct gui_context
 {
+    struct list { rect scissor; uint32_t level,first,last; };
     const gui_sprites & sprites;
     gfx::transient_resource_pool & pool;
     int2 dims;
-    uint32_t quad_count;
+    std::vector<list> lists;
+    std::vector<rect> scissors;
 
     gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims);
     
-    void draw_sprite_sheet(const int2 & p);
-    void draw_sprite(const rect & r, float s0, float t0, float s1, float t1, const float4 & color);
+    void begin_overlay();
+    void end_overlay();
+    void begin_scissor(const rect & r);
+    void end_scissor();
+
+    void draw_quad(ui_vertex v0, ui_vertex v1, ui_vertex v2, ui_vertex v3);
+    void draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color);
+    void draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color);
 
     void draw_rect(const rect & r, const float4 & color);
     void draw_rounded_rect(rect r, int radius, const float4 & color);
     void draw_partial_rounded_rect(rect r, int radius, const float4 & color, bool tl, bool tr, bool bl, bool br);
-    
-    void draw_text(const font_face & font, const float4 & color, int x, int y, std::string_view text);
-    void draw_shadowed_text(const font_face & font, const float4 & color, int x, int y, std::string_view text);
+    void draw_circle(const int2 & center, int radius, const float4 & color);
+
+    void draw_sprite_sheet(const int2 & p);
+    void draw_sprite(const rect & r, float s0, float t0, float s1, float t1, const float4 & color);
+    void draw_text(const font_face & font, const float4 & color, int2 pos, std::string_view text);
+    void draw_shadowed_text(const font_face & font, const float4 & color, int2 pos, std::string_view text);
 
     void draw(rhi::command_buffer & cmd);
 };
