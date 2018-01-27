@@ -77,13 +77,13 @@
     <ClInclude Include="..\..\src\engine\shader.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\src\engine\sprite.h">
-      <Filter>src</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\src\engine\rhi\rhi-internal.h">
       <Filter>src\rhi</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\engine\camera.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\sprite.h">
       <Filter>src</Filter>
     </ClInclude>
   </ItemGroup>

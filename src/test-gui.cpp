@@ -3,15 +3,15 @@
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
-void draw_tooltip(gui_context & buffer, const font_face & face, const int2 & loc, std::string_view text)
+void draw_tooltip(canvas & canvas, const font_face & face, const int2 & loc, std::string_view text)
 {
     int w = face.get_text_width(text), h = face.line_height;
 
-    buffer.begin_overlay();
-    buffer.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.5f)),1});
-    buffer.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),1});
-    buffer.draw_shadowed_text(loc+int2(15,5), {1,1,1,1}, face, text);
-    buffer.end_overlay();
+    canvas.begin_overlay();
+    canvas.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.5f)),1});
+    canvas.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),1});
+    canvas.draw_shadowed_text(loc+int2(15,5), {1,1,1,1}, face, text);
+    canvas.end_overlay();
 }
 
 struct node_type
@@ -23,30 +23,30 @@ struct node_type
     std::vector<std::string> inputs;
     std::vector<std::string> outputs;
 
-    int2 get_input_location(const rect & r, size_t index) const { return {r.x0, r.y0 + title_height + 18 + 24 * (int)index}; }
-    int2 get_output_location(const rect & r, size_t index) const { return {r.x1, r.y0 + title_height + 18 + 24 * (int)index}; }
+    int2 get_input_location(const rect<int> & r, size_t index) const { return {r.x0, r.y0 + title_height + 18 + 24 * (int)index}; }
+    int2 get_output_location(const rect<int> & r, size_t index) const { return {r.x1, r.y0 + title_height + 18 + 24 * (int)index}; }
 
-    void draw(gui_context & buffer, const font_face & face, const rect & r) const
+    void draw(canvas & canvas, const font_face & face, const rect<int> & r) const
     {
-        buffer.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, top_left_corner|top_right_corner, {float3(srgb_to_linear(0.5f)),1});
-        buffer.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),0.8f});
-        buffer.draw_shadowed_text({r.x0+8, r.y0+6}, {1,1,1,1}, face, caption);
+        canvas.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, top_left_corner|top_right_corner, {float3(srgb_to_linear(0.5f)),1});
+        canvas.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),0.8f});
+        canvas.draw_shadowed_text({r.x0+8, r.y0+6}, {1,1,1,1}, face, caption);
 
         for(size_t i=0; i<inputs.size(); ++i)
         {
             const auto loc = get_input_location(r,i);
-            buffer.draw_circle(loc, 8, {1,1,1,1});
-            buffer.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
-            buffer.draw_shadowed_text(loc + int2(12, -face.line_height/2), {1,1,1,1}, face, inputs[i]);
+            canvas.draw_circle(loc, 8, {1,1,1,1});
+            canvas.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
+            canvas.draw_shadowed_text(loc + int2(12, -face.line_height/2), {1,1,1,1}, face, inputs[i]);
         }
         for(size_t i=0; i<outputs.size(); ++i)
         {
             const auto loc = get_output_location(r,i);
-            buffer.draw_circle(loc, 8, {1,1,1,1});
-            buffer.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
-            buffer.draw_shadowed_text(loc + int2(-12 - face.get_text_width(outputs[i]), -face.line_height/2), {1,1,1,1}, face, outputs[i]);
+            canvas.draw_circle(loc, 8, {1,1,1,1});
+            canvas.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
+            canvas.draw_shadowed_text(loc + int2(-12 - face.get_text_width(outputs[i]), -face.line_height/2), {1,1,1,1}, face, outputs[i]);
 
-            if(i == 1) draw_tooltip(buffer, face, loc, "Tooltip in an overlay");
+            if(i == 1) draw_tooltip(canvas, face, loc, "Tooltip in an overlay");
         }
     }
 };
@@ -54,11 +54,11 @@ struct node_type
 struct node
 {
     const node_type * type;
-    rect placement;
+    rect<int> placement;
 
     int2 get_input_location(size_t index) const { return type->get_input_location(placement, index); }
     int2 get_output_location(size_t index) const { return type->get_output_location(placement, index); }
-    void draw(gui_context & buffer, font_face & face) const { type->draw(buffer, face, placement); }
+    void draw(canvas & canvas, font_face & face) const { type->draw(canvas, face, placement); }
 };
 
 struct edge
@@ -69,15 +69,15 @@ struct edge
     int input_index;
     bool curved;
 
-    void draw(gui_context & buffer) const
+    void draw(canvas & canvas) const
     {
         const auto p0 = float2(output_node->get_output_location(output_index));
         const auto p3 = float2(input_node->get_input_location(input_index));
         const auto p1 = float2((p0.x+p3.x)/2, p0.y), p2 = float2((p0.x+p3.x)/2, p3.y);
-        buffer.draw_circle(output_node->get_output_location(output_index), 7, {1,1,1,1});
-        buffer.draw_circle(input_node->get_input_location(input_index), 7, {1,1,1,1});
-        if(curved) buffer.draw_bezier_curve(p0, p1, p2, p3, 3, {1,1,1,1});
-        else buffer.draw_line(p0, p3, 3, {1,1,1,1});
+        canvas.draw_circle(output_node->get_output_location(output_index), 7, {1,1,1,1});
+        canvas.draw_circle(input_node->get_input_location(input_index), 7, {1,1,1,1});
+        if(curved) canvas.draw_bezier_curve(p0, p1, p2, p3, 3, {1,1,1,1});
+        else canvas.draw_line(p0, p3, 3, {1,1,1,1});
     }
 };
 
@@ -94,7 +94,7 @@ int main(int argc, const char * argv[]) try
     auto ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");      
     
     sprite_sheet sheet;
-    gui_sprites sprites{sheet};
+    canvas_sprites sprites{sheet};
     font_face face{sheet, loader.load_binary_file("arialbd.ttf"), 14};
     sheet.prepare_sheet();
 
@@ -156,9 +156,9 @@ int main(int argc, const char * argv[]) try
         pool.begin_frame(*dev);
 
         // Draw the UI
-        gui_context gui = gui_context(sprites, pool, gwindow->get_window_size());
-        for(auto & e : edges) e.draw(gui);
-        for(auto & n : nodes) n.draw(gui, face);
+        canvas canvas {sprites, pool, gwindow->get_window_size()};
+        for(auto & e : edges) e.draw(canvas);
+        for(auto & n : nodes) n.draw(canvas, face);
 
         // Set up descriptor set for UI global transform and font image
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
@@ -170,7 +170,7 @@ int main(int argc, const char * argv[]) try
         set->write(0, pool.uniforms.upload(mul(make_transform_4x4(ui_coords, fb.get_ndc_coords()), ortho)));
         set->write(1, *linear, *font_image);
 
-        // Encode our command buffer
+        // Encode our command canvas
         auto cmd = dev->create_command_buffer();
         rhi::render_pass_desc pass;
         pass.color_attachments = {{rhi::clear_color{0,0,0,1}, rhi::store{rhi::layout::present_source}}};
@@ -178,7 +178,7 @@ int main(int argc, const char * argv[]) try
         cmd->begin_render_pass(pass, fb);
         cmd->bind_pipeline(*pipe);
         cmd->bind_descriptor_set(*pipe_layout, 0, *set);
-        gui.encode_commands(*cmd);
+        canvas.encode_commands(*cmd);
         cmd->end_render_pass();
 
         // Submit and end frame

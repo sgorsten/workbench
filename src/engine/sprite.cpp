@@ -38,10 +38,10 @@ void sprite_sheet::prepare_sheet()
                 break;
             }
 
-            s->s0 = static_cast<float>(used.x+s->border)/img.dimensions.x;
-            s->t0 = static_cast<float>(used.y+s->border)/img.dimensions.y;
-            s->s1 = static_cast<float>(used.x+s->img.dimensions.x-s->border)/img.dimensions.x;
-            s->t1 = static_cast<float>(used.y+s->img.dimensions.y-s->border)/img.dimensions.y;
+            s->texcoords.x0 = static_cast<float>(used.x+s->border)/img.dimensions.x;
+            s->texcoords.y0 = static_cast<float>(used.y+s->border)/img.dimensions.y;
+            s->texcoords.x1 = static_cast<float>(used.x+s->img.dimensions.x-s->border)/img.dimensions.x;
+            s->texcoords.y1 = static_cast<float>(used.y+s->img.dimensions.y-s->border)/img.dimensions.y;
 
             for(int i=0; i<s->img.dimensions.y; ++i)
             {
@@ -126,11 +126,11 @@ image make_bordered_circle_quadrant(int radius)
     return std::move(img);
 }
 
-gui_sprites::gui_sprites(sprite_sheet & sheet) : sheet{sheet}
+canvas_sprites::canvas_sprites(sprite_sheet & sheet) : sheet{sheet}
 {
-    auto solid_pixel_img = image::allocate({1,1}, rhi::image_format::r_unorm8);
-    *solid_pixel_img.get_pixels() = 0xFF;
-    solid_pixel = sheet.add_sprite(std::move(solid_pixel_img), 0);
+    auto solid_pixel_img = image::allocate({3,3}, rhi::image_format::r_unorm8);
+    memset(solid_pixel_img.get_pixels(), 0xFF, 9);
+    solid_pixel = sheet.add_sprite(std::move(solid_pixel_img), 1);
     for(int i=1; i<=32; ++i) corner_sprites[i] = sheet.add_sprite(make_bordered_circle_quadrant(i), 1);
     for(int i=1; i<=8; ++i)
     {
@@ -141,11 +141,11 @@ gui_sprites::gui_sprites(sprite_sheet & sheet) : sheet{sheet}
     }
 }
 
-/////////////////
-// gui_context //
-/////////////////
+////////////
+// canvas //
+////////////
 
-gui_context::gui_context(const gui_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims) : sprites{sprites}, pool{pool}, dims{dims}, vertex_count{0}
+canvas::canvas(const canvas_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims) : sprites{sprites}, pool{pool}, dims{dims}, vertex_count{0}
 {
     pool.vertices.begin();
     pool.indices.begin();
@@ -153,32 +153,32 @@ gui_context::gui_context(const gui_sprites & sprites, gfx::transient_resource_po
     lists.push_back({scissors.back(), 0, 0, 0});
 }
 
-void gui_context::begin_overlay()
+void canvas::begin_overlay()
 {
     scissors.push_back(scissors.front());
     lists.push_back({scissors.back(), lists.back().level+1, lists.back().last, lists.back().last});
 }
 
-void gui_context::end_overlay()
+void canvas::end_overlay()
 {
     scissors.pop_back();
     lists.push_back({scissors.back(), lists.back().level-1, lists.back().last, lists.back().last});
 }
 
-void gui_context::begin_scissor(const rect & r)
+void canvas::begin_scissor(const rect<int> & r)
 {
     const auto & s = scissors.back();
     scissors.push_back({std::max(s.x0, r.x0), std::max(s.y0, r.y0), std::min(s.x1, r.x1), std::min(s.y1, r.y1)});
     lists.push_back({scissors.back(), lists.back().level, lists.back().last, lists.back().last});
 }
 
-void gui_context::end_scissor()
+void canvas::end_scissor()
 {
     scissors.pop_back();
     lists.push_back({scissors.back(), lists.back().level, lists.back().last, lists.back().last});
 }
 
-void gui_context::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color)
+void canvas::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color)
 {
     auto it = sprites.line_sprites.find(width);
     if(it == end(sprites.line_sprites)) return;
@@ -186,18 +186,18 @@ void gui_context::draw_line(const float2 & p0, const float2 & p1, int width, con
 
     const float2 perp = normalize(cross(float3(p1-p0,0), float3(0,0,1)).xy()) * (width*0.5f + 1);
     draw_convex_polygon({
-        {p0+perp, {sprite.s0, (sprite.t0+sprite.t1)/2}, color},
-        {p0-perp, {sprite.s1, (sprite.t0+sprite.t1)/2}, color},
-        {p1-perp, {sprite.s1, (sprite.t0+sprite.t1)/2}, color},
-        {p1+perp, {sprite.s0, (sprite.t0+sprite.t1)/2}, color}
+        {p0+perp, {sprite.texcoords.x0, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color},
+        {p0-perp, {sprite.texcoords.x1, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color},
+        {p1-perp, {sprite.texcoords.x1, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color},
+        {p1+perp, {sprite.texcoords.x0, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color}
     });
 }
 
-void gui_context::draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color)
+void canvas::draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color)
 {
     auto it = sprites.line_sprites.find(width);
     if(it == end(sprites.line_sprites)) return;
-    const auto & sprite = sprites.sheet.sprites[it->second];
+    const auto & tc = sprites.sheet.sprites[it->second].texcoords;
 
     const float2 d01 = p1-p0, d12 = p2-p1, d23 = p3-p2;
     float2 v0, v1;
@@ -206,8 +206,8 @@ void gui_context::draw_bezier_curve(const float2 & p0, const float2 & p1, const 
         const float t = (float)i/32, s = (1-t);
         const float2 p = p0*(s*s*s) + p1*(3*s*s*t) + p2*(3*s*t*t) + p3*(t*t*t);
         const float2 d = normalize(d01*(3*s*s) + d12*(6*s*t) + d23*(3*t*t)) * (width*0.5f + 1);
-        pool.vertices.write(ui_vertex{{p.x-d.y, p.y+d.x}, {sprite.s0, (sprite.t0+sprite.t1)/2}, color});
-        pool.vertices.write(ui_vertex{{p.x+d.y, p.y-d.x}, {sprite.s1, (sprite.t0+sprite.t1)/2}, color});
+        pool.vertices.write(ui_vertex{{p.x-d.y, p.y+d.x}, {tc.x0, (tc.y0+tc.y1)/2}, color});
+        pool.vertices.write(ui_vertex{{p.x+d.y, p.y-d.x}, {tc.x1, (tc.y0+tc.y1)/2}, color});
         if(i)
         {
             pool.indices.write(vertex_count + uint3(i*2-2, i*2-1, i*2+1));
@@ -218,49 +218,47 @@ void gui_context::draw_bezier_curve(const float2 & p0, const float2 & p1, const 
     lists.back().last += 32*6;
 }
 
-void gui_context::draw_rect(const rect & r, const float4 & color)
+void canvas::draw_rect(const rect<int> & r, const float4 & color)
 {
-    const auto & solid = sprites.sheet.sprites[sprites.solid_pixel];
-    const float s = (solid.s0 + solid.s1)/2, t = (solid.t0 + solid.t1)/2;
-    draw_sprite(r, color, s, t, s, t);
+    draw_sprite(r, color, sprites.sheet.sprites[sprites.solid_pixel].texcoords);
 }
 
-void gui_context::draw_circle(const int2 & center, int radius, const float4 & color)
+void canvas::draw_circle(const int2 & center, int radius, const float4 & color)
 { 
-    return draw_rounded_rect({center.x-radius, center.y-radius, center.x+radius, center.y+radius}, radius, color);
+    draw_rounded_rect({center.x-radius, center.y-radius, center.x+radius, center.y+radius}, radius, color);
 }
 
-void gui_context::draw_rounded_rect(const rect & r, int radius, const float4 & color)
+void canvas::draw_rounded_rect(const rect<int> & r, int radius, const float4 & color)
 {
-    return draw_partial_rounded_rect(r, radius, 0xF, color);
+    draw_partial_rounded_rect(r, radius, 0xF, color);
 }
 
-void gui_context::draw_partial_rounded_rect(const rect & rr, int radius, corner_flags corners, const float4 & color)
+void canvas::draw_partial_rounded_rect(const rect<int> & rr, int radius, corner_flags corners, const float4 & color)
 {
     auto it = sprites.corner_sprites.find(radius);
     if(it == end(sprites.corner_sprites)) return;
-    const auto & sprite = sprites.sheet.sprites[it->second];
+    const auto & tc = sprites.sheet.sprites[it->second].texcoords;
     auto r = rr;
     if(corners & (top_left_corner | top_right_corner))
     {
-        rect r2 = r.take_y0(radius);
-        if(corners & top_left_corner) draw_sprite(r2.take_x0(radius), color, sprite.s1, sprite.t1, sprite.s0, sprite.t0);    
-        if(corners & top_right_corner) draw_sprite(r2.take_x1(radius), color, sprite.s0, sprite.t1, sprite.s1, sprite.t0);
+        rect<int> r2 = r.take_y0(radius);
+        if(corners & top_left_corner) draw_sprite(r2.take_x0(radius), color, {tc.x1, tc.y1, tc.x0, tc.y0});
+        if(corners & top_right_corner) draw_sprite(r2.take_x1(radius), color, {tc.x0, tc.y1, tc.x1, tc.y0});
         draw_rect(r2, color);
     }
 
     if(corners & (bottom_left_corner | bottom_right_corner))
     {
-        rect r2 = r.take_y1(radius);
-        if(corners & bottom_left_corner) draw_sprite(r2.take_x0(radius), color, sprite.s1, sprite.t0, sprite.s0, sprite.t1);
-        if(corners & bottom_right_corner) draw_sprite(r2.take_x1(radius), color, sprite.s0, sprite.t0, sprite.s1, sprite.t1);
+        rect<int> r2 = r.take_y1(radius);
+        if(corners & bottom_left_corner) draw_sprite(r2.take_x0(radius), color, {tc.x1, tc.y0, tc.x0, tc.y1});
+        if(corners & bottom_right_corner) draw_sprite(r2.take_x1(radius), color, {tc.x0, tc.y0, tc.x1, tc.y1});
         draw_rect(r2, color);
     }
 
     draw_rect(r, color);
 }
 
-void gui_context::draw_convex_polygon(array_view<ui_vertex> vertices)
+void canvas::draw_convex_polygon(array_view<ui_vertex> vertices)
 {
     const uint32_t n = exactly(vertices.size());
     pool.vertices.write(vertices);
@@ -269,18 +267,32 @@ void gui_context::draw_convex_polygon(array_view<ui_vertex> vertices)
     lists.back().last += (n-2)*3;
 }
 
-void gui_context::draw_sprite(const rect & r, const float4 & color, float s0, float t0, float s1, float t1)
+void canvas::draw_sprite(const rect<int> & r, const float4 & color, const rect<float> & texcoords)
 {
-    const float x0 = static_cast<float>(r.x0), y0 = static_cast<float>(r.y0), x1 = static_cast<float>(r.x1), y1 = static_cast<float>(r.y1);
-    draw_convex_polygon({{{x0,y0}, {s0,t0}, color}, {{x0,y1}, {s0,t1}, color}, {{x1,y1}, {s1,t1}, color}, {{x1,y0}, {s1,t0}, color}});
+    draw_convex_polygon({
+        {{static_cast<float>(r.x0),static_cast<float>(r.y0)}, {texcoords.x0,texcoords.y0}, color}, 
+        {{static_cast<float>(r.x0),static_cast<float>(r.y1)}, {texcoords.x0,texcoords.y1}, color}, 
+        {{static_cast<float>(r.x1),static_cast<float>(r.y1)}, {texcoords.x1,texcoords.y1}, color}, 
+        {{static_cast<float>(r.x1),static_cast<float>(r.y0)}, {texcoords.x1,texcoords.y0}, color}
+    });
 }
 
-void gui_context::draw_sprite_sheet(const int2 & p)
+void canvas::draw_sprite_sheet(const int2 & p)
 {
-    draw_sprite({p.x,p.y,p.x+sprites.sheet.img.dimensions.x,p.y+sprites.sheet.img.dimensions.y}, {1,1,1,1}, 0, 0, 1, 1);
+    draw_sprite({p.x,p.y,p.x+sprites.sheet.img.dimensions.x,p.y+sprites.sheet.img.dimensions.y}, {1,1,1,1}, {0,0,1,1});
 }
 
-void gui_context::draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text)
+void canvas::draw_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint)
+{
+    auto it = font.glyphs.find(codepoint);
+    if(it == font.glyphs.end()) return;
+    auto & b = it->second;
+    auto & s = font.sheet.sprites[b.sprite_index];
+    const int2 b0 = pos + b.offset, b1 = b0 + s.img.dimensions;
+    draw_sprite({b0.x+s.border, b0.y+s.border, b1.x-s.border, b1.y-s.border}, color, s.texcoords);
+}
+
+void canvas::draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text)
 {
     auto p = pos;
     for(auto ch : text)
@@ -290,18 +302,18 @@ void gui_context::draw_text(const int2 & pos, const float4 & color, const font_f
         auto & b = it->second;
         auto & s = font.sheet.sprites[b.sprite_index];
         const int2 b0 = p + b.offset, b1 = b0 + s.img.dimensions;
-        draw_sprite({b0.x+s.border, b0.y+s.border, b1.x-s.border, b1.y-s.border}, color, s.s0, s.t0, s.s1, s.t1);
+        draw_sprite({b0.x+s.border, b0.y+s.border, b1.x-s.border, b1.y-s.border}, color, s.texcoords);
         p.x += b.advance;
     }
 }
 
-void gui_context::draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text)
+void canvas::draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text)
 {
     draw_text(pos+1,{0,0,0,color.w},font,text);
     draw_text(pos,color,font,text);
 }
 
-void gui_context::encode_commands(rhi::command_buffer & cmd)
+void canvas::encode_commands(rhi::command_buffer & cmd)
 {
     std::sort(lists.begin(), lists.end(), [](const list & a, const list & b) { return a.level < b.level; });
     cmd.bind_vertex_buffer(0, pool.vertices.end());
