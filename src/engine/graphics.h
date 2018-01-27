@@ -21,6 +21,8 @@ namespace gfx
         binary_view(size_t size, const void * data) : size{size}, data{data} {}
         template<class T> binary_view(const T & obj) : binary_view{sizeof(T), &obj} { static_assert(std::is_trivially_copyable_v<T>, "binary_view supports only trivially_copyable types"); }
         template<class T> binary_view(const std::vector<T> & vec) : binary_view{vec.size()*sizeof(T), vec.data()} { static_assert(std::is_trivially_copyable_v<T>, "binary_view supports only trivially_copyable types"); }
+        template<class T> binary_view(std::initializer_list<T> ilist) : binary_view{ilist.size()*sizeof(T), vec.data()} { static_assert(std::is_trivially_copyable_v<T>, "binary_view supports only trivially_copyable types"); }
+        template<class T> binary_view(array_view<T> view) : binary_view{view.size()*sizeof(T), view.data()} { static_assert(std::is_trivially_copyable_v<T>, "binary_view supports only trivially_copyable types"); }
     };
 
     struct static_buffer

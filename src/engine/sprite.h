@@ -63,6 +63,14 @@ struct gui_sprites
 };
 
 #include "graphics.h"
+using corner_flags = int;
+enum corner_flag : corner_flags
+{
+    top_left_corner     = 1<<0,
+    top_right_corner    = 1<<1,
+    bottom_left_corner  = 1<<2,
+    bottom_right_corner = 1<<3,
+};
 struct ui_vertex { float2 position, texcoord; float4 color; };
 class gui_context
 {
@@ -81,19 +89,20 @@ public:
     void begin_scissor(const rect & r);
     void end_scissor();
 
-    void draw_quad(ui_vertex v0, ui_vertex v1, ui_vertex v2, ui_vertex v3);
     void draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color);
     void draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color);
 
     void draw_rect(const rect & r, const float4 & color);
-    void draw_rounded_rect(rect r, int radius, const float4 & color);
-    void draw_partial_rounded_rect(rect r, int radius, const float4 & color, bool tl, bool tr, bool bl, bool br);
     void draw_circle(const int2 & center, int radius, const float4 & color);
+    void draw_rounded_rect(const rect & r, int corner_radius, const float4 & color);
+    void draw_partial_rounded_rect(const rect & r, int corner_radius, corner_flags corners, const float4 & color);
+    void draw_convex_polygon(array_view<ui_vertex> vertices);
 
+    void draw_sprite(const rect & r, const float4 & color, float s0, float t0, float s1, float t1);
     void draw_sprite_sheet(const int2 & p);
-    void draw_sprite(const rect & r, float s0, float t0, float s1, float t1, const float4 & color);
-    void draw_text(const font_face & font, const float4 & color, int2 pos, std::string_view text);
-    void draw_shadowed_text(const font_face & font, const float4 & color, int2 pos, std::string_view text);
 
-    void draw(rhi::command_buffer & cmd);
+    void draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text);
+    void draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text);
+
+    void encode_commands(rhi::command_buffer & cmd);
 };

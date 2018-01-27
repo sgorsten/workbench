@@ -8,9 +8,9 @@ void draw_tooltip(gui_context & buffer, const font_face & face, const int2 & loc
     int w = face.get_text_width(text), h = face.line_height;
 
     buffer.begin_overlay();
-    buffer.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, {float3(srgb_to_linear(0.5f)),1}, 0, 1, 1, 1);
-    buffer.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, {float3(srgb_to_linear(0.3f)),1}, 0, 1, 1, 1);
-    buffer.draw_shadowed_text(face, {1,1,1,1}, loc+int2(15,5), text);
+    buffer.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.5f)),1});
+    buffer.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),1});
+    buffer.draw_shadowed_text(loc+int2(15,5), {1,1,1,1}, face, text);
     buffer.end_overlay();
 }
 
@@ -28,23 +28,23 @@ struct node_type
 
     void draw(gui_context & buffer, const font_face & face, const rect & r) const
     {
-        buffer.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, {float3(srgb_to_linear(0.5f)),1}, true, true, false, false);
-        buffer.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, {float3(srgb_to_linear(0.3f)),0.8f}, false, false, true, true);
-        buffer.draw_shadowed_text(face, {1,1,1,1}, {r.x0+8, r.y0+6}, caption);
+        buffer.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, top_left_corner|top_right_corner, {float3(srgb_to_linear(0.5f)),1});
+        buffer.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),0.8f});
+        buffer.draw_shadowed_text({r.x0+8, r.y0+6}, {1,1,1,1}, face, caption);
 
         for(size_t i=0; i<inputs.size(); ++i)
         {
             const auto loc = get_input_location(r,i);
             buffer.draw_circle(loc, 8, {1,1,1,1});
             buffer.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
-            buffer.draw_shadowed_text(face, {1,1,1,1}, loc + int2(12, -face.line_height/2), inputs[i]);
+            buffer.draw_shadowed_text(loc + int2(12, -face.line_height/2), {1,1,1,1}, face, inputs[i]);
         }
         for(size_t i=0; i<outputs.size(); ++i)
         {
             const auto loc = get_output_location(r,i);
             buffer.draw_circle(loc, 8, {1,1,1,1});
             buffer.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
-            buffer.draw_shadowed_text(face, {1,1,1,1}, loc + int2(-12 - face.get_text_width(outputs[i]), -face.line_height/2), outputs[i]);
+            buffer.draw_shadowed_text(loc + int2(-12 - face.get_text_width(outputs[i]), -face.line_height/2), {1,1,1,1}, face, outputs[i]);
 
             if(i == 1) draw_tooltip(buffer, face, loc, "Tooltip in an overlay");
         }
@@ -163,8 +163,11 @@ int main(int argc, const char * argv[]) try
         // Set up descriptor set for UI global transform and font image
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
         const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
+
+        auto dims = gwindow->get_window_size();
+        const float4x4 ortho {{2.0f/dims.x,0,0,0}, {0,2.0f/dims.y,0,0}, {0,0,1,0}, {-1,-1,0,1}};
         auto set = pool.descriptors->alloc(*set_layout);
-        set->write(0, pool.uniforms.upload(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
+        set->write(0, pool.uniforms.upload(mul(make_transform_4x4(ui_coords, fb.get_ndc_coords()), ortho)));
         set->write(1, *linear, *font_image);
 
         // Encode our command buffer
@@ -175,7 +178,7 @@ int main(int argc, const char * argv[]) try
         cmd->begin_render_pass(pass, fb);
         cmd->bind_pipeline(*pipe);
         cmd->bind_descriptor_set(*pipe_layout, 0, *set);
-        gui.draw(*cmd);
+        gui.encode_commands(*cmd);
         cmd->end_render_pass();
 
         // Submit and end frame
