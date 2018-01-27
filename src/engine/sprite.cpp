@@ -4,7 +4,7 @@
 // sprite_sheet //
 //////////////////
 
-size_t sprite_sheet::add_sprite(image img, int border)
+size_t sprite_sheet::add_sprite(grid<uint8_t> img, int border)
 {
     const size_t index = sprites.size();
     sprites.push_back({std::move(img), border});
@@ -18,38 +18,36 @@ void sprite_sheet::prepare_sheet()
     for(auto & g : sprites) sorted_sprites.push_back(&g);
     std::sort(begin(sorted_sprites), end(sorted_sprites), [](const sprite * a, const sprite * b)
     {
-        return std::make_tuple(a->img.dimensions.y, a->img.dimensions.x) > std::make_tuple(b->img.dimensions.y, b->img.dimensions.x);
+        return std::make_tuple(a->img.dims().y, a->img.dims().x) > std::make_tuple(b->img.dims().y, b->img.dims().x);
     });
 
     int2 tex_dims = {64, 64};
     while(true)
     {
-        img = image::allocate(tex_dims, rhi::image_format::r_unorm8);
-        memset(img.get_pixels(), 0, img.dimensions.x*img.dimensions.y);
+        sheet_image.clear();
+        sheet_image.resize(tex_dims);
+
         bool bad_pack = false;
         int2 used {0, 0};
         int next_y = 0;
         for(auto * s : sorted_sprites)
         {
-            if(used.x + s->img.dimensions.x > img.dimensions.x) used = {0, next_y};
-            if(used.x + s->img.dimensions.x > img.dimensions.x || used.y + s->img.dimensions.y > img.dimensions.y) 
+            if(used.x + s->img.width() > sheet_image.width()) used = {0, next_y};
+            if(used.x + s->img.width() > sheet_image.width() || used.y + s->img.height() > sheet_image.height()) 
             {
                 bad_pack = true;
                 break;
             }
 
-            s->texcoords.x0 = static_cast<float>(used.x+s->border)/img.dimensions.x;
-            s->texcoords.y0 = static_cast<float>(used.y+s->border)/img.dimensions.y;
-            s->texcoords.x1 = static_cast<float>(used.x+s->img.dimensions.x-s->border)/img.dimensions.x;
-            s->texcoords.y1 = static_cast<float>(used.y+s->img.dimensions.y-s->border)/img.dimensions.y;
+            s->texcoords.x0 = static_cast<float>(used.x+s->border)/sheet_image.width();
+            s->texcoords.y0 = static_cast<float>(used.y+s->border)/sheet_image.height();
+            s->texcoords.x1 = static_cast<float>(used.x+s->img.width()-s->border)/sheet_image.width();
+            s->texcoords.y1 = static_cast<float>(used.y+s->img.height()-s->border)/sheet_image.height();
 
-            for(int i=0; i<s->img.dimensions.y; ++i)
-            {
-                memcpy(img.get_pixels()+img.dimensions.x*(used.y+i)+used.x, s->img.get_pixels()+s->img.dimensions.x*i, s->img.dimensions.x);
-            }
+            sheet_image.blit(used, s->img);
 
-            used.x += s->img.dimensions.x;
-            next_y = std::max(next_y, used.y + s->img.dimensions.y);
+            used.x += s->img.width();
+            next_y = std::max(next_y, used.y + s->img.height());
         }
         if(bad_pack)
         {
@@ -103,15 +101,15 @@ static void compute_circle_quadrant_coverage(float coverage[], int radius)
     }
 }
 
-image make_bordered_circle_quadrant(int radius)
+grid<uint8_t> make_bordered_circle_quadrant(int radius)
 {
     std::vector<float> coverage(radius*radius);
     compute_circle_quadrant_coverage(coverage.data(), radius);
     auto in = coverage.data();
 
     const int width = radius+2;
-    auto img = image::allocate({width,width}, rhi::image_format::r_unorm8);
-    auto out = img.get_pixels(); 
+    grid<uint8_t> img({width,width});
+    auto out = img.data(); 
     *out++ = 255;
     for(int i=0; i<radius; ++i) *out++ = 255;
     *out++ = 0;
@@ -128,16 +126,13 @@ image make_bordered_circle_quadrant(int radius)
 
 canvas_sprites::canvas_sprites(sprite_sheet & sheet) : sheet{sheet}
 {
-    auto solid_pixel_img = image::allocate({3,3}, rhi::image_format::r_unorm8);
-    memset(solid_pixel_img.get_pixels(), 0xFF, 9);
-    solid_pixel = sheet.add_sprite(std::move(solid_pixel_img), 1);
+    solid_pixel = sheet.add_sprite(grid<uint8_t>({3,3}, 0xFF), 1);
     for(int i=1; i<=32; ++i) corner_sprites[i] = sheet.add_sprite(make_bordered_circle_quadrant(i), 1);
     for(int i=1; i<=8; ++i)
     {
-        auto line_sprite = image::allocate({i+2,1}, rhi::image_format::r_unorm8);
-        memset(line_sprite.get_pixels()+1, 255, i);
-        line_sprite.get_pixels()[0] = line_sprite.get_pixels()[i+1] = 0;
-        line_sprites[i] = sheet.add_sprite(line_sprite, 0);
+        grid<uint8_t> line_sprite({i+2,1}, 0xFF);
+        line_sprite[{0,0}] = line_sprite[{i+1,0}] = 0;
+        line_sprites[i] = sheet.add_sprite(std::move(line_sprite), 0);
     }
 }
 
@@ -279,7 +274,7 @@ void canvas::draw_sprite(const rect<int> & r, const float4 & color, const rect<f
 
 void canvas::draw_sprite_sheet(const int2 & p)
 {
-    draw_sprite({p.x,p.y,p.x+sprites.sheet.img.dimensions.x,p.y+sprites.sheet.img.dimensions.y}, {1,1,1,1}, {0,0,1,1});
+    draw_sprite({p.x, p.y, p.x+sprites.sheet.sheet_image.width(), p.y+sprites.sheet.sheet_image.height()}, {1,1,1,1}, {0,0,1,1});
 }
 
 void canvas::draw_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint)
@@ -288,7 +283,7 @@ void canvas::draw_glyph(const int2 & pos, const float4 & color, const font_face 
     if(it == font.glyphs.end()) return;
     auto & b = it->second;
     auto & s = font.sheet.sprites[b.sprite_index];
-    const int2 b0 = pos + b.offset, b1 = b0 + s.img.dimensions;
+    const int2 b0 = pos + b.offset, b1 = b0 + s.img.dims();
     draw_sprite({b0.x+s.border, b0.y+s.border, b1.x-s.border, b1.y-s.border}, color, s.texcoords);
 }
 
@@ -301,7 +296,7 @@ void canvas::draw_text(const int2 & pos, const float4 & color, const font_face &
         if(it == font.glyphs.end()) continue;
         auto & b = it->second;
         auto & s = font.sheet.sprites[b.sprite_index];
-        const int2 b0 = p + b.offset, b1 = b0 + s.img.dimensions;
+        const int2 b0 = p + b.offset, b1 = b0 + s.img.dims();
         draw_sprite({b0.x+s.border, b0.y+s.border, b1.x-s.border, b1.y-s.border}, color, s.texcoords);
         p.x += b.advance;
     }
@@ -347,8 +342,8 @@ font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_d
         stbtt_GetGlyphHMetrics(&info, g, &advance, &lsb);
         stbtt_GetGlyphBitmapBox(&info, g, scale, scale, &x0, &y0, &x1, &y1);
 
-        image img = image::allocate({x1-x0, y1-y0}, rhi::image_format::r_unorm8);
-        stbtt_MakeGlyphBitmap(&info, img.get_pixels(), img.dimensions.x, img.dimensions.y, img.dimensions.x, scale, scale, g);
+        grid<uint8_t> img({x1-x0, y1-y0});
+        stbtt_MakeGlyphBitmap(&info, img.data(), img.width(), img.height(), img.width(), scale, scale, g);
         glyphs[ch].sprite_index = sheet.add_sprite(std::move(img), 0);
         glyphs[ch].offset = {x0,y0 + baseline};
         glyphs[ch].advance = static_cast<int>(std::floor(advance * scale));

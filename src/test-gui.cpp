@@ -114,7 +114,7 @@ int main(int argc, const char * argv[]) try
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
     auto dev = context.get_backends().back().create_device(debug);
 
-    auto font_image = dev->create_image({rhi::image_shape::_2d, {sheet.img.dimensions,1}, 1, sheet.img.format, rhi::sampled_image_bit}, {sheet.img.get_pixels()});
+    auto font_image = dev->create_image({rhi::image_shape::_2d, {sheet.sheet_image.dims(),1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {sheet.sheet_image.data()});
     auto linear = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
     auto set_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1},
