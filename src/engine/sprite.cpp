@@ -39,10 +39,7 @@ void sprite_sheet::prepare_sheet()
                 break;
             }
 
-            s->texcoords.x0 = static_cast<float>(used.x+s->border)/sheet_image.width();
-            s->texcoords.y0 = static_cast<float>(used.y+s->border)/sheet_image.height();
-            s->texcoords.x1 = static_cast<float>(used.x+s->img.width()-s->border)/sheet_image.width();
-            s->texcoords.y1 = static_cast<float>(used.y+s->img.height()-s->border)/sheet_image.height();
+            s->texcoords = {float2(used+s->border)/float2(sheet_image.dims()), float2(used+s->img.dims()-s->border)/float2(sheet_image.dims())};
 
             sheet_image.blit(used, s->img);
 

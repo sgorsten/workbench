@@ -201,6 +201,7 @@
     <ClInclude Include="..\..\src\engine\core.h" />
     <ClInclude Include="..\..\src\engine\geometry.h" />
     <ClInclude Include="..\..\src\engine\graphics.h" />
+    <ClInclude Include="..\..\src\engine\grid.h" />
     <ClInclude Include="..\..\src\engine\load.h" />
     <ClInclude Include="..\..\src\engine\mesh.h" />
     <ClInclude Include="..\..\src\engine\pbr.h" />

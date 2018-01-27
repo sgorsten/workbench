@@ -86,6 +86,9 @@
     <ClInclude Include="..\..\src\engine\sprite.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\engine\grid.h">
+      <Filter>src</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\engine\rhi\rhi-tables.inl">
