@@ -23,6 +23,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test-pbr", "vs\test-pbr\tes
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test-gui", "vs\test-gui\test-gui.vcxproj", "{7657EC56-BAB1-4EE1-B189-5EEBBC880AA2}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "all-tests", "vs\all-tests\all-tests.vcxproj", "{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -87,6 +89,14 @@ Global
 		{7657EC56-BAB1-4EE1-B189-5EEBBC880AA2}.Release|x64.Build.0 = Release|x64
 		{7657EC56-BAB1-4EE1-B189-5EEBBC880AA2}.Release|x86.ActiveCfg = Release|Win32
 		{7657EC56-BAB1-4EE1-B189-5EEBBC880AA2}.Release|x86.Build.0 = Release|Win32
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Debug|x64.ActiveCfg = Debug|x64
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Debug|x64.Build.0 = Debug|x64
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Debug|x86.ActiveCfg = Debug|Win32
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Debug|x86.Build.0 = Debug|Win32
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Release|x64.ActiveCfg = Release|x64
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Release|x64.Build.0 = Release|x64
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Release|x86.ActiveCfg = Release|Win32
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -99,6 +109,7 @@ Global
 		{86083C63-3B67-4E2A-A4AA-2BDBFB117F02} = {7DE75E0D-FA7D-4A22-B1B6-BE75D4D9E0BB}
 		{D0DB0790-A76F-4EF2-B7DA-286F4DCA613B} = {7DE75E0D-FA7D-4A22-B1B6-BE75D4D9E0BB}
 		{7657EC56-BAB1-4EE1-B189-5EEBBC880AA2} = {7DE75E0D-FA7D-4A22-B1B6-BE75D4D9E0BB}
+		{99106F8B-A603-44A3-9AD3-1B991F5EF1D5} = {7DE75E0D-FA7D-4A22-B1B6-BE75D4D9E0BB}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BA05DCD5-82EA-4A15-821C-9CED95095DA8}

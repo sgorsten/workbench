@@ -1,7 +1,5 @@
 #pragma once
 #include "core.h"
-#include "linalg.h"
-using namespace linalg::aliases;
 
 // A value type representing an abstract direction vector in 3D space, independent of any coordinate system
 enum class coord_axis { forward, back, left, right, up, down };

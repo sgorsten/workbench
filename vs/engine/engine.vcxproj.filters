@@ -51,6 +51,9 @@
     <ClCompile Include="..\..\src\engine\rhi\rhi-vulkan.cpp">
       <Filter>src\rhi</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\engine\grid.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\engine\core.h">

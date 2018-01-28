@@ -1,12 +1,13 @@
 #pragma once
-#include <cstdint>
-#include <array>
 #include <vector>
 #include <variant>
 #include <optional>
 #include <string_view>
 #include <sstream>
 #include <functional>
+
+#include "linalg.h"
+using namespace linalg::aliases;
 
 // Globally include doctest when compiling in debug mode
 #ifdef NDEBUG

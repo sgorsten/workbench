@@ -160,7 +160,7 @@ void canvas::end_overlay()
 void canvas::begin_scissor(const rect<int> & r)
 {
     const auto & s = scissors.back();
-    scissors.push_back({std::max(s.x0, r.x0), std::max(s.y0, r.y0), std::min(s.x1, r.x1), std::min(s.y1, r.y1)});
+    scissors.push_back(scissors.back().intersected_with(r));
     lists.push_back({scissors.back(), lists.back().level, lists.back().last, lists.back().last});
 }
 
@@ -234,16 +234,16 @@ void canvas::draw_partial_rounded_rect(const rect<int> & rr, int radius, corner_
     if(corners & (top_left_corner | top_right_corner))
     {
         rect<int> r2 = r.take_y0(radius);
-        if(corners & top_left_corner) draw_sprite(r2.take_x0(radius), color, {tc.x1, tc.y1, tc.x0, tc.y0});
-        if(corners & top_right_corner) draw_sprite(r2.take_x1(radius), color, {tc.x0, tc.y1, tc.x1, tc.y0});
+        if(corners & top_left_corner) draw_sprite(r2.take_x0(radius), color, tc.rotated_180());
+        if(corners & top_right_corner) draw_sprite(r2.take_x1(radius), color, tc.mirrored_y());
         draw_rect(r2, color);
     }
 
     if(corners & (bottom_left_corner | bottom_right_corner))
     {
         rect<int> r2 = r.take_y1(radius);
-        if(corners & bottom_left_corner) draw_sprite(r2.take_x0(radius), color, {tc.x1, tc.y0, tc.x0, tc.y1});
-        if(corners & bottom_right_corner) draw_sprite(r2.take_x1(radius), color, {tc.x0, tc.y0, tc.x1, tc.y1});
+        if(corners & bottom_left_corner) draw_sprite(r2.take_x0(radius), color, tc.mirrored_x());
+        if(corners & bottom_right_corner) draw_sprite(r2.take_x1(radius), color, tc);
         draw_rect(r2, color);
     }
 
@@ -262,10 +262,10 @@ void canvas::draw_convex_polygon(array_view<ui_vertex> vertices)
 void canvas::draw_sprite(const rect<int> & r, const float4 & color, const rect<float> & texcoords)
 {
     draw_convex_polygon({
-        {{static_cast<float>(r.x0),static_cast<float>(r.y0)}, {texcoords.x0,texcoords.y0}, color}, 
-        {{static_cast<float>(r.x0),static_cast<float>(r.y1)}, {texcoords.x0,texcoords.y1}, color}, 
-        {{static_cast<float>(r.x1),static_cast<float>(r.y1)}, {texcoords.x1,texcoords.y1}, color}, 
-        {{static_cast<float>(r.x1),static_cast<float>(r.y0)}, {texcoords.x1,texcoords.y0}, color}
+        {float2(r.corner00()), texcoords.corner00(), color}, 
+        {float2(r.corner01()), texcoords.corner01(), color}, 
+        {float2(r.corner11()), texcoords.corner11(), color}, 
+        {float2(r.corner10()), texcoords.corner10(), color}
     });
 }
 
@@ -335,15 +335,18 @@ font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_d
     {
         if(!isprint(ch)) continue;
         const int g = stbtt_FindGlyphIndex(&info, ch);
-        int advance, lsb, x0, y0, x1, y1;
-        stbtt_GetGlyphHMetrics(&info, g, &advance, &lsb);
-        stbtt_GetGlyphBitmapBox(&info, g, scale, scale, &x0, &y0, &x1, &y1);
 
-        grid<uint8_t> img({x1-x0, y1-y0});
+        rect<int> bounds;
+        stbtt_GetGlyphBitmapBox(&info, g, scale, scale, &bounds.x0, &bounds.y0, &bounds.x1, &bounds.y1);
+
+        grid<uint8_t> img(bounds.dims());
         stbtt_MakeGlyphBitmap(&info, img.data(), img.width(), img.height(), img.width(), scale, scale, g);
         glyphs[ch].sprite_index = sheet.add_sprite(std::move(img), 0);
-        glyphs[ch].offset = {x0,y0 + baseline};
-        glyphs[ch].advance = static_cast<int>(std::floor(advance * scale));
+
+        int advance, lsb;
+        stbtt_GetGlyphHMetrics(&info, g, &advance, &lsb);
+        glyphs[ch].offset = bounds.corner00() + int2{0,baseline};
+        glyphs[ch].advance = exactly(std::floor(advance * scale));
     }
 }
 

@@ -15,7 +15,7 @@ struct common_assets
     mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
 
     sprite_sheet sheet;
-    gui_sprites sprites;
+    canvas_sprites sprites;
     font_face face;
 
     common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up},
@@ -81,7 +81,7 @@ public:
         // Images
         const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
         checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
-        font_image = dev->create_image({rhi::image_shape::_2d, {assets.sheet.img.dimensions,1}, 1, assets.sheet.img.format, rhi::sampled_image_bit}, {assets.sheet.img.get_pixels()});
+        font_image = dev->create_image({rhi::image_shape::_2d, {assets.sheet.sheet_image.dims(),1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {assets.sheet.sheet_image.data()});
         auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {assets.env_spheremap.dimensions,1}, 1, assets.env_spheremap.format, rhi::sampled_image_bit}, {assets.env_spheremap.get_pixels()});
 
         // Descriptor set layouts
@@ -264,17 +264,19 @@ public:
         }
 
         // Draw the UI
-        gui_context gui = gui_context(assets.sprites, pool, gwindow->get_window_size());
-        gui.draw_rounded_rect({10,10,140,30+assets.face.line_height}, 6, {0,0,0,0.8f});
-        gui.draw_shadowed_text(assets.face, {1,1,1,1}, {20,20}, "This is a test");
+        canvas canvas {assets.sprites, pool, gwindow->get_window_size()};
+        canvas.draw_rounded_rect({10,10,140,30+assets.face.line_height}, 6, {0,0,0,0.8f});
+        canvas.draw_shadowed_text({20,20}, {1,1,1,1}, assets.face, "This is a test");
 
         const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
+        const int2 dims = gwindow->get_window_size();
+        const float4x4 ortho {{2.0f/dims.x,0,0,0}, {0,2.0f/dims.y,0,0}, {0,0,1,0}, {-1,-1,0,1}};
         auto ui_set = pool.descriptors->alloc(*per_object_layout);
-        ui_set->write(0, pool.uniforms.upload(make_transform_4x4(ui_coords, fb.get_ndc_coords())));
+        ui_set->write(0, pool.uniforms.upload(mul(make_transform_4x4(ui_coords, fb.get_ndc_coords()), ortho)));
         ui_set->write(1, *nearest, *font_image);
         cmd->bind_pipeline(*ui_pipe);
         cmd->bind_descriptor_set(*ui_layout, 0, *ui_set);
-        gui.draw(*cmd);
+        canvas.encode_commands(*cmd);
 
         cmd->end_render_pass();
         dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
