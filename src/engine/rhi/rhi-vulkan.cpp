@@ -1214,7 +1214,7 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
 
 void vk_command_buffer::set_scissor_rect(int x0, int y0, int x1, int y1)
 {
-    VkRect2D scissor {{x0, y0}, {x1-x0, y1-y0}};
+    VkRect2D scissor {{exactly(x0), exactly(y0)}, {exactly(x1-x0), exactly(y1-y0)}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 
