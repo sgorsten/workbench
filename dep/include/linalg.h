@@ -309,6 +309,7 @@ namespace linalg
     template<class A, class B> bool_result_t<A,B> gequal (const A & a, const B & b) { return zip(a, b, op::gequal <scalar_t<A,B>>{}); }
 
     // Support for vector algebra
+    template<class T> constexpr vec<T,2>          perp     (const vec<T,2> & a)                          { return {a.y,-a.x}; }
     template<class T> constexpr T                 cross    (const vec<T,2> & a, const vec<T,2> & b)      { return a.x*b.y-a.y*b.x; }
     template<class T> constexpr vec<T,3>          cross    (const vec<T,3> & a, const vec<T,3> & b)      { return {a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x}; }
     template<class T, int M> constexpr T          dot      (const vec<T,M> & a, const vec<T,M> & b)      { return sum(a*b); }

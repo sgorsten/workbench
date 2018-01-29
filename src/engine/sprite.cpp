@@ -127,9 +127,9 @@ canvas_sprites::canvas_sprites(sprite_sheet & sheet) : sheet{sheet}
     for(int i=1; i<=32; ++i) corner_sprites[i] = sheet.add_sprite(make_bordered_circle_quadrant(i), 1);
     for(int i=1; i<=8; ++i)
     {
-        grid<uint8_t> line_sprite({i+2,1}, 0xFF);
-        line_sprite[{0,0}] = line_sprite[{i+1,0}] = 0;
-        line_sprites[i] = sheet.add_sprite(std::move(line_sprite), 0);
+        grid<uint8_t> line_sprite({i+4,3}, 0);
+        line_sprite.fill({2,0,i+2,3}, 0xFF);
+        line_sprites[i] = sheet.add_sprite(std::move(line_sprite), 1);
     }
 }
 
@@ -176,12 +176,12 @@ void canvas::draw_line(const float2 & p0, const float2 & p1, int width, const fl
     if(it == end(sprites.line_sprites)) return;
     const auto & sprite = sprites.sheet.sprites[it->second];
 
-    const float2 perp = normalize(cross(float3(p1-p0,0), float3(0,0,1)).xy()) * (width*0.5f + 1);
+    const float2 d = normalize(perp(p1-p0)) * (width*0.5f + 1);
     draw_convex_polygon({
-        {p0+perp, {sprite.texcoords.x0, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color},
-        {p0-perp, {sprite.texcoords.x1, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color},
-        {p1-perp, {sprite.texcoords.x1, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color},
-        {p1+perp, {sprite.texcoords.x0, (sprite.texcoords.y0+sprite.texcoords.y1)/2}, color}
+        {p0+d, sprite.texcoords.corner00(), color},
+        {p0-d, sprite.texcoords.corner10(), color},
+        {p1-d, sprite.texcoords.corner11(), color},
+        {p1+d, sprite.texcoords.corner01(), color}
     });
 }
 
@@ -191,15 +191,14 @@ void canvas::draw_bezier_curve(const float2 & p0, const float2 & p1, const float
     if(it == end(sprites.line_sprites)) return;
     const auto & tc = sprites.sheet.sprites[it->second].texcoords;
 
-    const float2 d01 = p1-p0, d12 = p2-p1, d23 = p3-p2;
-    float2 v0, v1;
+    const float2 d0 = p1-p0, d1 = p2-p1, d2 = p3-p2;
     for(uint32_t i=0; i<=32; ++i)
     {
         const float t = (float)i/32, s = (1-t);
         const float2 p = p0*(s*s*s) + p1*(3*s*s*t) + p2*(3*s*t*t) + p3*(t*t*t);
-        const float2 d = normalize(d01*(3*s*s) + d12*(6*s*t) + d23*(3*t*t)) * (width*0.5f + 1);
-        pool.vertices.write(ui_vertex{{p.x-d.y, p.y+d.x}, {tc.x0, (tc.y0+tc.y1)/2}, color});
-        pool.vertices.write(ui_vertex{{p.x+d.y, p.y-d.x}, {tc.x1, (tc.y0+tc.y1)/2}, color});
+        const float2 d = normalize(perp(d0*(3*s*s) + d1*(6*s*t) + d2*(3*t*t))) * (width*0.5f + 1);
+        pool.vertices.write(ui_vertex{p+d, tc.corner00(), color});
+        pool.vertices.write(ui_vertex{p-d, tc.corner10(), color});
         if(i)
         {
             pool.indices.write(vertex_count + uint3(i*2-2, i*2-1, i*2+1));
