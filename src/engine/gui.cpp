@@ -12,7 +12,7 @@ void gui::begin_frame()
     key = mods = 0;
 }
 
-void gui::begin_window(GLFWwindow * window, font_face * def_font, canvas * render_canvas)
+void gui::begin_window(GLFWwindow * window, font_face * def_font, font_face * icon_font, canvas * render_canvas)
 {
     current_id_prefix.root = window;
     current_id_prefix.path.clear();
@@ -20,6 +20,7 @@ void gui::begin_window(GLFWwindow * window, font_face * def_font, canvas * rende
     //int2 size;
     //glfwGetWindowSize(window, &size.x, &size.y);
     this->def_font = def_font;
+    this->icon_font = icon_font;
     buf = render_canvas;
     ctype = cursor_type::arrow;
 
@@ -314,7 +315,7 @@ bool gui::menu_item(std::string_view caption, int mods, int key, uint32_t icon)
     if(f.open)
     {
         if(is_cursor_over(item)) draw_fill_rect(item, {0.5f,0.5f,0,1});
-        if(icon) draw_shadowed_text({1,1,1,1}, {item.x0, item.y0}, utf8::units(icon).data());
+        if(icon) buf->draw_shadowed_glyph({item.x0, item.y0}, {1,1,1,1}, *icon_font, icon);
         draw_shadowed_text({1,1,1,1}, {item.x0+20, item.y0}, caption);
 
         if(key)

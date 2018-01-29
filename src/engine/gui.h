@@ -45,6 +45,7 @@ class gui
 
     // Output state
     font_face * def_font;
+    font_face * icon_font;
     canvas * buf;                       // The render buffer containing the draw calls for this frame
     cursor_type ctype;                  // Which cursor icon to display for this frame
 
@@ -55,7 +56,7 @@ public:
     void set_style(const gui_style & style) { this->style = style; }
 
     void begin_frame();
-    void begin_window(GLFWwindow * window, font_face * def_font, canvas * render_canvas);
+    void begin_window(GLFWwindow * window, font_face * def_font, font_face * icon_font, canvas * render_canvas);
     GLFWwindow * get_current_window() { return current_id_prefix.root; }
     void end_window();
 

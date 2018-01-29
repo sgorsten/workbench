@@ -89,14 +89,15 @@ int main(int argc, const char * argv[]) try
     loader loader;
     loader.register_root(get_program_binary_path() + "../../assets");
     loader.register_root("C:/windows/fonts");
-
+    
     shader_compiler compiler{loader};
     auto ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
     auto ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");      
     
     sprite_sheet sheet;
     canvas_sprites sprites{sheet};
-    font_face face{sheet, loader.load_binary_file("arialbd.ttf"), 14};
+    font_face face{sheet, loader.load_binary_file("arialbd.ttf"), 14, 0x20, 0x7E};
+    font_face icons{sheet, loader.load_binary_file("fontawesome-webfont.ttf"), 14, 0xf000, 0xf295};
     sheet.prepare_sheet();
 
     // Set up graph state
@@ -170,7 +171,7 @@ int main(int argc, const char * argv[]) try
         canvas canvas {sprites, pool, gwindow->get_window_size()};
 
         // Handle the menu
-        g.begin_window(gwindow->get_glfw_window(), &face, &canvas);
+        g.begin_window(gwindow->get_glfw_window(), &face, &icons, &canvas);
         g.begin_menu(0, client_rect.take_y0(20));
             g.begin_popup(1, "File");
                 g.begin_popup(1, "New");

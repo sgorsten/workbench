@@ -25,3 +25,6 @@ The contents of the `dep/` directory are taken from other open source projects a
 The contents of the `assets/` directory are taken from royalty-free sources and may have been reduced in resolution to minimize repository bloat. Please visit the author's website to obtain the original, full resolution files:
 
 * `assets/monument-valley.hdr`: The [sIBL Archive](http://www.hdrlabs.com/sibl/archive.html) is licensed under the Creative Commons Attribution-Noncommercial-Share Alike 3.0 License
+* `assets/fontawesome-webfont.ttf`:  The [font-awesome-4.5.0 package](http://fontawesome.io/) by Dave Gandy is licensed under the SIL Open Font License 1.1
+
+

@@ -359,6 +359,12 @@ void canvas::draw_glyph(const int2 & pos, const float4 & color, const font_face 
     draw_sprite({b0.x+s.border, b0.y+s.border, b1.x-s.border, b1.y-s.border}, color, s.texcoords);
 }
 
+void canvas::draw_shadowed_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint)
+{
+    draw_glyph(pos+1,{0,0,0,color.w},font,codepoint);
+    draw_glyph(pos,color,font,codepoint);
+}
+
 void canvas::draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text)
 {
     auto p = pos;
@@ -395,7 +401,7 @@ void canvas::encode_commands(rhi::command_buffer & cmd)
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
-font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_data, float pixel_height) : sheet{sheet}
+font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_data, float pixel_height, uint32_t min_codepoint, uint32_t max_codepoint) : sheet{sheet}
 {
     stbtt_fontinfo info {};
     if(!stbtt_InitFont(&info, reinterpret_cast<const uint8_t *>(font_data.data()), 0)) throw std::runtime_error("stbtt_InitFont(...) failed");
@@ -406,22 +412,21 @@ font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_d
     line_height = static_cast<int>(std::round((ascent - descent + line_gap) * scale));
     baseline = static_cast<int>(std::round(ascent * scale));
 
-    for(int ch=0; ch<128; ++ch)
+    for(uint32_t codepoint=min_codepoint; codepoint<=max_codepoint; ++codepoint)
     {
-        if(!isprint(ch)) continue;
-        const int g = stbtt_FindGlyphIndex(&info, ch);
+        const int g = stbtt_FindGlyphIndex(&info, codepoint);
 
         rect<int> bounds;
         stbtt_GetGlyphBitmapBox(&info, g, scale, scale, &bounds.x0, &bounds.y0, &bounds.x1, &bounds.y1);
 
         grid<uint8_t> img(bounds.dims());
         stbtt_MakeGlyphBitmap(&info, img.data(), img.width(), img.height(), img.width(), scale, scale, g);
-        glyphs[ch].sprite_index = sheet.add_sprite(std::move(img), 0);
+        glyphs[codepoint].sprite_index = sheet.add_sprite(std::move(img), 0);
 
         int advance, lsb;
         stbtt_GetGlyphHMetrics(&info, g, &advance, &lsb);
-        glyphs[ch].offset = bounds.corner00() + int2{0,baseline};
-        glyphs[ch].advance = exactly(std::floor(advance * scale));
+        glyphs[codepoint].offset = bounds.corner00() + int2{0,baseline};
+        glyphs[codepoint].advance = exactly(std::floor(advance * scale));
     }
 }
 
