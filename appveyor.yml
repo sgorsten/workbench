@@ -4,9 +4,7 @@
 version: 1.0.{build}
 
 image: Visual Studio 2017
-configuration:
-  - Debug
-  - Release
+configuration: Debug
 platform: x64
 clone_folder: "C:\\workbench"
 environment:
