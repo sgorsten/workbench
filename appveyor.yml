@@ -10,7 +10,7 @@ configuration:
 platform: x64
 clone_folder: "C:\\workbench"
 environment:
-  VULKAN_SDK: "c:\\workbench\\dep\\appveyor\\VulkanSDK-1.0.65.1\\"
+  VULKAN_SDK: "C:\\workbench\\dep\\appveyor\\VulkanSDK-1.0.65.1\\"
 
 build:
   project: workbench.sln
@@ -18,4 +18,5 @@ build:
   verbosity: minimal
   
 test_script:
+  - copy dep\appveyor\VulkanSDK-1.0.65.1\Lib\vulkan-1.dll bin\Debug-x64\
   - bin\Debug-x64\all-tests.exe
