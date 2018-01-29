@@ -99,8 +99,6 @@ int main(int argc, const char * argv[]) try
     loader.register_root("C:/windows/fonts");
     
     shader_compiler compiler{loader};
-    auto ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
-    auto ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");      
     
     sprite_sheet sheet;
     canvas_sprites sprites{sheet};
@@ -123,21 +121,7 @@ int main(int argc, const char * argv[]) try
     gfx::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
     auto dev = context.get_backends().back().create_device(debug);
-
-    auto font_image = dev->create_image({rhi::image_shape::_2d, {sheet.sheet_image.dims(),1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {sheet.sheet_image.data()});
-    auto linear = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
-    auto set_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::uniform_buffer, 1},
-        {1, rhi::descriptor_type::combined_image_sampler, 1}
-    });
-    auto pipe_layout = dev->create_pipeline_layout({set_layout});
-    const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
-        .attribute(0, &ui_vertex::position)
-        .attribute(1, &ui_vertex::texcoord)
-        .attribute(2, &ui_vertex::color);
-    auto ui_vss = dev->create_shader(ui_vs), ui_fss = dev->create_shader(ui_fs);
-    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
-    auto pipe = dev->create_pipeline({pipe_layout, {ui_vertex_binding}, {ui_vss,ui_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
+    canvas_device_objects device_objects {*dev, compiler, sheet};
     auto gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - GUI Test"));
 
     // Create transient resources
@@ -166,7 +150,7 @@ int main(int argc, const char * argv[]) try
 
         // Draw the UI
         rect<int> client_rect {{0,0}, gwindow->get_window_size()};
-        canvas canvas {sprites, pool};
+        canvas canvas {sprites, device_objects, pool};
 
         // Handle the menu
         const gui_style style {face, icons};
@@ -212,26 +196,14 @@ int main(int argc, const char * argv[]) try
         g.begin_group(3);
         tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
         g.end_group();
-
-        // Set up descriptor set for UI global transform and font image
-        auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
-        const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
-
-        auto dims = gwindow->get_window_size();
-        const float4x4 ortho {{2.0f/dims.x,0,0,0}, {0,2.0f/dims.y,0,0}, {0,0,1,0}, {-1,-1,0,1}};
-        auto set = pool.descriptors->alloc(*set_layout);
-        set->write(0, pool.uniforms.upload(mul(make_transform_4x4(ui_coords, fb.get_ndc_coords()), ortho)));
-        set->write(1, *linear, *font_image);
-
-        // Encode our command canvas
+                
+        // Encode our command buffer
         auto cmd = dev->create_command_buffer();
         rhi::render_pass_desc pass;
         pass.color_attachments = {{rhi::clear_color{0,0,0,1}, rhi::store{rhi::layout::present_source}}};
         pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
-        cmd->begin_render_pass(pass, fb);
-        cmd->bind_pipeline(*pipe);
-        cmd->bind_descriptor_set(*pipe_layout, 0, *set);
-        canvas.encode_commands(*cmd);
+        cmd->begin_render_pass(pass, gwindow->get_rhi_window().get_swapchain_framebuffer());
+        canvas.encode_commands(*cmd, *gwindow);
         cmd->end_render_pass();
 
         // Submit and end frame

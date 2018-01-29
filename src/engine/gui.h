@@ -1,6 +1,6 @@
  // A small immediate mode GUI framework
 #pragma once
-#include "sprite.h"
+#include "sprite.h" // For sprite_sheet, font_face, canvas
 
 // GUI state which persists from frame to frame
 struct GLFWwindow;

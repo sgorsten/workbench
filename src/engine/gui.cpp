@@ -1,4 +1,5 @@
 #include "gui.h"
+#include "shader.h"
 
 #include <cassert>
 #include <GLFW/glfw3.h> // For GLFW_KEY_* bindings
@@ -142,22 +143,22 @@ void gui::begin_overlay()
     rect<int> scissor;
     glfwGetFramebufferSize(window, &scissor.x1, &scissor.y1);
     scissor_stack.push_back(scissor);
-    buf.set_target(++current_layer, scissor_stack.back());
+    buf.set_target(++current_layer, scissor_stack.back(), 0);
 }
 void gui::end_overlay() 
 { 
     scissor_stack.pop_back();
-    buf.set_target(--current_layer, scissor_stack.back());
+    buf.set_target(--current_layer, scissor_stack.back(), 0);
 }
 void gui::begin_scissor(const rect<int> & r) 
 { 
     scissor_stack.push_back(scissor_stack.back().intersected_with(r));
-    buf.set_target(current_layer, scissor_stack.back());
+    buf.set_target(current_layer, scissor_stack.back(), 0);
 }
 void gui::end_scissor()
 { 
     scissor_stack.pop_back();
-    buf.set_target(current_layer, scissor_stack.back());
+    buf.set_target(current_layer, scissor_stack.back(), 0);
 }
 
 void gui::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color) { return buf.draw_line(p0, p1, width, color); }

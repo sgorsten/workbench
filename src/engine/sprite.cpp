@@ -1,4 +1,5 @@
 #include "sprite.h"
+#include "shader.h"
 
 //////////////////
 // sprite_sheet //
@@ -200,20 +201,47 @@ canvas_sprites::canvas_sprites(sprite_sheet & sheet) : sheet{sheet}
     }
 }
 
+///////////////////////////
+// canvas_device_objects //
+///////////////////////////
+
+canvas_device_objects::canvas_device_objects(rhi::device & device, shader_compiler & compiler, const sprite_sheet & sheet)
+{
+    sprites = device.create_image({rhi::image_shape::_2d, {sheet.sheet_image.dims(),1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {sheet.sheet_image.data()});
+    sampler = device.create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+    per_window_layout = device.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
+    per_texture_layout = device.create_descriptor_set_layout({{0, rhi::descriptor_type::combined_image_sampler, 1}});
+    pipe_layout = device.create_pipeline_layout({per_window_layout, per_texture_layout});
+    const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
+        .attribute(0, &ui_vertex::position)
+        .attribute(1, &ui_vertex::texcoord)
+        .attribute(2, &ui_vertex::color);
+    const auto vs = device.create_shader(compiler.compile_file(rhi::shader_stage::vertex, "standard/gui/ui.vert"));
+    const auto fs = device.create_shader(compiler.compile_file(rhi::shader_stage::fragment, "standard/gui/ui.frag")); 
+    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
+    pipe = device.create_pipeline({pipe_layout, {ui_vertex_binding}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});    
+}
+
 ////////////
 // canvas //
 ////////////
 
-canvas::canvas(const canvas_sprites & sprites, gfx::transient_resource_pool & pool) : sprites{sprites}, pool{pool}, vertex_count{0}
+canvas::canvas(const canvas_sprites & sprites, const canvas_device_objects & device_objects, gfx::transient_resource_pool & pool) : sprites{sprites}, device_objects{device_objects}, pool{pool}, vertex_count{0}
 {
     pool.vertices.begin();
     pool.indices.begin();
 }
 
-void canvas::set_target(int layer, rect<int> scissor)
+void canvas::set_target(int layer, rect<int> scissor, rhi::ptr<rhi::image> texture)
 {
+    auto & set = sets[texture];
+    if(!set)
+    {
+        set = pool.descriptors->alloc(*device_objects.per_texture_layout);
+        set->write(0, *device_objects.sampler, texture ? *texture : *device_objects.sprites);
+    }
     if(!lists.empty() && lists.back().index_count == 0) lists.pop_back();
-    lists.push_back({layer, scissor, lists.empty() ? 0 : lists.back().first_index + lists.back().index_count, 0});
+    lists.push_back({layer, scissor, set, lists.empty() ? 0 : lists.back().first_index + lists.back().index_count, 0});
 }
 
 void canvas::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color)
@@ -365,14 +393,27 @@ void canvas::draw_shadowed_text(const int2 & pos, const float4 & color, const fo
     draw_text(pos,color,font,text);
 }
 
-void canvas::encode_commands(rhi::command_buffer & cmd)
+void canvas::encode_commands(rhi::command_buffer & cmd, gfx::window & win)
 {
     std::sort(lists.begin(), lists.end(), [](const list & a, const list & b) { return a.layer < b.layer; });
+
+    constexpr coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
+    const coord_system ndc_coords = win.get_rhi_window().get_swapchain_framebuffer().get_ndc_coords();
+    const int2 dims = win.get_window_size();   
+    const auto ortho = float4x4{{2.0f/dims.x,0,0,0}, {0,2.0f/dims.y,0,0}, {0,0,1,0}, {-1,-1,0,1}};
+    const auto transform = mul(make_transform_4x4(ui_coords, ndc_coords), ortho);
+
+    auto per_window_set = pool.descriptors->alloc(*device_objects.per_window_layout);
+    per_window_set->write(0, pool.uniforms.upload(transform));
+
+    cmd.bind_pipeline(*device_objects.pipe);
+    cmd.bind_descriptor_set(*device_objects.pipe_layout, 0, *per_window_set);
     cmd.bind_vertex_buffer(0, pool.vertices.end());
     cmd.bind_index_buffer(pool.indices.end());
     for(auto & list : lists) 
     {
         cmd.set_scissor_rect(list.scissor.x0, list.scissor.y0, list.scissor.x1, list.scissor.y1);
+        cmd.bind_descriptor_set(*device_objects.pipe_layout, 1, *list.set);
         cmd.draw_indexed(list.first_index, list.index_count);
     }
 }

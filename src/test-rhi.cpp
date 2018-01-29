@@ -9,8 +9,9 @@
 struct common_assets
 {
     coord_system game_coords;
+    shader_compiler compiler;
     standard_shaders standard;
-    rhi::shader_desc vs, lit_fs, unlit_fs, skybox_vs, skybox_fs, ui_vs, ui_fs;
+    rhi::shader_desc vs, lit_fs, unlit_fs, skybox_vs, skybox_fs;
     image env_spheremap;
     mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
 
@@ -18,18 +19,15 @@ struct common_assets
     canvas_sprites sprites;
     font_face face;
 
-    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up},
-        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20}
+    common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}, 
+        compiler{loader}, standard{standard_shaders::compile(compiler)},
+        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20, 0x20, 0x7E}
     {
-        shader_compiler compiler{loader};
-        standard = standard_shaders::compile(compiler);
         vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
         lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
         unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
         skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
         skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
-        ui_vs = compiler.compile_file(rhi::shader_stage::vertex, "ui.vert");
-        ui_fs = compiler.compile_file(rhi::shader_stage::fragment, "ui.frag");
 
         env_spheremap = loader.load_image("monument-valley.hdr");
 
@@ -47,6 +45,7 @@ class device_session
     const common_assets & assets;
     rhi::ptr<rhi::device> dev;
     standard_device_objects standard;
+    canvas_device_objects canvas_objects;
     rhi::device_info info;
     gfx::transient_resource_pool pools[3];
     int pool_index=0;
@@ -60,14 +59,14 @@ class device_session
     rhi::ptr<rhi::sampler> nearest;
 
     rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
-    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout, ui_layout;
-    rhi::ptr<rhi::pipeline> wire_pipe, light_pipe, solid_pipe, skybox_pipe, ui_pipe;
+    rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
+    rhi::ptr<rhi::pipeline> wire_pipe, light_pipe, solid_pipe, skybox_pipe;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
 public:
-    device_session(const common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : 
-        assets{assets}, dev{dev}, standard{dev, assets.standard}, info{dev->get_info()}, pools{*dev, *dev, *dev}
+    device_session(common_assets & assets, const std::string & name, rhi::ptr<rhi::device> dev, const int2 & window_pos) : 
+        assets{assets}, dev{dev}, standard{dev, assets.standard}, canvas_objects{*dev, assets.compiler, assets.sheet}, info{dev->get_info()}, pools{*dev, *dev, *dev}
     {
         // Buffers
         basis = {*dev, assets.basis_mesh.vertices, assets.basis_mesh.lines};
@@ -106,7 +105,6 @@ public:
         common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
         object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
         skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
-        ui_layout = dev->create_pipeline_layout({per_object_layout});
 
         const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
             .attribute(0, &mesh_vertex::position)
@@ -121,7 +119,6 @@ public:
         // Shaders
         auto vs = dev->create_shader(assets.vs), lit_fs = dev->create_shader(assets.lit_fs), unlit_fs = dev->create_shader(assets.unlit_fs);
         auto skybox_vs = dev->create_shader(assets.skybox_vs), skybox_fs = dev->create_shader(assets.skybox_fs);
-        auto ui_vs = dev->create_shader(assets.ui_vs), ui_fs = dev->create_shader(assets.ui_fs);
 
         // Blend states
         const rhi::blend_state opaque {false};
@@ -132,7 +129,6 @@ public:
         light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-        ui_pipe = dev->create_pipeline({ui_layout, {ui_vertex_binding}, {ui_vs,ui_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});
 
         // Do some initial work
         pools[pool_index].begin_frame(*dev);
@@ -264,19 +260,11 @@ public:
         }
 
         // Draw the UI
-        canvas canvas {assets.sprites, pool, gwindow->get_window_size()};
+        canvas canvas {assets.sprites, canvas_objects, pool};
+        canvas.set_target(0, {{0,0},gwindow->get_window_size()}, nullptr);
         canvas.draw_rounded_rect({10,10,140,30+assets.face.line_height}, 6, {0,0,0,0.8f});
         canvas.draw_shadowed_text({20,20}, {1,1,1,1}, assets.face, "This is a test");
-
-        const coord_system ui_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
-        const int2 dims = gwindow->get_window_size();
-        const float4x4 ortho {{2.0f/dims.x,0,0,0}, {0,2.0f/dims.y,0,0}, {0,0,1,0}, {-1,-1,0,1}};
-        auto ui_set = pool.descriptors->alloc(*per_object_layout);
-        ui_set->write(0, pool.uniforms.upload(mul(make_transform_4x4(ui_coords, fb.get_ndc_coords()), ortho)));
-        ui_set->write(1, *nearest, *font_image);
-        cmd->bind_pipeline(*ui_pipe);
-        cmd->bind_descriptor_set(*ui_layout, 0, *ui_set);
-        canvas.encode_commands(*cmd);
+        canvas.encode_commands(*cmd, *gwindow);
 
         cmd->end_render_pass();
         dev->acquire_and_submit_and_present(*cmd, gwindow->get_rhi_window());
