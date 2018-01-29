@@ -204,37 +204,16 @@ canvas_sprites::canvas_sprites(sprite_sheet & sheet) : sheet{sheet}
 // canvas //
 ////////////
 
-canvas::canvas(const canvas_sprites & sprites, gfx::transient_resource_pool & pool, const int2 & dims) : sprites{sprites}, pool{pool}, dims{dims}, vertex_count{0}
+canvas::canvas(const canvas_sprites & sprites, gfx::transient_resource_pool & pool) : sprites{sprites}, pool{pool}, vertex_count{0}
 {
     pool.vertices.begin();
     pool.indices.begin();
-    scissors.push_back({0,0,dims.x,dims.y});
-    lists.push_back({scissors.back(), 0, 0, 0});
 }
 
-void canvas::begin_overlay()
+void canvas::set_target(int layer, rect<int> scissor)
 {
-    scissors.push_back(scissors.front());
-    lists.push_back({scissors.back(), lists.back().level+1, lists.back().last, lists.back().last});
-}
-
-void canvas::end_overlay()
-{
-    scissors.pop_back();
-    lists.push_back({scissors.back(), lists.back().level-1, lists.back().last, lists.back().last});
-}
-
-void canvas::begin_scissor(const rect<int> & r)
-{
-    const auto & s = scissors.back();
-    scissors.push_back(scissors.back().intersected_with(r));
-    lists.push_back({scissors.back(), lists.back().level, lists.back().last, lists.back().last});
-}
-
-void canvas::end_scissor()
-{
-    scissors.pop_back();
-    lists.push_back({scissors.back(), lists.back().level, lists.back().last, lists.back().last});
+    if(!lists.empty() && lists.back().index_count == 0) lists.pop_back();
+    lists.push_back({layer, scissor, lists.empty() ? 0 : lists.back().first_index + lists.back().index_count, 0});
 }
 
 void canvas::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color)
@@ -273,7 +252,7 @@ void canvas::draw_bezier_curve(const float2 & p0, const float2 & p1, const float
         }
     }
     vertex_count += 33*2;
-    lists.back().last += 32*6;
+    lists.back().index_count += 32*6;
 }
 
 void canvas::draw_wire_rect(const rect<int> & r, int width, const float4 & color)
@@ -331,7 +310,7 @@ void canvas::draw_convex_polygon(array_view<ui_vertex> vertices)
     pool.vertices.write(vertices);
     for(uint32_t i=2; i<n; ++i) pool.indices.write(vertex_count + uint3{0,i-1,i});
     vertex_count += n;
-    lists.back().last += (n-2)*3;
+    lists.back().index_count += (n-2)*3;
 }
 
 void canvas::draw_sprite(const rect<int> & r, const float4 & color, const rect<float> & texcoords)
@@ -388,13 +367,13 @@ void canvas::draw_shadowed_text(const int2 & pos, const float4 & color, const fo
 
 void canvas::encode_commands(rhi::command_buffer & cmd)
 {
-    std::sort(lists.begin(), lists.end(), [](const list & a, const list & b) { return a.level < b.level; });
+    std::sort(lists.begin(), lists.end(), [](const list & a, const list & b) { return a.layer < b.layer; });
     cmd.bind_vertex_buffer(0, pool.vertices.end());
     cmd.bind_index_buffer(pool.indices.end());
     for(auto & list : lists) 
     {
         cmd.set_scissor_rect(list.scissor.x0, list.scissor.y0, list.scissor.x1, list.scissor.y1);
-        cmd.draw_indexed(list.first, list.last - list.first);
+        cmd.draw_indexed(list.first_index, list.index_count);
     }
 }
 

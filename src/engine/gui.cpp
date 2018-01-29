@@ -5,42 +5,20 @@
 
 static bool operator == (const widget_id & a, const widget_id & b) { return a.root == b.root && a.path == b.path; }
 
-void gui::begin_frame()
+void gui_state::begin_frame()
 {
     clicked = false;
     scroll = {};
     key = mods = 0;
 }
 
-void gui::begin_window(GLFWwindow * window, font_face * def_font, font_face * icon_font, canvas * render_canvas)
-{
-    current_id_prefix.root = window;
-    current_id_prefix.path.clear();
-
-    //int2 size;
-    //glfwGetWindowSize(window, &size.x, &size.y);
-    this->def_font = def_font;
-    this->icon_font = icon_font;
-    buf = render_canvas;
-    ctype = cursor_type::arrow;
-
-    double2 pos;
-    glfwGetCursorPos(window, &pos.x, &pos.y);
-    cursor = int2(pos);
-}
-
-void gui::end_window()
-{
-
-}
-
-void gui::on_scroll(GLFWwindow * window, double x, double y) 
+void gui_state::on_scroll(GLFWwindow * window, double x, double y) 
 { 
     cursor_window = window;
     scroll += int2(double2(x,y)*100.0); 
 }
 
-void gui::on_mouse_button(GLFWwindow * window, int button, int action, int mods)
+void gui_state::on_mouse_button(GLFWwindow * window, int button, int action, int mods)
 {
     cursor_window = window;
     if(button == GLFW_MOUSE_BUTTON_LEFT)
@@ -50,14 +28,14 @@ void gui::on_mouse_button(GLFWwindow * window, int button, int action, int mods)
     }
 }
 
-void gui::delete_text_entry_selection()
+void gui_state::delete_text_entry_selection()
 {
     auto a = std::min(text_entry_cursor, text_entry_mark), b = std::max(text_entry_cursor, text_entry_mark);
     text_entry.erase(text_entry.begin() + a, text_entry.begin() + b);
     text_entry_mark = text_entry_cursor = a;
 }
 
-void gui::on_key(GLFWwindow * window, int key, int action, int mods)
+void gui_state::on_key(GLFWwindow * window, int key, int action, int mods)
 {
     cursor_window = window;
     auto set_text_entry_cursor = [this,mods](size_t cursor)
@@ -127,7 +105,7 @@ void gui::on_key(GLFWwindow * window, int key, int action, int mods)
     }
 }
 
-void gui::on_char(GLFWwindow * window, uint32_t codepoint)
+void gui_state::on_char(GLFWwindow * window, uint32_t codepoint)
 {
     cursor_window = window;
     if(!text_entry_id.path.empty() && focus_id == text_entry_id) 
@@ -140,13 +118,103 @@ void gui::on_char(GLFWwindow * window, uint32_t codepoint)
     }
 }
 
-bool gui::is_mouse_clicked() const { return clicked && current_id_prefix.root == cursor_window; }
-bool gui::is_mouse_down() const { return down && current_id_prefix.root == cursor_window; }
+/////////
+// gui //
+/////////
 
-// NOTE: This might later account for things like clip rects or widget transforms
+gui::gui(gui_state & state, canvas & canvas, const gui_style & style, GLFWwindow * window) : 
+    state{state}, buf{canvas}, style{style}, window{window}, current_layer{-1}
+{
+    double2 pos;
+    glfwGetCursorPos(window, &pos.x, &pos.y);
+    local_cursor = int2(pos);
+
+    current_id_prefix.root = window;
+    current_id_prefix.path.clear();
+
+    ctype = cursor_type::arrow;
+
+    begin_overlay();
+}
+
+void gui::begin_overlay() 
+{ 
+    rect<int> scissor;
+    glfwGetFramebufferSize(window, &scissor.x1, &scissor.y1);
+    scissor_stack.push_back(scissor);
+    buf.set_target(++current_layer, scissor_stack.back());
+}
+void gui::end_overlay() 
+{ 
+    scissor_stack.pop_back();
+    buf.set_target(--current_layer, scissor_stack.back());
+}
+void gui::begin_scissor(const rect<int> & r) 
+{ 
+    scissor_stack.push_back(scissor_stack.back().intersected_with(r));
+    buf.set_target(current_layer, scissor_stack.back());
+}
+void gui::end_scissor()
+{ 
+    scissor_stack.pop_back();
+    buf.set_target(current_layer, scissor_stack.back());
+}
+
+void gui::draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color) { return buf.draw_line(p0, p1, width, color); }
+void gui::draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color) { return buf.draw_bezier_curve(p0, p1, p2, p3, width, color); }
+void gui::draw_wire_rect(const rect<int> & r, int width, const float4 & color) { return buf.draw_wire_rect(r, width, color); }
+void gui::draw_rect(const rect<int> & r, const float4 & color) { return buf.draw_rect(r, color); }
+void gui::draw_circle(const int2 & center, int radius, const float4 & color) { return buf.draw_circle(center, radius, color); }
+void gui::draw_rounded_rect(const rect<int> & r, int corner_radius, const float4 & color) { return buf.draw_rounded_rect(r, corner_radius, color); }
+void gui::draw_partial_rounded_rect(const rect<int> & r, int corner_radius, corner_flags corners, const float4 & color) { return buf.draw_partial_rounded_rect(r, corner_radius, corners, color); }
+void gui::draw_convex_polygon(array_view<ui_vertex> vertices) { return buf.draw_convex_polygon(vertices); }
+void gui::draw_sprite(const rect<int> & r, const float4 & color, const rect<float> & texcoords) { return buf.draw_sprite(r, color, texcoords); }
+void gui::draw_sprite_sheet(const int2 & p) { return buf.draw_sprite_sheet(p); }
+void gui::draw_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint) { return buf.draw_glyph(pos, color, font, codepoint); }
+void gui::draw_shadowed_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint) { return buf.draw_shadowed_glyph(pos, color, font, codepoint); }
+void gui::draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text) { return buf.draw_text(pos, color, font, text); }
+void gui::draw_text(const int2 & coords, const float4 & color, std::string_view text) { buf.draw_text(coords, color, style.def_font, text); }
+void gui::draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text) { return buf.draw_shadowed_text(pos, color, font, text); }
+void gui::draw_shadowed_text(const int2 & coords, const float4 & color, std::string_view text) { buf.draw_shadowed_text(coords, color, style.def_font, text); }
+
+bool gui::is_mouse_clicked() const { return state.clicked && current_id_prefix.root == state.cursor_window; }
+bool gui::is_mouse_down() const { return state.down && current_id_prefix.root == state.cursor_window; }
+
+bool gui::clickable_widget(const rect<int> & bounds)
+{
+    if(is_mouse_clicked() && is_cursor_over(bounds))
+    {
+        consume_click();
+        return true;
+    }
+    return false;
+}
+
+bool gui::draggable_widget(int id, int2 dims, int2 & pos)
+{
+    if(is_focused(id))
+    {
+        if(is_mouse_down())
+        {
+            if(const int2 new_pos = local_cursor - state.clicked_offset; new_pos != pos)
+            {
+                pos = new_pos;
+                return true;
+            }
+        }
+        else clear_focus();
+    }
+    else if(clickable_widget({pos, pos+dims}))
+    {
+        state.clicked_offset = local_cursor - pos;
+        set_focus(id);
+    }
+    return false;
+}
+
 bool gui::is_cursor_over(const rect<int> & r) const 
 { 
-    return r.contains(cursor); 
+    return r.intersected_with(scissor_stack.back()).contains(local_cursor); 
 }
 
 static bool ids_equal(const std::vector<int> & a_prefix, int a_suffix, const std::vector<int> & b)
@@ -158,59 +226,59 @@ static bool ids_equal(const std::vector<int> & a_prefix, int a_suffix, const std
 
 bool gui::is_focused(int id) const 
 { 
-    if(current_id_prefix.root != focus_id.root) return false;
-    if(current_id_prefix.path.size() + 1 != focus_id.path.size()) return false;
-    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != focus_id.path[i]) return false;
-    return id == focus_id.path.back();
+    if(current_id_prefix.root != state.focus_id.root) return false;
+    if(current_id_prefix.path.size() + 1 != state.focus_id.path.size()) return false;
+    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != state.focus_id.path[i]) return false;
+    return id == state.focus_id.path.back();
 }
 
 bool gui::is_group_focused(int id) const
 {
-    if(current_id_prefix.root != focus_id.root) return false;
-    if(current_id_prefix.path.size() + 2 > focus_id.path.size()) return false;
-    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != focus_id.path[i]) return false;
-    return id == focus_id.path[current_id_prefix.path.size()];
+    if(current_id_prefix.root != state.focus_id.root) return false;
+    if(current_id_prefix.path.size() + 2 > state.focus_id.path.size()) return false;
+    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != state.focus_id.path[i]) return false;
+    return id == state.focus_id.path[current_id_prefix.path.size()];
 }
 
-void gui::clear_focus() { focus_id.root = nullptr; focus_id.path.clear(); }
+void gui::clear_focus() { state.focus_id.root = nullptr; state.focus_id.path.clear(); }
 void gui::set_focus(int id)
 {
-    focus_id = current_id_prefix;
-    focus_id.path.push_back(id);
+    state.focus_id = current_id_prefix;
+    state.focus_id.path.push_back(id);
 }
 
 void gui::begin_text_entry(int id, const char * contents, bool selected)
 {
     set_focus(id);
-    text_entry_id = focus_id;
-    text_entry = contents ? contents : "";
-    text_entry_cursor = selected ? text_entry.size() : 0;
-    text_entry_mark = 0;
-    assert(utf8::is_valid(text_entry));
+    state.text_entry_id = state.focus_id;
+    state.text_entry = contents ? contents : "";
+    state.text_entry_cursor = selected ? state.text_entry.size() : 0;
+    state.text_entry_mark = 0;
+    assert(utf8::is_valid(state.text_entry));
 
     // HACK: Avoid modifying the selection in subsequent calls to show_text_entry() this frame
     if(selected)
     {
-        clicked = false;
-        down = false;
+        state.clicked = false;
+        state.down = false;
     }
 }
 
 void gui::show_text_entry(const float4 & color, const rect<int> & rect)
 {
-    const auto w_cursor = def_font->get_text_width({text_entry.c_str(), text_entry_cursor});
-    const auto w_mark = def_font->get_text_width({text_entry.c_str(), text_entry_mark});
-    if(w_cursor != w_mark) draw_fill_rect({rect.x0+std::min(w_cursor,w_mark), rect.y0, rect.x0+std::max(w_cursor,w_mark), rect.y0+def_font->line_height}, style.selection_background);
-    draw_text(color, {rect.x0,rect.y0}, text_entry);
-    draw_fill_rect({rect.x0+w_cursor, rect.y0, rect.x0+w_cursor+1, rect.y0+def_font->line_height}, style.active_text);
+    const auto w_cursor = style.def_font.get_text_width({state.text_entry.c_str(), state.text_entry_cursor});
+    const auto w_mark = style.def_font.get_text_width({state.text_entry.c_str(), state.text_entry_mark});
+    if(w_cursor != w_mark) draw_rect({rect.x0+std::min(w_cursor,w_mark), rect.y0, rect.x0+std::max(w_cursor,w_mark), rect.y0+style.def_font.line_height}, style.selection_background);
+    draw_text({rect.x0,rect.y0}, color, state.text_entry);
+    draw_rect({rect.x0+w_cursor, rect.y0, rect.x0+w_cursor+1, rect.y0+style.def_font.line_height}, style.active_text);
 
-    if(down) text_entry_cursor = def_font->get_cursor_pos(text_entry, cursor.x - rect.x0);
+    if(state.down) state.text_entry_cursor = style.def_font.get_cursor_pos(state.text_entry, local_cursor.x - rect.x0);
     if(is_cursor_over(rect)) 
     {
         ctype = cursor_type::ibeam;
-        if(clicked) 
+        if(state.clicked) 
         {
-            text_entry_mark = text_entry_cursor;
+            state.text_entry_mark = state.text_entry_cursor;
             consume_click();
         }
     }
@@ -222,7 +290,7 @@ void gui::show_text_entry(const float4 & color, const rect<int> & rect)
 
 void gui::begin_menu(int id, const rect<int> & r)
 {
-    draw_fill_rect(r, style.edit_background);
+    draw_rect(r, style.edit_background);
 
     menu_stack.clear();
     menu_stack.push_back({{r.x0+10, r.y0, r.x0+10, r.y1}, true});
@@ -234,13 +302,13 @@ rect<int> gui::get_next_menu_item_rect(rect<int> & r, std::string_view caption)
 {
     if(menu_stack.size() == 1)
     {
-        const rect<int> item = {r.x1, r.y0 + (r.height() - get_font().line_height) / 2, r.x1 + get_font().get_text_width(caption), r.y0 + (r.height() + get_font().line_height) / 2};
+        const rect<int> item = {r.x1, r.y0 + (r.height() - style.def_font.line_height) / 2, r.x1 + style.def_font.get_text_width(caption), r.y0 + (r.height() + style.def_font.line_height) / 2};
         r.x1 = item.x1 + 30;
         return item;
     }
     else
     {
-        const rect<int> item = {r.x0 + 4, r.y1, r.x0 + 196, r.y1 + get_font().line_height};
+        const rect<int> item = {r.x0 + 4, r.y1, r.x0 + 196, r.y1 + style.def_font.line_height};
         r.x1 = std::max(r.x1, item.x1);
         r.y1 = item.y1 + 4;
         return item;    
@@ -254,16 +322,16 @@ void gui::begin_popup(int id, std::string_view caption)
 
     if(f.open)
     {
-        if(is_cursor_over(item)) draw_fill_rect(item, {0.5f,0.5f,0,1});
+        if(is_cursor_over(item)) draw_rect(item, {0.5f,0.5f,0,1});
 
         if(menu_stack.size() > 1)
         {
-            draw_shadowed_text({1,1,1,1}, {item.x0+20, item.y0}, caption);
-            draw_shadowed_text({1,1,1,1}, {item.x0+180, item.y0}, utf8::units(0xf0da).data());
+            draw_shadowed_text({item.x0+20, item.y0}, {1,1,1,1}, caption);
+            draw_shadowed_text({item.x0+180, item.y0}, {1,1,1,1}, utf8::units(0xf0da).data());
         }
-        else draw_shadowed_text({1,1,1,1}, {item.x0, item.y0}, caption);
+        else draw_shadowed_text({item.x0, item.y0}, {1,1,1,1}, caption);
 
-        if(clicked && is_cursor_over(item))
+        if(state.clicked && is_cursor_over(item))
         {
             set_focus(id);
             consume_click();
@@ -273,8 +341,8 @@ void gui::begin_popup(int id, std::string_view caption)
     if(menu_stack.size() == 1) menu_stack.push_back({{item.x0, item.y1, item.x0+200, item.y1+4}, is_focused(id) || is_group_focused(id)});
     else menu_stack.push_back({{item.x1-6, item.y0-1, item.x1+194, item.y0+3}, is_focused(id) || is_group_focused(id)});
 
-    buf->begin_overlay();
-    buf->begin_overlay();
+    begin_overlay();
+    begin_overlay();
     begin_group(id);
 }
 
@@ -282,7 +350,7 @@ void gui::menu_seperator()
 {
     if(menu_stack.size() < 2) return;
     auto & f = menu_stack.back();
-    if(f.open) draw_fill_rect({f.r.x0 + 4, f.r.y1 + 1, f.r.x0 + 196, f.r.y1 + 2}, {0.5,0.5,0.5,1});
+    if(f.open) draw_rect({f.r.x0 + 4, f.r.y1 + 1, f.r.x0 + 196, f.r.y1 + 2}, {0.5,0.5,0.5,1});
     f.r.y1 += 6;
 }
 
@@ -307,16 +375,16 @@ template<int N> struct fixed_string_buffer
 
 bool gui::menu_item(std::string_view caption, int mods, int key, uint32_t icon)
 {
-    if(key && key == this->key && mods == this->mods) return true;
+    if(key && key == state.key && mods == state.mods) return true;
 
     auto & f = menu_stack.back();
     const rect<int> item = get_next_menu_item_rect(f.r, caption);
 
     if(f.open)
     {
-        if(is_cursor_over(item)) draw_fill_rect(item, {0.5f,0.5f,0,1});
-        if(icon) buf->draw_shadowed_glyph({item.x0, item.y0}, {1,1,1,1}, *icon_font, icon);
-        draw_shadowed_text({1,1,1,1}, {item.x0+20, item.y0}, caption);
+        if(is_cursor_over(item)) draw_rect(item, {0.5f,0.5f,0,1});
+        if(icon) buf.draw_shadowed_glyph({item.x0, item.y0}, {1,1,1,1}, style.icon_font, icon);
+        draw_shadowed_text({item.x0+20, item.y0}, {1,1,1,1}, caption);
 
         if(key)
         {
@@ -369,9 +437,9 @@ bool gui::menu_item(std::string_view caption, int mods, int key, uint32_t icon)
             default: throw std::logic_error("unsupported hotkey");
             }
             hotkey_text.append(0);
-            draw_shadowed_text({1,1,1,1}, {item.x0 + 100, item.y0}, hotkey_text.buffer);
+            draw_shadowed_text({item.x0 + 100, item.y0}, {1,1,1,1}, hotkey_text.buffer);
         }
-        if(clicked && is_cursor_over(item))
+        if(state.clicked && is_cursor_over(item))
         {
             clear_focus();
             consume_click();
@@ -385,14 +453,14 @@ bool gui::menu_item(std::string_view caption, int mods, int key, uint32_t icon)
 void gui::end_popup()
 {
     end_group();
-    buf->end_overlay();
+    end_overlay();
     if(menu_stack.back().open)
     {
         const auto & r = menu_stack.back().r;
-        draw_fill_rect(r, {0.5f,0.5f,0.5f,1});
-        draw_fill_rect({r.x0+1, r.y0+1, r.x1-1, r.y1-1}, {0.2f,0.2f,0.2f,1});
+        draw_rect(r, {0.5f,0.5f,0.5f,1});
+        draw_rect({r.x0+1, r.y0+1, r.x1-1, r.y1-1}, {0.2f,0.2f,0.2f,1});
     }
-    buf->end_overlay();
+    end_overlay();
     menu_stack.pop_back();
 }
 
@@ -423,7 +491,7 @@ bool edit(gui & g, int id, const rect<int> & r, std::string & value)
             return true;
         }
     }
-    else g.draw_text(g.get_style().passive_text, {r.x0+1,r.y0+1}, value);
+    else g.draw_text({r.x0+1,r.y0+1}, g.get_style().passive_text, value);
     return false;
 }
 
@@ -454,7 +522,7 @@ template<class T, class F> bool edit_number(gui & g, int id, const rect<int> & r
         }
         else g.show_text_entry(g.get_style().invalid_text, r.shrink(1));
     }
-    else g.draw_text(g.get_style().passive_text, {r.x0+1,r.y0+1}, buffer);
+    else g.draw_text({r.x0+1,r.y0+1}, g.get_style().passive_text, buffer);
     return false;
 }
 bool edit(gui & g, int id, const rect<int> & r, int & value) { return edit_number(g, id, r, value, "%d", [](const char * s, char ** e) { return std::strtol(s, e, 10); }); }
@@ -528,21 +596,21 @@ static bool is_subsequence(std::string_view seq, std::string_view sub)
 
 bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view<std::string_view(int)> get_label, int & index)
 {
-    static int scroll_value = 0;
+    static int scroll_value = 0; // TODO: Fix this
 
     bool retval = false;
     g.draw_rounded_rect(r, 3, g.get_style().edit_background);
     if(g.is_focused(id))
     {    
         g.show_text_entry({1,1,0,1}, r.shrink(1));
-        if(g.get_text_entry().empty() && index >= 0 && index < num_items) g.draw_text({1,1,1,0.5f}, {r.x0+1,r.y0+1}, get_label(index));
+        if(g.get_text_entry().empty() && index >= 0 && index < num_items) g.draw_text({r.x0+1,r.y0+1}, {1,1,1,0.5f}, get_label(index));
 
         rect<int> r2 = {r.x0,r.y1,r.x1,r.y1};
 
         int2 p = {r2.x0, r2.y0 - scroll_value};
         int client_height = 0;
 
-        auto r3 = r2.adjusted(0, 0, 0, g.get_font().line_height*11/2);
+        auto r3 = r2.adjusted(0, 0, 0, g.get_style().def_font.line_height*11/2);
         g.begin_overlay();
         g.begin_scissor(r3);
         g.begin_overlay();
@@ -552,9 +620,9 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
             std::string_view label = get_label(i);
             if(is_subsequence(label, g.get_text_entry()))
             {
-                g.draw_text(i == index ? g.get_style().active_text : g.get_style().passive_text, p, label);
+                g.draw_text(p, i == index ? g.get_style().active_text : g.get_style().passive_text, label);
 
-                if(g.is_mouse_clicked() && g.is_cursor_over({r.x0,p.y,r.x1,p.y+g.get_font().line_height}))
+                if(g.is_mouse_clicked() && g.is_cursor_over({r.x0,p.y,r.x1,p.y+g.get_style().def_font.line_height}))
                 {
                     g.clear_focus();
                     g.consume_click();
@@ -562,14 +630,14 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
                     retval = true;
                 }
 
-                p.y += g.get_font().line_height;
-                client_height += g.get_font().line_height;
+                p.y += g.get_style().def_font.line_height;
+                client_height += g.get_style().def_font.line_height;
             }
         }
 
         g.end_overlay();
-        r2.y1 = std::min(p.y + g.get_font().line_height, r3.y1);
-        g.draw_fill_rect(r2, g.get_style().popup_background);
+        r2.y1 = std::min(p.y + g.get_style().def_font.line_height, r3.y1);
+        g.draw_rect(r2, g.get_style().popup_background);
 
         scroll_value -= g.get_scroll().y;
         vscroll(g, 100, {r2.x1-10,r2.y0,r2.x1,r2.y1}, r2.y1-r2.y0, client_height, scroll_value);
@@ -582,7 +650,7 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
     }
     else 
     {
-        if(index >= 0 && index < num_items) g.draw_text({1,1,1,1}, {r.x0+1,r.y0+1}, get_label(index));
+        if(index >= 0 && index < num_items) g.draw_text({r.x0+1,r.y0+1}, {1,1,1,1}, get_label(index));
 
         if(g.is_mouse_clicked() && g.is_cursor_over(r))
         {
@@ -595,16 +663,16 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
 
 bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function_view<std::string_view(int)> get_label, function_view<void(int, const rect<int> &)> draw_icon, int & index)
 {
-    static int scroll_value = 0;
+    static int scroll_value = 0; // TODO: Fix this
 
     bool retval = false;
     g.draw_rounded_rect(r, 3, g.get_style().edit_background);
     if(g.is_focused(id))
     {    
         g.show_text_entry({1,1,0,1}, r.shrink(1));
-        if(g.get_text_entry().empty() && index >= 0 && index < num_items) g.draw_text({1,1,1,0.5f}, {r.x0+1,r.y0+1}, get_label(index));
+        if(g.get_text_entry().empty() && index >= 0 && index < num_items) g.draw_text({r.x0+1,r.y0+1}, {1,1,1,0.5f}, get_label(index));
 
-        const int ICON_SIZE = 48, ICON_PADDING = 16, HORIZONTAL_SPACING = ICON_SIZE + ICON_PADDING*2, VERTICAL_SPACING = ICON_SIZE + g.get_font().line_height + 12;
+        const int ICON_SIZE = 48, ICON_PADDING = 16, HORIZONTAL_SPACING = ICON_SIZE + ICON_PADDING*2, VERTICAL_SPACING = ICON_SIZE + g.get_style().def_font.line_height + 12;
         rect<int> r2 {r.x0, r.y1, r.x1, r.y1 + 8};
         int2 p {r2.x0, r2.y1 - scroll_value};
         int client_height = 0;
@@ -627,7 +695,7 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
             if(is_subsequence(label, g.get_text_entry()))
             {
                 draw_icon(i, {p+int2(ICON_PADDING,0), p+ICON_SIZE+int2(ICON_PADDING,0)});
-                g.draw_text(i == index ? g.get_style().active_text : g.get_style().passive_text, p+int2((HORIZONTAL_SPACING - g.get_font().get_text_width(label))/2, ICON_SIZE+4), label);
+                g.draw_text(p+int2((HORIZONTAL_SPACING - g.get_style().def_font.get_text_width(label))/2, ICON_SIZE+4), i == index ? g.get_style().active_text : g.get_style().passive_text, label);
 
                 if(g.is_mouse_clicked() && g.is_cursor_over({p,p+int2(HORIZONTAL_SPACING,VERTICAL_SPACING)})) 
                 {
@@ -643,7 +711,7 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
 
         g.end_overlay();
         r2.y1 = std::min(p.y + VERTICAL_SPACING, r3.y1);
-        g.draw_fill_rect(r2, g.get_style().popup_background);
+        g.draw_rect(r2, g.get_style().popup_background);
 
         scroll_value -= g.get_scroll().y;
         vscroll(g, 99, {r2.x1-10,r2.y0,r2.x1,r2.y1}, r2.y1-r2.y0, client_height, scroll_value);
@@ -656,7 +724,7 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
     }
     else
     {
-        if(index >= 0 && index < num_items) g.draw_text({1,1,1,1}, {r.x0+1,r.y0+1}, get_label(index));
+        if(index >= 0 && index < num_items) g.draw_text({r.x0+1,r.y0+1}, {1,1,1,1}, get_label(index));
 
         if(g.is_mouse_clicked() && g.is_cursor_over(r))
         {
@@ -669,36 +737,33 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
 
 void gui::focus_window() 
 { 
-    if(cursor_window != current_id_prefix.root)
+    if(state.cursor_window != current_id_prefix.root)
     {
-        cursor_window = current_id_prefix.root;
-        double2 pos;
-        glfwGetCursorPos(cursor_window, &pos.x, &pos.y);
-        cursor = int2(pos);
-        clicked = false;
-        down = false;
-        glfwFocusWindow(cursor_window); 
+        state.cursor_window = current_id_prefix.root;
+        state.clicked = false;
+        state.down = false;
+        glfwFocusWindow(state.cursor_window); 
     }
 }
 
 rect<int> tabbed_container(gui & g, rect<int> bounds, array_view<std::string_view> captions, size_t & active_tab)
 {
-    auto cap_bounds = bounds.take_y0(g.get_font().line_height + 4);
-    g.draw_wire_rect(bounds, g.get_style().frame_color);
+    auto cap_bounds = bounds.take_y0(g.get_style().def_font.line_height + 4);
+    g.draw_wire_rect(bounds, 1, g.get_style().frame_color);
 
     for(size_t i=0; i<captions.size(); ++i)
     {
         bool active = active_tab == i;
-        auto r = cap_bounds.take_x0(g.get_font().get_text_width(captions[i]) + 24);
+        auto r = cap_bounds.take_x0(g.get_style().def_font.get_text_width(captions[i]) + 24);
         if(g.is_mouse_clicked() && g.is_cursor_over(r))
         {
             g.consume_click();
             active_tab = i;
         }
 
-        g.draw_rounded_rect(r, 10, g.get_style().frame_color, top_left_corner|top_right_corner);
-        g.draw_rounded_rect(r.adjusted(1, 1, -1, active ? 1 : 0), 9, active ? g.get_style().edit_background : g.get_style().popup_background, top_left_corner|top_right_corner);
-        g.draw_shadowed_text(active ? g.get_style().active_text : g.get_style().passive_text, {r.x0 + 11, r.y0 + 3}, captions[i]);
+        g.draw_partial_rounded_rect(r, 10, top_left_corner|top_right_corner, g.get_style().frame_color);
+        g.draw_partial_rounded_rect(r.adjusted(1, 1, -1, active ? 1 : 0), 9, top_left_corner|top_right_corner, active ? g.get_style().edit_background : g.get_style().popup_background);
+        g.draw_shadowed_text({r.x0 + 11, r.y0 + 3}, active ? g.get_style().active_text : g.get_style().passive_text, captions[i]);
     }
    
     return bounds.shrink(1);

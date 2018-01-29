@@ -4,15 +4,15 @@
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
-void draw_tooltip(canvas & canvas, const font_face & face, const int2 & loc, std::string_view text)
+void draw_tooltip(gui & g, const int2 & loc, std::string_view text)
 {
-    int w = face.get_text_width(text), h = face.line_height;
+    int w = g.get_style().def_font.get_text_width(text), h = g.get_style().def_font.line_height;
 
-    canvas.begin_overlay();
-    canvas.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.5f)),1});
-    canvas.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),1});
-    canvas.draw_shadowed_text(loc+int2(15,5), {1,1,1,1}, face, text);
-    canvas.end_overlay();
+    g.begin_overlay();
+    g.draw_partial_rounded_rect({loc.x+10, loc.y, loc.x+w+20, loc.y+h+10}, 8, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.5f)),1});
+    g.draw_partial_rounded_rect({loc.x+11, loc.y+1, loc.x+w+19, loc.y+h+9}, 7, top_right_corner|bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),1});
+    g.draw_shadowed_text(loc+int2(15,5), {1,1,1,1}, text);
+    g.end_overlay();
 }
 
 struct node_type
@@ -27,27 +27,35 @@ struct node_type
     int2 get_input_location(const rect<int> & r, size_t index) const { return {r.x0, r.y0 + title_height + 18 + 24 * (int)index}; }
     int2 get_output_location(const rect<int> & r, size_t index) const { return {r.x1, r.y0 + title_height + 18 + 24 * (int)index}; }
 
-    void draw(canvas & canvas, const font_face & face, const rect<int> & r) const
+    void on_gui(gui & g, int id, rect<int> & placement) const
     {
-        canvas.draw_partial_rounded_rect({r.x0, r.y0, r.x1, r.y0+title_height}, corner_radius, top_left_corner|top_right_corner, {float3(srgb_to_linear(0.5f)),1});
-        canvas.draw_partial_rounded_rect({r.x0, r.y0+title_height, r.x1, r.y1}, corner_radius, bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),0.8f});
-        canvas.draw_shadowed_text({r.x0+8, r.y0+6}, {1,1,1,1}, face, caption);
+        int2 p = placement.corner00();
+        if(g.draggable_widget(id, placement.dims(), p))
+        {
+            int2 move = p - placement.corner00();
+            placement = placement.adjusted(move.x, move.y, move.x, move.y);
+        }
+
+        const auto & font = g.get_style().def_font;
+        g.draw_partial_rounded_rect({placement.x0, placement.y0, placement.x1, placement.y0 + title_height}, corner_radius, top_left_corner|top_right_corner, {float3(srgb_to_linear(0.5f)),1});
+        g.draw_partial_rounded_rect({placement.x0, placement.y0 + title_height, placement.x1, placement.y1}, corner_radius, bottom_left_corner|bottom_right_corner, {float3(srgb_to_linear(0.3f)),0.8f});
+        g.draw_shadowed_text({placement.x0+8, placement.y0+6}, {1,1,1,1}, caption);
 
         for(size_t i=0; i<inputs.size(); ++i)
         {
-            const auto loc = get_input_location(r,i);
-            canvas.draw_circle(loc, 8, {1,1,1,1});
-            canvas.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
-            canvas.draw_shadowed_text(loc + int2(12, -face.line_height/2), {1,1,1,1}, face, inputs[i]);
+            const auto loc = get_input_location(placement,i);
+            g.draw_circle(loc, 8, {1,1,1,1});
+            g.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
+            g.draw_shadowed_text(loc + int2(12, -font.line_height/2), {1,1,1,1}, inputs[i]);
+            if(g.is_cursor_over({loc-8,loc+8})) draw_tooltip(g, loc, "Tooltip for "+inputs[i]);
         }
         for(size_t i=0; i<outputs.size(); ++i)
         {
-            const auto loc = get_output_location(r,i);
-            canvas.draw_circle(loc, 8, {1,1,1,1});
-            canvas.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
-            canvas.draw_shadowed_text(loc + int2(-12 - face.get_text_width(outputs[i]), -face.line_height/2), {1,1,1,1}, face, outputs[i]);
-
-            if(i == 1) draw_tooltip(canvas, face, loc, "Tooltip in an overlay");
+            const auto loc = get_output_location(placement,i);
+            g.draw_circle(loc, 8, {1,1,1,1});
+            g.draw_circle(loc, 6, {float3(srgb_to_linear(0.2f)),1});
+            g.draw_shadowed_text(loc + int2(-12 - font.get_text_width(outputs[i]), -font.line_height/2), {1,1,1,1}, outputs[i]);
+            if(g.is_cursor_over({loc-8,loc+8})) draw_tooltip(g, loc, "Tooltip for "+outputs[i]);
         }
     }
 };
@@ -59,7 +67,7 @@ struct node
 
     int2 get_input_location(size_t index) const { return type->get_input_location(placement, index); }
     int2 get_output_location(size_t index) const { return type->get_output_location(placement, index); }
-    void draw(canvas & canvas, font_face & face) const { type->draw(canvas, face, placement); }
+    void on_gui(gui & g, int id) { type->on_gui(g, id, placement); }
 };
 
 struct edge
@@ -136,11 +144,11 @@ int main(int argc, const char * argv[]) try
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
     int pool_index=0;
 
-    gui g;
-    gwindow->on_scroll = [w=gwindow->get_glfw_window(), &g](double2 scroll) { g.on_scroll(w, scroll.x, scroll.y); };
-    gwindow->on_mouse_button = [w=gwindow->get_glfw_window(), &g](int button, int action, int mods) { g.on_mouse_button(w, button, action, mods); };
-    gwindow->on_key = [w=gwindow->get_glfw_window(), &g](int key, int scancode, int action, int mods) { g.on_key(w, key, action, mods); };
-    gwindow->on_char = [w=gwindow->get_glfw_window(), &g](uint32_t ch, int mods) { g.on_char(w, ch); };
+    gui_state gs;
+    gwindow->on_scroll = [w=gwindow->get_glfw_window(), &gs](double2 scroll) { gs.on_scroll(w, scroll.x, scroll.y); };
+    gwindow->on_mouse_button = [w=gwindow->get_glfw_window(), &gs](int button, int action, int mods) { gs.on_mouse_button(w, button, action, mods); };
+    gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
+    gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
     int split = -300;
     size_t tab = 0;
 
@@ -148,18 +156,8 @@ int main(int argc, const char * argv[]) try
     while(!gwindow->should_close())
     {
         // Poll events
-        g.begin_frame();
+        gs.begin_frame();
         context.poll_events();
-
-        int2 move {0,0};
-        if(gwindow->get_key(GLFW_KEY_W)) move.y -= 4;
-        if(gwindow->get_key(GLFW_KEY_A)) move.x -= 4;
-        if(gwindow->get_key(GLFW_KEY_S)) move.y += 4;
-        if(gwindow->get_key(GLFW_KEY_D)) move.x += 4;
-        nodes[1].placement.x0 += move.x;
-        nodes[1].placement.y0 += move.y;
-        nodes[1].placement.x1 += move.x;
-        nodes[1].placement.y1 += move.y;
 
         // Reset resources
         pool_index = (pool_index+1)%3;
@@ -168,10 +166,11 @@ int main(int argc, const char * argv[]) try
 
         // Draw the UI
         rect<int> client_rect {{0,0}, gwindow->get_window_size()};
-        canvas canvas {sprites, pool, gwindow->get_window_size()};
+        canvas canvas {sprites, pool};
 
         // Handle the menu
-        g.begin_window(gwindow->get_glfw_window(), &face, &icons, &canvas);
+        const gui_style style {face, icons};
+        gui g {gs, canvas, style, gwindow->get_glfw_window()};
         g.begin_menu(0, client_rect.take_y0(20));
             g.begin_popup(1, "File");
                 g.begin_popup(1, "New");
@@ -198,18 +197,21 @@ int main(int argc, const char * argv[]) try
                 g.menu_item("View Help", GLFW_MOD_CONTROL, GLFW_KEY_F1, 0xf059);
             g.end_popup();
         g.end_menu();
-        g.end_window();
 
         auto [left_rect, right_rect] = hsplitter(g, 1, client_rect, split);
 
         // Draw nodes
+        g.begin_group(2);
         g.begin_scissor(left_rect);
         for(auto & e : edges) e.draw(canvas);
-        for(auto & n : nodes) n.draw(canvas, face);
-        g.draw_wire_rect(left_rect, {1,1,1,1});
+        for(size_t i=0; i<countof(nodes); ++i) nodes[i].on_gui(g, exactly(i));
+        g.draw_wire_rect(left_rect, 1, {1,1,1,1});
         g.end_scissor();
+        g.end_group();
 
+        g.begin_group(3);
         tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
+        g.end_group();
 
         // Set up descriptor set for UI global transform and font image
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();

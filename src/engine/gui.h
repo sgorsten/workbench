@@ -2,11 +2,46 @@
 #pragma once
 #include "sprite.h"
 
+// GUI state which persists from frame to frame
 struct GLFWwindow;
 enum class cursor_type { arrow, hresize, vresize, ibeam };
 struct widget_id { GLFWwindow * root; std::vector<int> path; };
+class gui_state
+{
+    friend class gui;
+
+    // Focus state
+    widget_id focus_id;                 // The ID of the widget which is in focus (see clear_focus()/set_focus()/is_focused())
+    int2 clicked_offset;                // The offset of the cursor within the focused widget at the time the widget was clicked
+
+    // Text entry state
+    widget_id text_entry_id;            // The ID of the widget currently being used for text entry
+    std::string text_entry;             // The current text in the active text entry widget
+    size_t text_entry_cursor;           // The location of the cursor in the text entry widget
+    size_t text_entry_mark;             // The location of the start of a selection in the text entry widget
+
+    // Input state
+    GLFWwindow * cursor_window;         // The window which the cursor is currently over
+    bool clicked, down;                 // True if the mouse was clicked during this frame, and if the mouse is currently down
+    int2 scroll;                        // Scroll amount in the current frame
+    int key, mods;                      // Key pressed during this frame, and corresponding mods
+
+    void delete_text_entry_selection();
+public:
+    // Facilities for injecting input events
+    void begin_frame();
+    void on_scroll(GLFWwindow * window, double x, double y);
+    void on_mouse_button(GLFWwindow * window, int button, int action, int mods);
+    void on_key(GLFWwindow * window, int key, int action, int mods);
+    void on_char(GLFWwindow * window, uint32_t codepoint);
+};
+
+// Immediate mode GUI context
 struct gui_style
 {
+    const font_face & def_font;                               // default font used for text
+    const font_face & icon_font;                              // default font used for icons
+
     float4 panel_background     {0.10f, 0.10f, 0.10f, 1.00f}; // background of a panel on which controls are situated
     float4 popup_background     {0.15f, 0.15f, 0.15f, 1.00f}; // background of a popup menu or overlay
     float4 edit_background      {0.20f, 0.20f, 0.20f, 1.00f}; // background of a field which can be modified
@@ -20,65 +55,60 @@ struct gui_style
 class gui
 {   
     struct menu_stack_frame { rect<int> r; bool open; };
+    gui_state & state;
+    canvas & buf;
+    gui_style style;
+    GLFWwindow * window;                // The GLFWwindow whose GUI we are generating
+    int2 local_cursor;                  // The current cursor position local to this window
 
-    // Environment state
-    gui_style style;                    // Current style
-
-    // Input state
-    GLFWwindow * cursor_window;         // The window which the cursor is currently over
-    int2 cursor;                        // Current cursor position
-    bool clicked, down;                 // True if the mouse was clicked during this frame, and if the mouse is currently down
-    int2 scroll;                        // Scroll amount in the current frame
-    int key, mods;                      // Key pressed during this frame, and corresponding mods
-
-    // Widget state
+    int current_layer;
+    std::vector<rect<int>> scissor_stack;
+    std::vector<menu_stack_frame> menu_stack;    
     widget_id current_id_prefix;        // The prefix applied to IDs in the current widget group (see begin_group()/end_group())
-    widget_id focus_id;                 // The ID of the widget which is in focus (see clear_focus()/set_focus()/is_focused())
-
-    // Text entry state
-    widget_id text_entry_id;            // The ID of the widget currently being used for text entry
-    std::string text_entry;             // The current text in the active text entry widget
-    size_t text_entry_cursor;           // The location of the cursor in the text entry widget
-    size_t text_entry_mark;             // The location of the start of a selection in the text entry widget
-
-    std::vector<menu_stack_frame> menu_stack;
-
-    // Output state
-    font_face * def_font;
-    font_face * icon_font;
-    canvas * buf;                       // The render buffer containing the draw calls for this frame
     cursor_type ctype;                  // Which cursor icon to display for this frame
-
-    void delete_text_entry_selection();
 public:
+    gui(gui_state & state, canvas & canvas, const gui_style & style, GLFWwindow * window);
+
     // The gui context has an associated "style" struct which is used to control various visual elements
     const gui_style & get_style() const { return style; }
-    void set_style(const gui_style & style) { this->style = style; }
 
-    void begin_frame();
-    void begin_window(GLFWwindow * window, font_face * def_font, font_face * icon_font, canvas * render_canvas);
-    GLFWwindow * get_current_window() { return current_id_prefix.root; }
-    void end_window();
+    // Widgets drawn inside an overlay are drawn on top of other widgets, and are not clipped by previously defined scissor rects
+    void begin_overlay();
+    void end_overlay();
 
-    void begin_overlay() { buf->begin_overlay(); }
-    void end_overlay() { buf->end_overlay(); }
-    void begin_scissor(const rect<int> & r) { buf->begin_scissor(r); }
-    void end_scissor() { buf->end_scissor(); }
+    // Widgets drawn inside a scissor are clipped to the specified rectangle
+    void begin_scissor(const rect<int> & r);
+    void end_scissor();
 
-    // Facilities for injecting input events
-    void on_scroll(GLFWwindow * window, double x, double y);
-    void on_mouse_button(GLFWwindow * window, int button, int action, int mods);
-    void on_key(GLFWwindow * window, int key, int action, int mods);
-    void on_char(GLFWwindow * window, uint32_t codepoint);
+    // Draw commands are forwarded to the underlying canvas
+    void draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color);
+    void draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color);
+    void draw_wire_rect(const rect<int> & r, int width, const float4 & color);
+
+    void draw_rect(const rect<int> & r, const float4 & color);
+    void draw_circle(const int2 & center, int radius, const float4 & color);
+    void draw_rounded_rect(const rect<int> & r, int corner_radius, const float4 & color);
+    void draw_partial_rounded_rect(const rect<int> & r, int corner_radius, corner_flags corners, const float4 & color);
+    void draw_convex_polygon(array_view<ui_vertex> vertices);
+
+    void draw_sprite(const rect<int> & r, const float4 & color, const rect<float> & texcoords);
+    void draw_sprite_sheet(const int2 & p);
+
+    void draw_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint);
+    void draw_shadowed_glyph(const int2 & pos, const float4 & color, const font_face & font, uint32_t codepoint);
+    void draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text);
+    void draw_text(const int2 & pos, const float4 & color, std::string_view text);
+    void draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text);
+    void draw_shadowed_text(const int2 & pos, const float4 & color, std::string_view text);
 
     // Facilities for consuming mouse clicks
-    GLFWwindow * get_cursor_window() const { return cursor_window; }
-    const int2 & get_cursor() const { return cursor; } // NOTE: Prefer is_cursor_over(...) for doing mouseover checks
+    GLFWwindow * get_cursor_window() const { return state.cursor_window; }
+    const int2 & get_cursor() const { return local_cursor; } // NOTE: Prefer is_cursor_over(...) for doing mouseover checks
     bool is_mouse_clicked() const; // True if the mouse has been clicked on this window in this frame
     bool is_mouse_down() const; // True if the mouse button is held down and the original click was on this window
     bool is_cursor_over(const rect<int> & r) const;
-    void consume_click() { clicked = false; }
-    int2 get_scroll() const { return scroll; }
+    void consume_click() { state.clicked = false; }
+    int2 get_scroll() const { return state.scroll; }
 
     // Facilities for consuming mouse input which originated in other windows
     void focus_window();
@@ -95,7 +125,7 @@ public:
     // Facilities for implementing widgets that require some form of text entry
     void begin_text_entry(int id, const char * contents = nullptr, bool selected = false);
     void show_text_entry(const float4 & color, const rect<int> & rect);
-    const std::string & get_text_entry() const { return text_entry; }
+    const std::string & get_text_entry() const { return state.text_entry; }
 
     // Facilities for creating menus
     void begin_menu(int id, const rect<int> & r);
@@ -107,16 +137,13 @@ public:
     void end_menu();
 
     // Facilities for drawing widgets
-    const font_face & get_font() const { return *def_font; }
     cursor_type get_cursor_type() const { return ctype; }
-
     void set_cursor_type(cursor_type type) { ctype = type; }
-    void draw_fill_rect(const rect<int> & bounds, const float4 & color) { buf->draw_rect(bounds, color); }
-    void draw_wire_rect(const rect<int> & bounds, const float4 & color) { buf->draw_wire_rect(bounds, 1, color); }
-    void draw_rounded_rect(const rect<int> & bounds, int radius, const float4 & color, int corners=15) { buf->draw_partial_rounded_rect(bounds, radius, corners, color); }
-    void draw_text(const float4 & color, const int2 & coords, std::string_view text) { buf->draw_text(coords, color, *def_font, text); }
-    void draw_shadowed_text(const float4 & color, const int2 & coords, std::string_view text) { buf->draw_shadowed_text(coords, color, *def_font, text); }
     void draw_icon(const rect<int> & bounds, uintptr_t tex) {} // TODO: ::draw_icon(*buf, tex, bounds); }
+
+    // Standard widgets
+    bool clickable_widget(const rect<int> & bounds);        // Returns true if clicked, and consumes the click
+    bool draggable_widget(int id, int2 dims, int2 & pos);   // Returns true if dragged, and modifies pos accordingly
 };
 
 // A text entry field allowing the user to edit the value of a utf-8 encoded string.
