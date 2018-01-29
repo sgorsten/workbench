@@ -8,12 +8,9 @@ configuration:
   - Debug
   - Release
 platform: x64
+clone_folder: "C:\\workbench"
 environment:
-  VULKAN_SDK: "C:\\VulkanSDK\\1.0.65.1\\"
-init:
-  - appveyor DownloadFile https://vulkan.lunarg.com/sdk/home#sdk/downloadConfirm/1.0.65.1/windows/VulkanSDK-1.0.65.1-Installer.exe?Human=true -FileName VulkanSDK.exe
-  - cmd: dir .
-  - cmd: .\VulkanSDK.exe /S
+  VULKAN_SDK: "c:\\workbench\\dep\\VulkanSDK-1.0.65.1\\"
 
 build:
   project: workbench.sln
