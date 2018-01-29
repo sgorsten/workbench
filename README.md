@@ -1,13 +1,14 @@
-# Overview
+[![License is Unlicense](http://img.shields.io/badge/license-Unlicense-blue.svg?style=flat)](http://unlicense.org/)
+[![Build status](https://ci.appveyor.com/api/projects/status/74wvkherug11jafc?svg=true)](https://ci.appveyor.com/project/sgorsten/workbench)
 
 Just some random programming experiments, based on some work in a few of my other repositories as well as some new stuff. Everything is work-in-progress, but some design notes and rationales are available [here](doc/design.md)
 
-# Dependencies
+### Dependencies
 
 * [Visual Studio 2017](https://www.visualstudio.com/downloads/)
 * [LunarG Vulkan SDK](http://www.lunarg.com/vulkan-sdk/)
 
-# Licensing
+### Licensing
 
 A reasonable effort has been made to limit the contents of the `src/` directory to my original work, which is available under the terms of the [Unlicense](http://unlicense.org/)
 
