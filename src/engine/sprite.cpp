@@ -55,6 +55,73 @@ void sprite_sheet::prepare_sheet()
     }
 }
 
+//////////
+// utf8 //
+//////////
+
+namespace utf8
+{
+    size_t get_code_length(char ch)
+    { 
+        const auto byte = static_cast<uint8_t>(ch);
+        if(byte < 0x80) return 1;
+        if(byte < 0xC0) return 0;
+        if(byte < 0xE0) return 2;
+        if(byte < 0xF0) return 3;
+        if(byte < 0xF8) return 4;
+        return 0;
+    }
+
+    bool is_continuation_byte(char ch)
+    { 
+        const auto byte = static_cast<uint8_t>(ch);
+        return byte >= 0x80 && byte < 0xC0; 
+    }
+
+    const char * prev(const char * units)
+    {
+        do { --units; } while(is_continuation_byte(*units));
+        return units;
+    }
+
+    const char * next(const char * units)
+    {
+        return units + get_code_length(*units);
+    }
+
+    uint32_t code(const char * units)
+    {
+        static const uint8_t masks[] = {0, 0x7F, 0x1F, 0x0F, 0x07};
+        auto length = get_code_length(*units);
+        uint32_t codepoint = units[0] & masks[length];
+        for(int i=1; i<length; ++i)
+        {
+            codepoint = (codepoint << 6) | (units[i] & 0x3F);
+        }
+        return codepoint;
+    }
+
+    std::array<char,5> units(uint32_t code)
+    {
+        if(code < 0x80) return {static_cast<char>(code)};
+        if(code < 0x800) return {static_cast<char>(0xC0|((code>>6)&0x1F)), static_cast<char>(0x80|(code&0x3F))};
+        if(code < 0x10000) return {static_cast<char>(0xE0|((code>>12)&0x0F)), static_cast<char>(0x80|((code>>6)&0x3F)), static_cast<char>(0x80|(code&0x3F))};
+        return {static_cast<char>(0xF0|((code>>18)&0x07)), static_cast<char>(0x80|((code>>12)&0x3F)), static_cast<char>(0x80|((code>>6)&0x3F)), static_cast<char>(0x80|(code&0x3F))};
+    }
+
+    bool is_valid(std::string_view units)
+    {
+        while(!units.empty())
+        {
+            auto length = get_code_length(units.front());
+            if(length == 0 || length > units.size()) return false;
+            for(int i=1; i<length; ++i) if(!is_continuation_byte(units[i])) return false;
+            units.remove_prefix(length);
+        }
+        return true;
+    }
+}
+
 /////////////////
 // gui_sprites //
 /////////////////
@@ -209,6 +276,15 @@ void canvas::draw_bezier_curve(const float2 & p0, const float2 & p1, const float
     lists.back().last += 32*6;
 }
 
+void canvas::draw_wire_rect(const rect<int> & r, int width, const float4 & color)
+{
+    auto rr = r;
+    draw_rect(rr.take_x0(width), color);
+    draw_rect(rr.take_y0(width), color);
+    draw_rect(rr.take_x1(width), color);
+    draw_rect(rr.take_y1(width), color);
+}
+
 void canvas::draw_rect(const rect<int> & r, const float4 & color)
 {
     draw_sprite(r, color, sprites.sheet.sprites[sprites.solid_pixel].texcoords);
@@ -286,9 +362,9 @@ void canvas::draw_glyph(const int2 & pos, const float4 & color, const font_face 
 void canvas::draw_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text)
 {
     auto p = pos;
-    for(auto ch : text)
+    for(auto str = text.data(); str != text.data()+text.size(); str = utf8::next(str))
     {
-        auto it = font.glyphs.find(ch);
+        auto it = font.glyphs.find(utf8::code(str));
         if(it == font.glyphs.end()) continue;
         auto & b = it->second;
         auto & s = font.sheet.sprites[b.sprite_index];
@@ -350,13 +426,25 @@ font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_d
 }
 
 int font_face::get_text_width(std::string_view text) const
-{
+{         
     int width = 0;
-    for(auto codepoint : text)
+    for(auto s = text.data(); s != text.data()+text.size(); s = utf8::next(s))
     {
-        auto g = glyphs.find(codepoint);
-        if(g == end(glyphs)) continue;
-        width += g->second.advance;
+        auto it = glyphs.find(utf8::code(s));
+        if(it == glyphs.end()) continue;
+        width += it->second.advance;
     }
     return width;
+}
+
+int font_face::get_cursor_pos(std::string_view text, int x) const
+{
+    for(auto s = text.data(); s != text.data()+text.size(); s = utf8::next(s))
+    {
+        auto it = glyphs.find(utf8::code(s));
+        if(it == end(glyphs)) continue;  
+        if(x*2 < it->second.advance) return exactly(s - text.data());
+        x -= it->second.advance;
+    }
+    return exactly(text.end() - text.begin());
 }

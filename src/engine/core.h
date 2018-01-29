@@ -120,6 +120,18 @@ template<class First, class... Rest> struct overload_set<First,Rest...> : First,
 };
 template<class... F> overload_set<F...> overload(F... f) { return {f...}; }
 
+// A non-owning view of a callable object of a specific signature.
+// Requires no dynamic memory allocation, and imposes only one additional indirection per call.
+template<class S> class function_view;
+template<class R, class... A> class function_view<R(A...)>
+{
+    const void * user;                  // Type-erased pointer to the original callable object
+    R (* func)(const void *, A...);     // Pointer to function which dispatches call to original object
+public:
+    template<class F> function_view(const F & f) : user(&f) { func = [](const void * u, A... a) { return (*reinterpret_cast<const F *>(u))(std::forward<A>(a)...); }; }
+    R operator()(A... args) const { return func(user, std::forward<A>(args)...); }
+};
+
 // Determine the offset of a non virtually inherited member variable of a class type
 template<class C, class T> intptr_t member_offset(T C::*member_pointer) { C object; return reinterpret_cast<char *>(&(object.*member_pointer)) - reinterpret_cast<char *>(&object); }
 

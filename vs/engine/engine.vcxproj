@@ -187,6 +187,7 @@
     <ClCompile Include="..\..\src\engine\geometry.cpp" />
     <ClCompile Include="..\..\src\engine\graphics.cpp" />
     <ClCompile Include="..\..\src\engine\grid.cpp" />
+    <ClCompile Include="..\..\src\engine\gui.cpp" />
     <ClCompile Include="..\..\src\engine\load.cpp" />
     <ClCompile Include="..\..\src\engine\mesh.cpp" />
     <ClCompile Include="..\..\src\engine\pbr.cpp" />
@@ -203,6 +204,7 @@
     <ClInclude Include="..\..\src\engine\geometry.h" />
     <ClInclude Include="..\..\src\engine\graphics.h" />
     <ClInclude Include="..\..\src\engine\grid.h" />
+    <ClInclude Include="..\..\src\engine\gui.h" />
     <ClInclude Include="..\..\src\engine\load.h" />
     <ClInclude Include="..\..\src\engine\mesh.h" />
     <ClInclude Include="..\..\src\engine\pbr.h" />

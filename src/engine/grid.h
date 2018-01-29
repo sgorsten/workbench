@@ -30,6 +30,7 @@ template<class T> struct rect
     constexpr rect mirrored_x() const noexcept { return {x1, y0, x0, y1}; }
     constexpr rect mirrored_y() const noexcept { return {x0, y1, x1, y0}; }
     constexpr rect rotated_180() const noexcept { return {x1, y1, x0, y0}; }
+    constexpr rect shrink(T amount) const noexcept { return adjusted(amount, amount, -amount, -amount); }
 
     // Mutators
     constexpr rect take_x0(T x) { rect r {x0, y0, x0+x, y1}; x0 = r.x1; return r; }

@@ -124,6 +124,7 @@ namespace gfx
         // Mutators
         void set_pos(const int2 & pos) { glfwSetWindowPos(glfw_window, pos.x, pos.y); }
         rhi::window & get_rhi_window() { return *rhi_window; }
+        GLFWwindow * get_glfw_window() { return glfw_window; }
 
         // Event handling callbacks
         std::function<void(int2 pos)> on_window_pos = ignore{};

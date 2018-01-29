@@ -1,5 +1,6 @@
 #include "engine/shader.h"
 #include "engine/sprite.h"
+#include "engine/gui.h"
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
@@ -134,10 +135,19 @@ int main(int argc, const char * argv[]) try
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
     int pool_index=0;
 
+    gui g;
+    gwindow->on_scroll = [w=gwindow->get_glfw_window(), &g](double2 scroll) { g.on_scroll(w, scroll.x, scroll.y); };
+    gwindow->on_mouse_button = [w=gwindow->get_glfw_window(), &g](int button, int action, int mods) { g.on_mouse_button(w, button, action, mods); };
+    gwindow->on_key = [w=gwindow->get_glfw_window(), &g](int key, int scancode, int action, int mods) { g.on_key(w, key, action, mods); };
+    gwindow->on_char = [w=gwindow->get_glfw_window(), &g](uint32_t ch, int mods) { g.on_char(w, ch); };
+    int split = -300;
+    size_t tab = 0;
+
     // Main loop
     while(!gwindow->should_close())
     {
         // Poll events
+        g.begin_frame();
         context.poll_events();
 
         int2 move {0,0};
@@ -156,9 +166,49 @@ int main(int argc, const char * argv[]) try
         pool.begin_frame(*dev);
 
         // Draw the UI
+        rect<int> client_rect {{0,0}, gwindow->get_window_size()};
         canvas canvas {sprites, pool, gwindow->get_window_size()};
+
+        // Handle the menu
+        g.begin_window(gwindow->get_glfw_window(), &face, &canvas);
+        g.begin_menu(0, client_rect.take_y0(20));
+            g.begin_popup(1, "File");
+                g.begin_popup(1, "New");
+                    g.menu_item("Game...", GLFW_MOD_CONTROL|GLFW_MOD_SHIFT, GLFW_KEY_N, 0);
+                    g.menu_item("Scene", GLFW_MOD_CONTROL, GLFW_KEY_N, 0);
+                g.end_popup();
+                g.menu_item("Open...", GLFW_MOD_CONTROL, GLFW_KEY_O, 0xf115);
+                g.menu_item("Save", GLFW_MOD_CONTROL, GLFW_KEY_S, 0xf0c7);
+                g.menu_item("Save As...", 0, 0, 0);
+                g.menu_seperator();
+                if(g.menu_item("Exit", GLFW_MOD_ALT, GLFW_KEY_F4, 0)) glfwSetWindowShouldClose(gwindow->get_glfw_window(), 1);
+            g.end_popup();
+            g.begin_popup(2, "Edit");
+                g.menu_item("Undo", GLFW_MOD_CONTROL, GLFW_KEY_Z, 0xf0e2);
+                g.menu_item("Redo", GLFW_MOD_CONTROL, GLFW_KEY_Y, 0xf01e);
+                g.menu_seperator();
+                g.menu_item("Cut", GLFW_MOD_CONTROL, GLFW_KEY_X, 0xf0c4);
+                g.menu_item("Copy", GLFW_MOD_CONTROL, GLFW_KEY_C, 0xf0c5);
+                g.menu_item("Paste", GLFW_MOD_CONTROL, GLFW_KEY_V, 0xf0ea);
+                g.menu_seperator();
+                g.menu_item("Select All", GLFW_MOD_CONTROL, GLFW_KEY_A, 0xf245);
+            g.end_popup();
+            g.begin_popup(3, "Help");
+                g.menu_item("View Help", GLFW_MOD_CONTROL, GLFW_KEY_F1, 0xf059);
+            g.end_popup();
+        g.end_menu();
+        g.end_window();
+
+        auto [left_rect, right_rect] = hsplitter(g, 1, client_rect, split);
+
+        // Draw nodes
+        g.begin_scissor(left_rect);
         for(auto & e : edges) e.draw(canvas);
         for(auto & n : nodes) n.draw(canvas, face);
+        g.draw_wire_rect(left_rect, {1,1,1,1});
+        g.end_scissor();
+
+        tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
 
         // Set up descriptor set for UI global transform and font image
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();

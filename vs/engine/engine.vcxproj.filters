@@ -54,6 +54,9 @@
     <ClCompile Include="..\..\src\engine\grid.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\engine\gui.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\engine\core.h">
@@ -90,6 +93,9 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\engine\grid.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\engine\gui.h">
       <Filter>src</Filter>
     </ClInclude>
   </ItemGroup>
