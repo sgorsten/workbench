@@ -11,9 +11,9 @@ platform: x64
 environment:
   VULKAN_SDK: "C:\\VulkanSDK\\1.0.65.1\\"
 init:
-  - cmd: curl --silent --show-error https://vulkan.lunarg.com/sdk/download/1.0.65.1/windows/VulkanSDK-1.0.65.1-Installer.exe
+  - cmd: curl --silent --show-error --output VulkanSDK.exe https://vulkan.lunarg.com/sdk/download/1.0.65.1/windows/VulkanSDK-1.0.65.1-Installer.exe
   - cmd: dir .
-  - cmd: .\VulkanSDK-1.0.65.1-Installer.exe /S
+  - cmd: .\VulkanSDK.exe /S
 
 build:
   project: workbench.sln
