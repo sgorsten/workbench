@@ -10,7 +10,7 @@ configuration:
 platform: x64
 clone_folder: "C:\\workbench"
 environment:
-  VULKAN_SDK: "c:\\workbench\\dep\\VulkanSDK-1.0.65.1\\"
+  VULKAN_SDK: "c:\\workbench\\dep\\appveyor\\VulkanSDK-1.0.65.1\\"
 
 build:
   project: workbench.sln
