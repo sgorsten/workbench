@@ -1,9 +1,5 @@
-.vs
-
+.vs/
 bin/
-
 lib/
-
 obj/
-
 *.vcxproj.user
