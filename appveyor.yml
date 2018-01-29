@@ -1,18 +1,24 @@
 # appveyor file
 # http://www.appveyor.com/docs/appveyor-yml
 
-os: Visual Studio 2017
-configuration: Debug
-platform: x64
+version: 1.0.{build}
 
-install:
-  - cmd: curl --silent --show-error --output VulkanSDK.exe https://vulkan.lunarg.com/sdk/download/1.0.65.1/windows/VulkanSDK-1.0.65.1-Installer.exe
-  - cmd: .\VulkanSDK.exe /S
-  - cmd: set VULKAN_SDK=C:\VulkanSDK\1.0.65.1
+image: Visual Studio 2017
+configuration:
+  - Debug
+  - Release
+platform: x64
+environment:
+  VULKAN_SDK: "C:\\VulkanSDK\\1.0.65.1\\"
+init:
+  - cmd: curl --silent --show-error https://vulkan.lunarg.com/sdk/download/1.0.65.1/windows/VulkanSDK-1.0.65.1-Installer.exe
+  - cmd: dir .
+  - cmd: .\VulkanSDK-1.0.65.1-Installer.exe /S
 
 build:
-  verbosity: minimal
   project: workbench.sln
+  parallel: true
+  verbosity: minimal
   
 test_script:
   - bin\Debug-x64\all-tests.exe
