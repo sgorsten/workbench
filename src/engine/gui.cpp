@@ -619,8 +619,8 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
 
         auto r3 = r2.adjusted(0, 0, 0, g.get_style().def_font.line_height*11/2);
         g.begin_overlay();
-        g.begin_scissor(r3);
         g.begin_overlay();
+        g.begin_scissor(r3);
 
         for(int i=0; i<num_items; ++i)
         {
@@ -642,14 +642,14 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
             }
         }
 
+        g.end_scissor();
         g.end_overlay();
-        r2.y1 = std::min(p.y + g.get_style().def_font.line_height, r3.y1);
-        g.draw_rect(r2, g.get_style().popup_background);
+        r3.y1 = std::min(p.y + g.get_style().def_font.line_height, r3.y1);
+        g.draw_rect(r3, g.get_style().popup_background);
 
         scroll_value -= g.get_scroll().y;
-        vscroll(g, 100, {r2.x1-10,r2.y0,r2.x1,r2.y1}, r2.y1-r2.y0, client_height, scroll_value);
+        vscroll(g, 99, {r3.x1-10,r3.y0,r3.x1,r3.y1}, r3.y1-r3.y0, client_height, scroll_value);
 
-        g.end_scissor();
         g.end_overlay();
 
         // If the user clicks outside of the combobox, remove focus
@@ -723,12 +723,9 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
 
         g.end_scissor();
         g.end_overlay();
-        r3.y1 = std::min(p.y + VERTICAL_SPACING, r3.y1);
         g.draw_rect(r3, g.get_style().popup_background);
-
         scroll_value -= g.get_scroll().y;
         vscroll(g, 99, {r3.x1-10,r3.y0,r3.x1,r3.y1}, r3.y1-r3.y0, client_height, scroll_value);
-
         g.end_overlay();
 
         // If the user clicks outside of the combobox, remove focus

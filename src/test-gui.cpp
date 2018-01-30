@@ -4,11 +4,23 @@
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
+enum direction { north, northeast, east, southeast, south, southwest, west, northwest };
+bool direction_combobox(gui & g, int id, const rect<int> & bounds, direction & texture)
+{
+    return combobox<direction>(g, id, bounds, {north, northeast, east, southeast, south, southwest, west, northwest}, 
+        [](direction d) { const char * labels[] {"north","northeast","east","southeast","south","southwest","west","northwest"}; return std::string_view{labels[d]}; }, texture);
+}
+
 struct texture_asset
 {
     std::string name;
     rhi::ptr<rhi::image> texture;
 };
+bool texture_combobox(gui & g, int id, const rect<int> & bounds, const std::vector<texture_asset *> & textures, texture_asset * & texture)
+{
+    return icon_combobox<texture_asset *>(g, id, bounds, textures, [](const texture_asset * t) { return std::string_view{t->name}; }, 
+        [&g](const texture_asset * t, const rect<int> & r) { g.draw_image(r, {1,1,1,1}, *t->texture); }, texture);
+}
 
 void draw_tooltip(gui & g, const int2 & loc, std::string_view text)
 {
@@ -225,7 +237,59 @@ int main(int argc, const char * argv[]) try
 
         g.begin_group(3);
         auto client = tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
-        icon_combobox<texture_asset *>(g, 0, {client.x0+10, client.y0+10, client.x1-10, client.y0+30}, textures, [](texture_asset * t) -> std::string_view { return t->name; }, [&g](const texture_asset * t, const rect<int> & r) { g.draw_image(r, {1,1,1,1}, *t->texture); }, tex);
+        {
+            int id = 0;
+            static int split = 120;
+            auto r = client.shrink(4);
+            auto s = hsplitter(g, id++, r, split);
+
+            const int widget_height = g.get_style().def_font.line_height + 2;
+            const int vspacing = widget_height + 4;
+
+            static struct
+            {
+                std::string name;
+                rigid_transform pose;
+                float3 scale;
+                texture_asset * diffuse;
+                texture_asset * normal;
+                direction dir;
+            } object;
+
+            g.begin_group(id);
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Name");
+            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.name);
+            r.y0 += vspacing;
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Position");
+            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.pose.translation);
+            r.y0 += vspacing;
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Orientation");
+            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.pose.rotation);
+            r.y0 += vspacing;
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Uniform Scale");
+            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.scale);
+            r.y0 += vspacing;
+
+            //g.draw_shadowed_text(g.get_style().passive_text, {r.x0, r.y0+1}, "Mesh");
+            //assets.picker(g, child++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.mesh);
+            //r.y0 += vspacing;    
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Diffuse Map");
+            texture_combobox(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, textures, object.diffuse);
+            r.y0 += vspacing;
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Normal Map");
+            texture_combobox(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, textures, object.normal);
+            r.y0 += vspacing;
+
+            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Compass Direction");
+            direction_combobox(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.dir);
+            r.y0 += vspacing;
+        }
         g.end_group();
                 
         // Encode our command buffer
