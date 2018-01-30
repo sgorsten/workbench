@@ -90,7 +90,7 @@ class canvas
 public:
     canvas(const canvas_sprites & sprites, const canvas_device_objects & device_objects, gfx::transient_resource_pool & pool);
 
-    void set_target(int layer, rect<int> scissor, rhi::ptr<rhi::image> texture);
+    void set_target(int layer, rect<int> scissor, rhi::image * texture);
 
     void draw_line(const float2 & p0, const float2 & p1, int width, const float4 & color);
     void draw_bezier_curve(const float2 & p0, const float2 & p1, const float2 & p2, const float2 & p3, int width, const float4 & color);

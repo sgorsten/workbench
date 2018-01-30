@@ -4,6 +4,12 @@
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
+struct texture_asset
+{
+    std::string name;
+    rhi::ptr<rhi::image> texture;
+};
+
 void draw_tooltip(gui & g, const int2 & loc, std::string_view text)
 {
     int w = g.get_style().def_font.get_text_width(text), h = g.get_style().def_font.line_height;
@@ -124,6 +130,29 @@ int main(int argc, const char * argv[]) try
     canvas_device_objects device_objects {*dev, compiler, sheet};
     auto gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - GUI Test"));
 
+    std::vector<texture_asset *> textures;
+    textures.push_back(new texture_asset{"checker.png"});
+    textures.push_back(new texture_asset{"marble.png"});
+    textures.push_back(new texture_asset{"scratched.png"});
+    textures.push_back(new texture_asset{"normal.png"});
+    textures.push_back(new texture_asset{"checker.png"});
+    textures.push_back(new texture_asset{"marble.png"});
+    textures.push_back(new texture_asset{"scratched.png"});
+    textures.push_back(new texture_asset{"normal.png"});
+    textures.push_back(new texture_asset{"checker.png"});
+    textures.push_back(new texture_asset{"marble.png"});
+    textures.push_back(new texture_asset{"scratched.png"});
+    textures.push_back(new texture_asset{"normal.png"});
+    textures.push_back(new texture_asset{"checker.png"});
+    textures.push_back(new texture_asset{"marble.png"});
+    textures.push_back(new texture_asset{"scratched.png"});
+    textures.push_back(new texture_asset{"normal.png"});
+    for(auto tex : textures)
+    {
+        auto im = loader.load_image(tex->name);
+        tex->texture = dev->create_image({rhi::image_shape::_2d, {im.dimensions,1}, 1, im.format, rhi::sampled_image_bit}, {im.get_pixels()});
+    }
+
     // Create transient resources
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
     int pool_index=0;
@@ -135,6 +164,7 @@ int main(int argc, const char * argv[]) try
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
     int split = -300;
     size_t tab = 0;
+    texture_asset * tex = 0;
 
     // Main loop
     while(!gwindow->should_close())
@@ -194,7 +224,8 @@ int main(int argc, const char * argv[]) try
         g.end_group();
 
         g.begin_group(3);
-        tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
+        auto client = tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
+        icon_combobox<texture_asset *>(g, 0, {client.x0+10, client.y0+10, client.x1-10, client.y0+30}, textures, [](texture_asset * t) -> std::string_view { return t->name; }, [&g](const texture_asset * t, const rect<int> & r) { g.draw_image(r, {1,1,1,1}, *t->texture); }, tex);
         g.end_group();
                 
         // Encode our command buffer

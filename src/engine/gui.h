@@ -100,6 +100,7 @@ public:
     void draw_text(const int2 & pos, const float4 & color, std::string_view text);
     void draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text);
     void draw_shadowed_text(const int2 & pos, const float4 & color, std::string_view text);
+    void draw_image(const rect<int> & bounds, const float4 & color, rhi::image & image);
 
     // Facilities for consuming mouse clicks
     GLFWwindow * get_cursor_window() const { return state.cursor_window; }
@@ -139,7 +140,6 @@ public:
     // Facilities for drawing widgets
     cursor_type get_cursor_type() const { return ctype; }
     void set_cursor_type(cursor_type type) { ctype = type; }
-    void draw_icon(const rect<int> & bounds, uintptr_t tex) {} // TODO: ::draw_icon(*buf, tex, bounds); }
 
     // Standard widgets
     bool clickable_widget(const rect<int> & bounds);        // Returns true if clicked, and consumes the click
@@ -179,7 +179,7 @@ std::pair<rect<int>, rect<int>> vsplitter(gui & g, int id, const rect<int> & r, 
 
 bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view<std::string_view(int)> get_label, int & index);
 template<class T, class F> 
-bool combobox(gui & g, int id, const rect<int> & r, array_view<const T> items, F get_label, T & value)
+bool combobox(gui & g, int id, const rect<int> & r, array_view<T> items, F get_label, T & value)
 {
     int index = std::find(items.begin(), items.end(), value) - items.begin();
     bool b = combobox(g, id, r, items.size(), [=](int i) { return get_label(items[i]); }, index);
@@ -189,10 +189,10 @@ bool combobox(gui & g, int id, const rect<int> & r, array_view<const T> items, F
 
 bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function_view<std::string_view(int)> get_label, function_view<void(int, const rect<int> &)> draw_icon, int & index);
 template<class T, class F, class G>
-bool icon_combobox(gui & g, int id, const rect<int> & r, array_view<const T> items, F get_label, G draw_icon, T & value)
+bool icon_combobox(gui & g, int id, const rect<int> & r, array_view<T> items, F get_label, G draw_icon, T & value)
 {
     int index = std::find(items.begin(), items.end(), value) - items.begin();
-    bool b = icon_combobox(g, id, r, items.size(), [=](int i) { return get_label(items[i]); }, [=](int i, const rect & r) { draw_icon(items[i], r); }, index);
+    bool b = icon_combobox(g, id, r, items.size(), [=](int i) { return get_label(items[i]); }, [=](int i, const rect<int> & r) { draw_icon(items[i], r); }, index);
     if(b) value = items[index];
     return b;
 }

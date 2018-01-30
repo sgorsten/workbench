@@ -177,6 +177,12 @@ void gui::draw_text(const int2 & pos, const float4 & color, const font_face & fo
 void gui::draw_text(const int2 & coords, const float4 & color, std::string_view text) { buf.draw_text(coords, color, style.def_font, text); }
 void gui::draw_shadowed_text(const int2 & pos, const float4 & color, const font_face & font, std::string_view text) { return buf.draw_shadowed_text(pos, color, font, text); }
 void gui::draw_shadowed_text(const int2 & coords, const float4 & color, std::string_view text) { buf.draw_shadowed_text(coords, color, style.def_font, text); }
+void gui::draw_image(const rect<int> & bounds, const float4 & color, rhi::image & image)
+{
+    buf.set_target(current_layer, scissor_stack.back(), &image);
+    buf.draw_sprite(bounds, color, {0,0,1,1});
+    buf.set_target(current_layer, scissor_stack.back(), 0);
+}
 
 bool gui::is_mouse_clicked() const { return state.clicked && current_id_prefix.root == state.cursor_window; }
 bool gui::is_mouse_down() const { return state.down && current_id_prefix.root == state.cursor_window; }
@@ -680,8 +686,8 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
 
         auto r3 = r2.adjusted(0, 0, 0, VERTICAL_SPACING*7/2);
         g.begin_overlay();
-        g.begin_scissor(r2);
         g.begin_overlay();
+        g.begin_scissor(r3);
 
         for(int i=0; i<num_items; ++i)
         {
@@ -709,15 +715,20 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
                 p.x += HORIZONTAL_SPACING;
             }
         }
-
-        g.end_overlay();
-        r2.y1 = std::min(p.y + VERTICAL_SPACING, r3.y1);
-        g.draw_rect(r2, g.get_style().popup_background);
-
-        scroll_value -= g.get_scroll().y;
-        vscroll(g, 99, {r2.x1-10,r2.y0,r2.x1,r2.y1}, r2.y1-r2.y0, client_height, scroll_value);
+        if(p.x > r2.x0)
+        {
+            p.y += VERTICAL_SPACING;
+            client_height += VERTICAL_SPACING;
+        }
 
         g.end_scissor();
+        g.end_overlay();
+        r3.y1 = std::min(p.y + VERTICAL_SPACING, r3.y1);
+        g.draw_rect(r3, g.get_style().popup_background);
+
+        scroll_value -= g.get_scroll().y;
+        vscroll(g, 99, {r3.x1-10,r3.y0,r3.x1,r3.y1}, r3.y1-r3.y0, client_height, scroll_value);
+
         g.end_overlay();
 
         // If the user clicks outside of the combobox, remove focus

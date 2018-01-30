@@ -232,7 +232,7 @@ canvas::canvas(const canvas_sprites & sprites, const canvas_device_objects & dev
     pool.indices.begin();
 }
 
-void canvas::set_target(int layer, rect<int> scissor, rhi::ptr<rhi::image> texture)
+void canvas::set_target(int layer, rect<int> scissor, rhi::image * texture)
 {
     auto & set = sets[texture];
     if(!set)

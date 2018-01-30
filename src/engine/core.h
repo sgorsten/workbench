@@ -128,7 +128,7 @@ template<class R, class... A> class function_view<R(A...)>
     const void * user;                  // Type-erased pointer to the original callable object
     R (* func)(const void *, A...);     // Pointer to function which dispatches call to original object
 public:
-    template<class F> function_view(const F & f) : user(&f) { func = [](const void * u, A... a) { return (*reinterpret_cast<const F *>(u))(std::forward<A>(a)...); }; }
+    template<class F> function_view(const F & f) : user(&f) { func = [](const void * u, A... a) -> R { return (*reinterpret_cast<const F *>(u))(std::forward<A>(a)...); }; }
     R operator()(A... args) const { return func(user, std::forward<A>(args)...); }
 };
 
