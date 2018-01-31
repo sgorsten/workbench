@@ -57,6 +57,7 @@ struct scene
 // Editor logic //
 //////////////////
 
+struct ranged_property { float & value; float min, max; };
 class property_editor
 {
     gui & g;
@@ -67,6 +68,7 @@ class property_editor
     void edit_property(rect<int> bounds, std::string & prop) { ::edit(g, next_id++, bounds, prop); }
     void edit_property(rect<int> bounds, float & prop) { ::edit(g, next_id++, bounds, prop); }
     void edit_property(rect<int> bounds, float3 & prop) { ::edit(g, next_id++, bounds, prop); }
+    void edit_property(rect<int> bounds, ranged_property & prop) { ::hslider(g, next_id++, bounds, prop.min, prop.max, prop.value); }
     void edit_property(rect<int> bounds, mesh_asset * & prop) { combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * m) { return std::string_view{m->name}; }, prop); }
     void edit_property(rect<int> bounds, texture_asset * & prop) { icon_combobox<texture_asset *>(g, next_id++, bounds, assets.textures, 
         [](const texture_asset * t) { return std::string_view{t->name}; }, 
@@ -203,8 +205,8 @@ struct editor
         p.edit("Scale", selection->scale);
         p.edit("Mesh", selection->mesh);
         p.edit("Albedo", selection->albedo);
-        p.edit("Roughness", selection->roughness);
-        p.edit("Metalness", selection->metalness);
+        p.edit("Roughness", ranged_property{selection->roughness,0,1});
+        p.edit("Metalness", ranged_property{selection->metalness,0,1});
         p.edit("Light", selection->light);
         g.end_group();
     }

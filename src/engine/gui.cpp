@@ -579,21 +579,64 @@ bool edit(gui & g, int id, const rect<int> & r, unsigned & value) { return edit_
 bool edit(gui & g, int id, const rect<int> & r, float & value) { return edit_number(g, id, r, value, "%f", [](const char * s, char ** e) { return std::strtof(s, e); }); }
 bool edit(gui & g, int id, const rect<int> & r, double & value) { return edit_number(g, id, r, value, "%f", [](const char * s, char ** e) { return std::strtod(s, e); }); }
 
+
+bool slider_tab(gui & g, int id, const rect<int> & track_bounds, int2 tab_dims, int2 & tab_offset)
+{
+    bool changed = false;
+    int2 pos = track_bounds.corner00() + tab_offset;
+    if(g.draggable_widget(id, tab_dims, pos)) 
+    {
+        pos = clamp(pos, track_bounds.corner00(), track_bounds.corner11() - tab_dims);
+        if(const int2 new_offset = pos - track_bounds.corner00(); new_offset != tab_offset)
+        {
+            tab_offset = new_offset;
+            changed = true;
+        }
+    }
+    g.draw_rect(track_bounds, {0.5f,0.5f,0.5f,1}); // Track
+    g.draw_rounded_rect({pos, pos+tab_dims}, minelem((tab_dims-2)/2), {0.8f,0.8f,0.8f,1}); // Tab
+    return changed;
+}
+
+bool hslider(gui & g, int id, const rect<int> & bounds, float min_value, float max_value, float & value)
+{
+    const int2 tab_dims = {std::min(100, bounds.width()/4), bounds.height()};
+    const int range = bounds.width() - tab_dims.x;
+    int2 tab_offset {static_cast<int>(std::round((value-min_value)*range/(max_value-min_value))),0};
+    if(slider_tab(g, id, bounds, tab_dims, tab_offset))
+    {
+        value = min_value + tab_offset.x*(max_value-min_value)/range;
+        return true;
+    }
+    return false;
+}
+
+bool vslider(gui & g, int id, const rect<int> & bounds, float min_value, float max_value, float & value)
+{
+    const int2 tab_dims = {bounds.width(), std::min(100, bounds.height()/4)};
+    const int range = bounds.height() - tab_dims.y;
+    int2 tab_offset {0, static_cast<int>(std::round((value-min_value)*range/(max_value-min_value)))};
+    if(slider_tab(g, id, bounds, tab_dims, tab_offset))
+    {
+        value = min_value + tab_offset.y*(max_value-min_value)/range;
+        return true;
+    }
+    return false;
+}
+
 rect<int> vscroll_panel(gui & g, int id, const rect<int> & r, int client_height, int & offset)
 {
-    const int scrollbar_width = 12;
-    if(g.is_pressed(id)) offset = (static_cast<int>(g.get_cursor().y - g.get_pressed_offset().y) - r.y0) * client_height / r.height();
+    // Handle mousewheel interaction
     if(g.is_cursor_over(r)) offset -= static_cast<int>(g.get_scroll().y * 20);
     offset = std::min(offset, client_height - r.height());
     offset = std::max(offset, 0);
 
-    if(client_height <= r.height()) return r;
-    const rect<int> tab = {r.x1-scrollbar_width, r.y0 + offset * r.height() / client_height, r.x1, r.y0 + (offset + r.height()) * r.height() / client_height};
-    g.check_press(id, tab);
+    // Handle slider interaction
+    int2 slider_offset {0, offset*r.height()/client_height};
+    if(slider_tab(g, id, {r.x1-10, r.y0, r.x1, r.y1}, {10, r.height()*r.height()/client_height}, slider_offset)) offset = slider_offset.y*client_height/r.height();
 
-    g.draw_rect({r.x1-scrollbar_width, r.y0, r.x1, r.y1}, {0.5f,0.5f,0.5f,1}); // Track
-    g.draw_rounded_rect(tab, (scrollbar_width-2)/2, {0.8f,0.8f,0.8f,1}); // Tab
-    return {r.x0, r.y0, r.x1-scrollbar_width, r.y1};
+    // Return client area
+    return {r.x0, r.y0, r.x1-10, r.y1};
 }
 
 static std::pair<rect<int>, rect<int>> splitter(gui & g, int id, const rect<int> & r, int & split_value, int (int2::*e), int (rect<int>::*e0), int (rect<int>::*e1), cursor_type ctype)

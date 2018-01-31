@@ -193,7 +193,10 @@ template<class T, int M> bool edit(gui & g, int id, const rect<int> & r, linalg:
     return retval;
 }
 
-// TODO: hslider/vslider
+bool slider_tab(gui & g, int id, const rect<int> & track_bounds, int2 tab_dims, int2 & tab_offset);
+
+bool hslider(gui & g, int id, const rect<int> & bounds, float min_value, float max_value, float & value);
+bool vslider(gui & g, int id, const rect<int> & bounds, float min_value, float max_value, float & value);
 
 // TODO: hscroll_panel/scroll_panel
 rect<int> vscroll_panel(gui & g, int id, const rect<int> & r, int client_height, int & offset);
