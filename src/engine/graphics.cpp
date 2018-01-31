@@ -1,6 +1,18 @@
 #include "graphics.h"
 #include "rhi/rhi-internal.h"
 
+GLFWcursor * gfx::get_standard_cursor(cursor_type type)
+{
+    static GLFWcursor * cursors[4]
+    {
+        glfwCreateStandardCursor(GLFW_ARROW_CURSOR),
+        glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR),
+        glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR),
+        glfwCreateStandardCursor(GLFW_IBEAM_CURSOR)
+    };
+    return cursors[static_cast<int>(type)];
+}
+
 gfx::context::context() { if(glfwInit() == GLFW_FALSE) throw std::runtime_error("glfwInit() failed"); }
 gfx::context::~context() { glfwTerminate(); }
 const std::vector<rhi::backend_info> & gfx::context::get_backends() { return rhi::global_backend_list(); }

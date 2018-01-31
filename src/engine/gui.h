@@ -12,8 +12,6 @@ struct widget_id
     void clear();
 };
 inline bool operator == (const widget_id & a, const widget_id & b) { return a.root == b.root && a.path == b.path; }
-
-enum class cursor_type { arrow, hresize, vresize, ibeam };
 class gui_state
 {
     friend class gui;
@@ -75,7 +73,7 @@ class gui
     std::vector<rect<int>> scissor_stack;
     std::vector<menu_stack_frame> menu_stack;    
     widget_id current_id_prefix;        // The prefix applied to IDs in the current widget group (see begin_group()/end_group())
-    cursor_type ctype;                  // Which cursor icon to display for this frame
+    //gfx::cursor_type ctype;             // Which cursor icon to display for this frame
 public:
     gui(gui_state & state, canvas & canvas, const gui_style & style, GLFWwindow * window);
 
@@ -159,8 +157,8 @@ public:
     void end_menu();
 
     // Facilities for drawing widgets
-    cursor_type get_cursor_type() const { return ctype; }
-    void set_cursor_type(cursor_type type) { ctype = type; }
+    //gfx::cursor_type get_cursor_type() const { return ctype; }
+    void set_cursor_type(gfx::cursor_type type) { glfwSetCursor(window, get_standard_cursor(type)); }
 
     // Standard widgets
     bool clickable_widget(const rect<int> & bounds);            // Returns true if clicked, and consumes the click

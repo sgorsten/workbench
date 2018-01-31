@@ -6,6 +6,9 @@
 
 namespace gfx
 {
+    enum class cursor_type { arrow, hresize, vresize, ibeam };
+    GLFWcursor * get_standard_cursor(cursor_type type);
+
     struct context
     {
         context();
@@ -123,6 +126,7 @@ namespace gfx
 
         // Mutators
         void set_pos(const int2 & pos) { glfwSetWindowPos(glfw_window, pos.x, pos.y); }
+        void set_cursor(cursor_type type) { glfwSetCursor(glfw_window, get_standard_cursor(type)); }
         rhi::window & get_rhi_window() { return *rhi_window; }
         GLFWwindow * get_glfw_window() { return glfw_window; }
 

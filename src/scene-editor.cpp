@@ -370,10 +370,7 @@ int main(int argc, const char * argv[]) try
         pool.begin_frame(*dev);
 
         // Draw the UI
-        rect<int> client_rect {{0,0}, gwindow->get_window_size()};
         canvas canvas {sprites, canvas_objects, pool};
-
-        // Handle the menu
         const gui_style style {face, icons};
         gui g {gs, canvas, style, gwindow->get_glfw_window()};
         editor.on_gui(g, timestep);

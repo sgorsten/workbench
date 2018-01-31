@@ -157,7 +157,8 @@ gui::gui(gui_state & state, canvas & canvas, const gui_style & style, GLFWwindow
     current_id_prefix.root = window;
     current_id_prefix.path.clear();
 
-    ctype = cursor_type::arrow;
+    glfwSetCursor(window, get_standard_cursor(gfx::cursor_type::arrow));
+    //ctype = ;
 
     begin_overlay();
 }
@@ -254,7 +255,7 @@ void gui::show_text_entry(const float4 & color, const rect<int> & rect)
     if(state.down) state.text_entry_cursor = style.def_font.get_cursor_pos(state.text_entry, local_cursor.x - rect.x0);
     if(is_cursor_over(rect)) 
     {
-        ctype = cursor_type::ibeam;
+        set_cursor_type(gfx::cursor_type::ibeam);
         if(state.clicked) 
         {
             state.text_entry_mark = state.text_entry_cursor;
@@ -527,7 +528,7 @@ bool edit(gui & g, int id, const rect<int> & r, std::string & value)
     g.draw_rounded_rect(r, 3, g.get_style().edit_background);
     if(g.is_cursor_over(r))
     {
-        g.set_cursor_type(cursor_type::ibeam);
+        g.set_cursor_type(gfx::cursor_type::ibeam);
         if(g.is_mouse_clicked() && !g.is_focused(id)) g.begin_text_entry(id, value.c_str());
     }
 
@@ -551,7 +552,7 @@ template<class T, class F> bool edit_number(gui & g, int id, const rect<int> & r
     g.draw_rounded_rect(r, 3, g.get_style().edit_background);
     if(g.is_cursor_over(r))
     {
-        g.set_cursor_type(cursor_type::ibeam);
+        g.set_cursor_type(gfx::cursor_type::ibeam);
         if(g.is_mouse_clicked() && !g.is_focused(id)) g.begin_text_entry(id, buffer, true);
     }
 
@@ -630,6 +631,7 @@ rect<int> vscroll_panel(gui & g, int id, const rect<int> & r, int client_height,
     if(g.is_cursor_over(r)) offset -= static_cast<int>(g.get_scroll().y * 20);
     offset = std::min(offset, client_height - r.height());
     offset = std::max(offset, 0);
+    if(client_height < r.height()) return r;
 
     // Handle slider interaction
     int2 slider_offset {0, offset*r.height()/client_height};
@@ -639,7 +641,7 @@ rect<int> vscroll_panel(gui & g, int id, const rect<int> & r, int client_height,
     return {r.x0, r.y0, r.x1-10, r.y1};
 }
 
-static std::pair<rect<int>, rect<int>> splitter(gui & g, int id, const rect<int> & r, int & split_value, int (int2::*e), int (rect<int>::*e0), int (rect<int>::*e1), cursor_type ctype)
+static std::pair<rect<int>, rect<int>> splitter(gui & g, int id, const rect<int> & r, int & split_value, int (int2::*e), int (rect<int>::*e0), int (rect<int>::*e1), gfx::cursor_type ctype)
 {
     // If the user is currently dragging the splitter, compute a new split value
     if(g.is_focused(id))
@@ -671,8 +673,8 @@ static std::pair<rect<int>, rect<int>> splitter(gui & g, int id, const rect<int>
     // Return the two subregions
     return {a, b};
 }
-std::pair<rect<int>, rect<int>> hsplitter(gui & g, int id, const rect<int> & r, int & split_value) { return splitter(g, id, r, split_value, &int2::x, &rect<int>::x0, &rect<int>::x1, cursor_type::hresize); }
-std::pair<rect<int>, rect<int>> vsplitter(gui & g, int id, const rect<int> & r, int & split_value) { return splitter(g, id, r, split_value, &int2::y, &rect<int>::y0, &rect<int>::y1, cursor_type::vresize); }
+std::pair<rect<int>, rect<int>> hsplitter(gui & g, int id, const rect<int> & r, int & split_value) { return splitter(g, id, r, split_value, &int2::x, &rect<int>::x0, &rect<int>::x1, gfx::cursor_type::hresize); }
+std::pair<rect<int>, rect<int>> vsplitter(gui & g, int id, const rect<int> & r, int & split_value) { return splitter(g, id, r, split_value, &int2::y, &rect<int>::y0, &rect<int>::y1, gfx::cursor_type::vresize); }
 
 void vscroll(gui & g, int id, const rect<int> & r, int slider_size, int range_size, int & value)
 {
