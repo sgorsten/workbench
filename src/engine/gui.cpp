@@ -4,7 +4,26 @@
 #include <cassert>
 #include <GLFW/glfw3.h> // For GLFW_KEY_* bindings
 
-static bool operator == (const widget_id & a, const widget_id & b) { return a.root == b.root && a.path == b.path; }
+bool widget_id::equals(const widget_id & prefix, int id) const
+{
+    if(prefix.root != root) return false;
+    if(prefix.path.size() + 1 != path.size()) return false;
+    for(size_t i=0; i<prefix.path.size(); ++i) if(prefix.path[i] != path[i]) return false;
+    return id == path.back();
+}
+
+void widget_id::set(const widget_id & prefix, int id)
+{
+    root = prefix.root;
+    path = prefix.path;
+    path.push_back(id);
+}
+
+void widget_id::clear()
+{
+    root = nullptr;
+    path.clear();
+}
 
 void gui_state::begin_frame()
 {
@@ -194,80 +213,9 @@ bool gui::is_mouse_down() const { return state.down && current_id_prefix.root ==
 bool gui::is_right_mouse_clicked() const { return state.right_clicked && current_id_prefix.root == state.cursor_window; }
 bool gui::is_right_mouse_down() const { return state.right_down && current_id_prefix.root == state.cursor_window; }
 
-bool gui::clickable_widget(const rect<int> & bounds)
-{
-    if(is_mouse_clicked() && is_cursor_over(bounds))
-    {
-        consume_click();
-        return true;
-    }
-    return false;
-}
-
-bool gui::draggable_widget(int id, int2 dims, int2 & pos)
-{
-    if(is_focused(id))
-    {
-        if(is_mouse_down())
-        {
-            if(const int2 new_pos = local_cursor - state.clicked_offset; new_pos != pos)
-            {
-                pos = new_pos;
-                return true;
-            }
-        }
-        else clear_focus();
-    }
-    else if(clickable_widget({pos, pos+dims}))
-    {
-        state.clicked_offset = local_cursor - pos;
-        set_focus(id);
-    }
-    return false;
-}
-
-bool gui::focusable_widget(int id, const rect<int> & bounds)
-{
-    if(is_focused(id))
-    {
-        if(is_mouse_clicked() && !is_cursor_over(bounds)) 
-        {
-            clear_focus();
-        }
-    }
-    else if(clickable_widget(bounds))
-    {
-        set_focus(id);
-    }
-    return is_focused(id);
-}
-
 bool gui::is_cursor_over(const rect<int> & r) const 
 { 
     return r.intersected_with(scissor_stack.back()).contains(local_cursor); 
-}
-
-static bool ids_equal(const std::vector<int> & a_prefix, int a_suffix, const std::vector<int> & b)
-{
-    if(a_prefix.size() + 1 != b.size()) return false;
-    for(size_t i=0; i<a_prefix.size(); ++i) if(a_prefix[i] != b[i]) return false;
-    return a_suffix == b.back();
-}
-
-bool gui::is_pressed(int id) const
-{
-    if(current_id_prefix.root != state.pressed_id.root) return false;
-    if(current_id_prefix.path.size() + 1 != state.pressed_id.path.size()) return false;
-    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != state.pressed_id.path[i]) return false;
-    return id == state.pressed_id.path.back();
-}
-
-bool gui::is_focused(int id) const 
-{ 
-    if(current_id_prefix.root != state.focus_id.root) return false;
-    if(current_id_prefix.path.size() + 1 != state.focus_id.path.size()) return false;
-    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != state.focus_id.path[i]) return false;
-    return id == state.focus_id.path.back();
 }
 
 bool gui::is_group_focused(int id) const
@@ -277,21 +225,6 @@ bool gui::is_group_focused(int id) const
     for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != state.focus_id.path[i]) return false;
     return id == state.focus_id.path[current_id_prefix.path.size()];
 }
-
-void gui::clear_focus() { state.focus_id.root = nullptr; state.focus_id.path.clear(); }
-void gui::set_focus(int id)
-{
-    state.focus_id = current_id_prefix;
-    state.focus_id.path.push_back(id);
-}
-
-void gui::clear_pressed() { state.pressed_id.root = nullptr; state.pressed_id.path.clear(); }
-void gui::set_pressed(int id)
-{
-    state.pressed_id = current_id_prefix;
-    state.pressed_id.path.push_back(id);
-}
-
 
 void gui::begin_text_entry(int id, const char * contents, bool selected)
 {
@@ -515,27 +448,41 @@ void gui::end_menu()
     end_group();
 }
 
-////////////////////////////////////////
-// Salvaged functions. TODO: Refactor //
-////////////////////////////////////////
+//
 
-bool gui::check_click(int id, const rect<int> & r)
+bool gui::clickable_widget(const rect<int> & bounds)
 {
-    if(clickable_widget(r))
+    if(is_mouse_clicked() && is_cursor_over(bounds))
     {
-        state.clicked_offset = local_cursor - r.corner00();
-        set_pressed(id);
+        consume_click();
         return true;
     }
     return false;
 }
 
-bool gui::check_pressed(int id)
+bool gui::focusable_widget(int id, const rect<int> & bounds)
 {
-    if(is_pressed(id))
+    if(is_focused(id))
     {
-        if(!is_mouse_down()) clear_pressed();
-        else return true;
+        if(is_mouse_clicked() && !is_cursor_over(bounds)) 
+        {
+            clear_focus();
+        }
+    }
+    else if(clickable_widget(bounds))
+    {
+        set_focus(id);
+    }
+    return is_focused(id);
+}
+
+bool gui::check_press(int id, const rect<int> & bounds)
+{
+    if(clickable_widget(bounds))
+    {
+        state.pressed_offset = local_cursor - bounds.corner00();
+        set_pressed(id);
+        return true;
     }
     return false;
 }
@@ -546,6 +493,27 @@ bool gui::check_release(int id)
     {
         clear_pressed();
         return true;
+    }
+    return false;
+}
+
+bool gui::pressable_widget(int id, const rect<int> & bounds)
+{
+    if(check_release(id)) return false;
+    if(is_pressed(id)) return true;
+    return check_press(id, bounds);
+}
+
+bool gui::draggable_widget(int id, int2 dims, int2 & pos)
+{
+    if(pressable_widget(id, {pos, pos+dims}))
+    {
+        const int2 new_pos = local_cursor - state.pressed_offset;
+        if(new_pos != pos)
+        {
+            pos = new_pos;
+            return true;
+        }
     }
     return false;
 }
@@ -610,6 +578,23 @@ bool edit(gui & g, int id, const rect<int> & r, int & value) { return edit_numbe
 bool edit(gui & g, int id, const rect<int> & r, unsigned & value) { return edit_number(g, id, r, value, "%d", [](const char * s, char ** e) { return std::strtoll(s, e, 10); }); }
 bool edit(gui & g, int id, const rect<int> & r, float & value) { return edit_number(g, id, r, value, "%f", [](const char * s, char ** e) { return std::strtof(s, e); }); }
 bool edit(gui & g, int id, const rect<int> & r, double & value) { return edit_number(g, id, r, value, "%f", [](const char * s, char ** e) { return std::strtod(s, e); }); }
+
+rect<int> vscroll_panel(gui & g, int id, const rect<int> & r, int client_height, int & offset)
+{
+    const int scrollbar_width = 12;
+    if(g.is_pressed(id)) offset = (static_cast<int>(g.get_cursor().y - g.get_pressed_offset().y) - r.y0) * client_height / r.height();
+    if(g.is_cursor_over(r)) offset -= static_cast<int>(g.get_scroll().y * 20);
+    offset = std::min(offset, client_height - r.height());
+    offset = std::max(offset, 0);
+
+    if(client_height <= r.height()) return r;
+    const rect<int> tab = {r.x1-scrollbar_width, r.y0 + offset * r.height() / client_height, r.x1, r.y0 + (offset + r.height()) * r.height() / client_height};
+    g.check_press(id, tab);
+
+    g.draw_rect({r.x1-scrollbar_width, r.y0, r.x1, r.y1}, {0.5f,0.5f,0.5f,1}); // Track
+    g.draw_rounded_rect(tab, (scrollbar_width-2)/2, {0.8f,0.8f,0.8f,1}); // Tab
+    return {r.x0, r.y0, r.x1-scrollbar_width, r.y1};
+}
 
 static std::pair<rect<int>, rect<int>> splitter(gui & g, int id, const rect<int> & r, int & split_value, int (int2::*e), int (rect<int>::*e0), int (rect<int>::*e1), cursor_type ctype)
 {

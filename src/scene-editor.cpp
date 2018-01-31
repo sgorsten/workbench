@@ -168,9 +168,8 @@ struct editor
 
         static int scr=0;
         if(g.is_cursor_over(bounds)) scr -= g.get_scroll().y;
-        vscroll(g, id, bounds.take_x1(10), bounds.height(), (line_height+4)*exact_cast<int>(cur_scene.objects.size())-4, scr);
+        bounds = vscroll_panel(g, id, bounds, (line_height+4)*exact_cast<int>(cur_scene.objects.size())-4, scr);
         bounds.y0 -= scr;
-
         for(auto & obj : cur_scene.objects)
         {
             auto r = bounds.take_y0(g.get_style().def_font.line_height);

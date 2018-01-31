@@ -148,17 +148,15 @@ struct graph
             g.draw_rect({overlay.x0+1, overlay.y0+1, overlay.x1-1, overlay.y1-1}, {0.3f,0.3f,0.3f,1});
             edit(g, 1, {overlay.x0+4, overlay.y0+4, overlay.x1-4, overlay.y0 + g.get_style().def_font.line_height + 8}, node_filter);
 
-            //auto c = vscroll_panel(g, 2, {overlay.x0 + 1, overlay.y0 + g.get_style().def_font.line_height + 12, overlay.x1 - 1, overlay.y1 - 1}, (g.get_style().def_font.line_height+4) * n - 4, node_scroll);
-            rect<int> c = {overlay.x0 + 1, overlay.y0 + g.get_style().def_font.line_height + 12, overlay.x1 - 1, overlay.y1 - 1};
-            
+            auto c = vscroll_panel(g, 2, {overlay.x0 + 1, overlay.y0 + g.get_style().def_font.line_height + 12, overlay.x1 - 1, overlay.y1 - 1}, (g.get_style().def_font.line_height+4) * n - 4, node_scroll);
             g.begin_scissor(c);
-            int y = c.y0;
+            int y = c.y0 - node_scroll;
             for(auto & type : types)
             {
                 if(!is_subsequence(type.caption, node_filter)) continue;
 
                 rect<int> r = {c.x0, y, c.x1, y + g.get_style().def_font.line_height};
-                if(g.check_click(3, r))
+                if(g.clickable_widget(r))
                 {
                     nodes.push_back(new node{&type, popup_loc});
                     g.clear_focus();
@@ -200,7 +198,7 @@ struct graph
             // Input pin interactions
             for(size_t i=0; i<n->type->inputs.size(); ++i)
             {
-                if(g.check_click(ID_NEW_WIRE, get_input_rect(g,*n,i)))
+                if(g.check_press(ID_NEW_WIRE, get_input_rect(g,*n,i)))
                 {
                     n->input_edges[i].other = nullptr;
                     link_input_node = n;
@@ -218,7 +216,7 @@ struct graph
             // Output pin interactions
             for(size_t i=0; i<n->type->outputs.size(); ++i)
             {
-                if(g.check_click(ID_NEW_WIRE, get_output_rect(g,*n,i)))
+                if(g.check_press(ID_NEW_WIRE, get_output_rect(g,*n,i)))
                 {
                     if(g.is_alt_held()) for(auto & other : nodes) for(auto & edge : other->input_edges) if(edge.other == n) edge.other = nullptr;
                     link_output_node = n;

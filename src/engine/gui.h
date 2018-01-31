@@ -4,16 +4,24 @@
 
 // GUI state which persists from frame to frame
 struct GLFWwindow;
+struct widget_id 
+{ 
+    GLFWwindow * root; std::vector<int> path; 
+    bool equals(const widget_id & prefix, int id) const;
+    void set(const widget_id & prefix, int id);
+    void clear();
+};
+inline bool operator == (const widget_id & a, const widget_id & b) { return a.root == b.root && a.path == b.path; }
+
 enum class cursor_type { arrow, hresize, vresize, ibeam };
-struct widget_id { GLFWwindow * root; std::vector<int> path; };
 class gui_state
 {
     friend class gui;
 
     // Focus state
+    int2 pressed_offset;                // The offset of the cursor within the pressed widget at the time the widget was clicked
     widget_id pressed_id;               // The ID of the widget which is has been clicked and the mouse has not yet been released
     widget_id focus_id;                 // The ID of the widget which is in focus (see clear_focus()/set_focus()/is_focused())
-    int2 clicked_offset;                // The offset of the cursor within the focused widget at the time the widget was clicked
 
     // Text entry state
     widget_id text_entry_id;            // The ID of the widget currently being used for text entry
@@ -111,9 +119,11 @@ public:
     bool is_mouse_down() const; // True if the mouse button is held down and the original click was on this window
     bool is_right_mouse_clicked() const;
     bool is_right_mouse_down() const;
+    bool is_alt_held() const { return state.mods & GLFW_MOD_ALT; }
     bool is_cursor_over(const rect<int> & r) const;
     void consume_click() { state.clicked = false; }
     int2 get_scroll() const { return state.scroll; }
+    int2 get_pressed_offset() const { return state.pressed_offset; }
 
     // Facilities for consuming mouse input which originated in other windows
     void focus_window();
@@ -122,16 +132,17 @@ public:
     // Facilities for manipulating and querying which widget (identified by unique integer IDs) have focus
     void begin_group(int id) { current_id_prefix.path.push_back(id); }
     void end_group() { current_id_prefix.path.pop_back(); }
-    bool is_focused(int id) const;          // Return true if set_focus(id) has been called and clear_focus() has not been called
+
+    // The "pressed" ID stores the ID of a widget that has been clicked and the mouse has not yet been released
+    bool is_pressed(int id) const { return state.pressed_id.equals(current_id_prefix, id); }
+    void set_pressed(int id) { state.pressed_id.set(current_id_prefix, id); }
+    void clear_pressed() { state.pressed_id.clear(); }
+
+    // The "focused" ID stores the ID of the widget which has input focus
     bool is_group_focused(int id) const;    // Return true if any widget between a begin_group(id)/end_group() call has focused
-    void clear_focus();
-    void set_focus(int id);
-
-    bool is_pressed(int id) const;
-    void clear_pressed();
-    void set_pressed(int id);
-
-    bool is_alt_held() const { return state.mods & GLFW_MOD_ALT; }
+    bool is_focused(int id) const { return state.focus_id.equals(current_id_prefix, id); }
+    void set_focus(int id) { state.focus_id.set(current_id_prefix, id); }
+    void clear_focus() { state.focus_id.clear(); }   
 
     // Facilities for implementing widgets that require some form of text entry
     void begin_text_entry(int id, const char * contents = nullptr, bool selected = false);
@@ -153,12 +164,12 @@ public:
 
     // Standard widgets
     bool clickable_widget(const rect<int> & bounds);            // Returns true if clicked, and consumes the click
-    bool draggable_widget(int id, int2 dims, int2 & pos);       // Returns true if dragged, and modifies pos accordingly
     bool focusable_widget(int id, const rect<int> & bounds);    // Gains focus when clicked, loses focus when something else is clicked, returns true if currently focused
 
-    bool check_click(int id, const rect<int> & r);
-    bool check_pressed(int id);
-    bool check_release(int id);
+    bool check_press(int id, const rect<int> & bounds);         // If user clicked in bounds, set_pressed(id) and return true
+    bool check_release(int id);                                 // If is_pressed(id) and mouse is released, clear_pressed() and return true
+    bool pressable_widget(int id, const rect<int> & bounds);    // Returns true while pressed, and consumes the click
+    bool draggable_widget(int id, int2 dims, int2 & pos);       // Returns true if dragged, and modifies pos accordingly    
 };
 
 // A text entry field allowing the user to edit the value of a utf-8 encoded string.
@@ -182,6 +193,11 @@ template<class T, int M> bool edit(gui & g, int id, const rect<int> & r, linalg:
     return retval;
 }
 
+// TODO: hslider/vslider
+
+// TODO: hscroll_panel/scroll_panel
+rect<int> vscroll_panel(gui & g, int id, const rect<int> & r, int client_height, int & offset);
+
 // A user-draggable splitter widget which divides a single region into a left and right subregion. When split_value 
 // is positive, it defines the width in pixels of the left subregion, when negative, its magnitude defines the width
 // in pixels of the right subregion, with the other region occupying whatever space is left over.
@@ -191,8 +207,6 @@ std::pair<rect<int>, rect<int>> hsplitter(gui & g, int id, const rect<int> & r, 
 // is positive, it defines the height in pixels of the top subregion, when negative, its magnitude defines the height
 // in pixels of the bottom subregion, with the other region occupying whatever space is left over.
 std::pair<rect<int>, rect<int>> vsplitter(gui & g, int id, const rect<int> & r, int & split_value);
-
-void vscroll(gui & g, int id, const rect<int> & r, int slider_size, int range_size, int & value);
 
 bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view<std::string_view(int)> get_label, int & index);
 template<class T, class F> 
