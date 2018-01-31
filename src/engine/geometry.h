@@ -25,10 +25,25 @@ struct rigid_transform
     float3 translation {0,0,0}; // The translation component stored as a vector
 
     rigid_transform inverse() const { return {qconj(rotation), qrot(qconj(rotation), -translation)}; }
-    float4x4 matrix() const { return linalg::pose_matrix(rotation, translation); }
+    float4x4 matrix() const { return pose_matrix(rotation, translation); }
+
+    float3 transform_vector(const float3 & v) const { return qrot(rotation, v); }
+    float3 transform_point(const float3 & p) const { return translation + transform_vector(p); }
+    float3 detransform_point(const float3 & p) const { return detransform_vector(p - translation); }
+    float3 detransform_vector(const float3 & v) const { return qrot(qconj(rotation), v); }
 };
 inline rigid_transform slerp(const rigid_transform & a, const rigid_transform & b, float t) { return {slerp(a.rotation, b.rotation, t), lerp(a.translation, b.translation, t)}; }
 inline rigid_transform nlerp(const rigid_transform & a, const rigid_transform & b, float t) { return {nlerp(a.rotation, b.rotation, t), lerp(a.translation, b.translation, t)}; }
 
 // Convert from a normalized right-down-forward direction vector to right-down texcoords, with the forward vector centered at 0.5,0.5
 inline float2 compute_sphere_texcoords(float3 direction) { return float2{std::atan2(direction.x, direction.z)*0.1591549f, std::asin(direction.y)*0.3183099f}+0.5f; }
+
+// Shape transformations
+struct ray { float3 origin, direction; };
+inline ray transform(const rigid_transform & t, const ray & r) { return {t.transform_point(r.origin), t.transform_vector(r.direction)}; }
+inline ray detransform(const rigid_transform & t, const ray & r) { return {t.detransform_point(r.origin), t.detransform_vector(r.direction)}; }
+
+// Shape intersection routines
+struct ray_triangle_hit { float t; float2 uv; };
+std::optional<float> intersect_ray_plane(const ray & ray, const float4 & plane);
+std::optional<ray_triangle_hit> intersect_ray_triangle(const ray & ray, const float3 & v0, const float3 & v1, const float3 & v2);

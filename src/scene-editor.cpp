@@ -24,6 +24,18 @@ struct mesh_asset
     std::string name;
     mesh cmesh;
     gfx::simple_mesh gmesh;
+
+    bool raycast(const ray & r) const
+    {
+        for(auto & tri : cmesh.triangles)
+        {
+            if(intersect_ray_triangle(r, cmesh.vertices[tri[0]].position, cmesh.vertices[tri[1]].position, cmesh.vertices[tri[2]].position))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 struct asset_library
@@ -46,6 +58,11 @@ struct object
     float roughness;
     float metalness;
     float3 light;
+
+    bool raycast(const ray & r) const
+    {
+        return mesh ? mesh->raycast({(r.origin-position)/scale, r.direction/scale}) : false;
+    }
 };
 
 struct scene
@@ -143,10 +160,30 @@ struct editor
         size_t tab=0;
         viewport_rect = tabbed_container(g, bounds, {"Scene View"}, tab);
 
-        const double2 cursor = win->get_cursor_pos();
-        if(g.focusable_widget(id, viewport_rect))
+        // First handle click selections
+        if(g.clickable_widget(viewport_rect))
         {
-            if(win->get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
+            selection = nullptr;
+            auto ray = cam.get_ray_from_pixel(g.get_cursor(), viewport_rect);
+            for(auto & object : cur_scene.objects)
+            {
+                if(object.raycast(ray))
+                {
+                    selection = &object;
+                }
+            }
+            g.set_focus(id);
+            g.consume_click();
+        }
+        if(g.is_right_mouse_clicked() && g.is_cursor_over(viewport_rect))
+        {
+            g.set_focus(id);
+        }
+
+        const double2 cursor = win->get_cursor_pos();
+        if(g.is_focused(id))
+        {
+            if(win->get_mouse_button(GLFW_MOUSE_BUTTON_RIGHT))
             {
                 cam.yaw += static_cast<float>(cursor.x - last_cursor.x) * 0.01f;
                 cam.pitch = std::min(std::max(cam.pitch + static_cast<float>(cursor.y - last_cursor.y) * 0.01f, -1.5f), +1.5f);
@@ -375,6 +412,7 @@ int main(int argc, const char * argv[]) try
         gui g {gs, canvas, style, gwindow->get_glfw_window()};
         editor.on_gui(g, timestep);
 
+        auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
         auto vp = editor.viewport_rect;
 
         // Set up per scene uniforms
@@ -393,15 +431,10 @@ int main(int argc, const char * argv[]) try
         per_scene_set->write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
         per_scene_set->write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
 
-        auto cmd = dev->create_command_buffer();
-
         // Set up per-view uniforms for a specific framebuffer
-        auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
-        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, vp.aspect_ratio(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), make_transform_4x4(coords, fb.get_ndc_coords()));
-
         pbr_per_view_uniforms per_view_uniforms;
-        per_view_uniforms.view_proj_matrix = mul(proj_matrix, editor.cam.get_view_matrix());
-        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, editor.cam.get_skybox_view_matrix());
+        per_view_uniforms.view_proj_matrix = editor.cam.get_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
+        per_view_uniforms.skybox_view_proj_matrix = editor.cam.get_skybox_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
         per_view_uniforms.eye_position = editor.cam.position;
         per_view_uniforms.right_vector = editor.cam.get_direction(coord_axis::right);
         per_view_uniforms.down_vector = editor.cam.get_direction(coord_axis::down);
@@ -410,16 +443,16 @@ int main(int argc, const char * argv[]) try
         per_view_set->write(0, pool.uniforms.upload(per_view_uniforms));
 
         // Draw objects to our primary framebuffer
+        auto cmd = dev->create_command_buffer();
         rhi::render_pass_desc pass;
         pass.color_attachments = {{rhi::clear_color{0.05f,0.05f,0.05f,1.0f}, rhi::store{rhi::layout::present_source}}};
         pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
         cmd->begin_render_pass(pass, fb);
+        cmd->set_viewport_rect(vp.x0, vp.y0, vp.x1, vp.y1);
 
         // Bind common descriptors
         cmd->bind_descriptor_set(*common_layout, pbr_per_scene_set_index, *per_scene_set);
         cmd->bind_descriptor_set(*common_layout, pbr_per_view_set_index, *per_view_set);
-
-        cmd->set_viewport_rect(vp.x0, vp.y0, vp.x1, vp.y1);
 
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe);

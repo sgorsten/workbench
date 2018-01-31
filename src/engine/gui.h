@@ -121,7 +121,7 @@ public:
     bool is_cursor_over(const rect<int> & r) const;
     void consume_click() { state.clicked = false; }
     int2 get_scroll() const { return state.scroll; }
-    int2 get_pressed_offset() const { return state.pressed_offset; }
+    void set_cursor_type(gfx::cursor_type type) { glfwSetCursor(window, get_standard_cursor(type)); }
 
     // Facilities for consuming mouse input which originated in other windows
     void focus_window();
@@ -155,10 +155,6 @@ public:
     bool menu_item(std::string_view caption, int mods, int key, uint32_t icon);
     void end_popup();
     void end_menu();
-
-    // Facilities for drawing widgets
-    //gfx::cursor_type get_cursor_type() const { return ctype; }
-    void set_cursor_type(gfx::cursor_type type) { glfwSetCursor(window, get_standard_cursor(type)); }
 
     // Standard widgets
     bool clickable_widget(const rect<int> & bounds);            // Returns true if clicked, and consumes the click

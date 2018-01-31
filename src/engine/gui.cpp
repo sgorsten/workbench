@@ -49,7 +49,7 @@ void gui_state::on_mouse_button(GLFWwindow * window, int button, int action, int
     if(button == GLFW_MOUSE_BUTTON_RIGHT)
     {
         right_down = action == GLFW_PRESS;
-        if(right_clicked) clicked = true;
+        if(right_down) right_clicked = true;
     }
 }
 
