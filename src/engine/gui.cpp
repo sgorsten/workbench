@@ -8,7 +8,7 @@ static bool operator == (const widget_id & a, const widget_id & b) { return a.ro
 
 void gui_state::begin_frame()
 {
-    clicked = false;
+    clicked = right_clicked = false;
     scroll = {};
     key = mods = 0;
 }
@@ -26,6 +26,11 @@ void gui_state::on_mouse_button(GLFWwindow * window, int button, int action, int
     {
         down = action == GLFW_PRESS;
         if(down) clicked = true;
+    }
+    if(button == GLFW_MOUSE_BUTTON_RIGHT)
+    {
+        right_down = action == GLFW_PRESS;
+        if(right_clicked) clicked = true;
     }
 }
 
@@ -186,6 +191,8 @@ void gui::draw_image(const rect<int> & bounds, const float4 & color, rhi::image 
 
 bool gui::is_mouse_clicked() const { return state.clicked && current_id_prefix.root == state.cursor_window; }
 bool gui::is_mouse_down() const { return state.down && current_id_prefix.root == state.cursor_window; }
+bool gui::is_right_mouse_clicked() const { return state.right_clicked && current_id_prefix.root == state.cursor_window; }
+bool gui::is_right_mouse_down() const { return state.right_down && current_id_prefix.root == state.cursor_window; }
 
 bool gui::clickable_widget(const rect<int> & bounds)
 {
@@ -247,6 +254,14 @@ static bool ids_equal(const std::vector<int> & a_prefix, int a_suffix, const std
     return a_suffix == b.back();
 }
 
+bool gui::is_pressed(int id) const
+{
+    if(current_id_prefix.root != state.pressed_id.root) return false;
+    if(current_id_prefix.path.size() + 1 != state.pressed_id.path.size()) return false;
+    for(size_t i=0; i<current_id_prefix.path.size(); ++i) if(current_id_prefix.path[i] != state.pressed_id.path[i]) return false;
+    return id == state.pressed_id.path.back();
+}
+
 bool gui::is_focused(int id) const 
 { 
     if(current_id_prefix.root != state.focus_id.root) return false;
@@ -269,6 +284,14 @@ void gui::set_focus(int id)
     state.focus_id = current_id_prefix;
     state.focus_id.path.push_back(id);
 }
+
+void gui::clear_pressed() { state.pressed_id.root = nullptr; state.pressed_id.path.clear(); }
+void gui::set_pressed(int id)
+{
+    state.pressed_id = current_id_prefix;
+    state.pressed_id.path.push_back(id);
+}
+
 
 void gui::begin_text_entry(int id, const char * contents, bool selected)
 {
@@ -490,6 +513,41 @@ void gui::end_popup()
 void gui::end_menu()
 {
     end_group();
+}
+
+////////////////////////////////////////
+// Salvaged functions. TODO: Refactor //
+////////////////////////////////////////
+
+bool gui::check_click(int id, const rect<int> & r)
+{
+    if(clickable_widget(r))
+    {
+        state.clicked_offset = local_cursor - r.corner00();
+        set_pressed(id);
+        return true;
+    }
+    return false;
+}
+
+bool gui::check_pressed(int id)
+{
+    if(is_pressed(id))
+    {
+        if(!is_mouse_down()) clear_pressed();
+        else return true;
+    }
+    return false;
+}
+
+bool gui::check_release(int id)
+{
+    if(is_pressed(id) && !is_mouse_down())
+    {
+        clear_pressed();
+        return true;
+    }
+    return false;
 }
 
 /////////////////////////////////////

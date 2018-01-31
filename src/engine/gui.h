@@ -11,6 +11,7 @@ class gui_state
     friend class gui;
 
     // Focus state
+    widget_id pressed_id;               // The ID of the widget which is has been clicked and the mouse has not yet been released
     widget_id focus_id;                 // The ID of the widget which is in focus (see clear_focus()/set_focus()/is_focused())
     int2 clicked_offset;                // The offset of the cursor within the focused widget at the time the widget was clicked
 
@@ -23,6 +24,7 @@ class gui_state
     // Input state
     GLFWwindow * cursor_window;         // The window which the cursor is currently over
     bool clicked, down;                 // True if the mouse was clicked during this frame, and if the mouse is currently down
+    bool right_clicked, right_down;     // True if the mouse was clicked during this frame, and if the mouse is currently down
     int2 scroll;                        // Scroll amount in the current frame
     int key, mods;                      // Key pressed during this frame, and corresponding mods
 
@@ -107,6 +109,8 @@ public:
     const int2 & get_cursor() const { return local_cursor; } // NOTE: Prefer is_cursor_over(...) for doing mouseover checks
     bool is_mouse_clicked() const; // True if the mouse has been clicked on this window in this frame
     bool is_mouse_down() const; // True if the mouse button is held down and the original click was on this window
+    bool is_right_mouse_clicked() const;
+    bool is_right_mouse_down() const;
     bool is_cursor_over(const rect<int> & r) const;
     void consume_click() { state.clicked = false; }
     int2 get_scroll() const { return state.scroll; }
@@ -122,6 +126,12 @@ public:
     bool is_group_focused(int id) const;    // Return true if any widget between a begin_group(id)/end_group() call has focused
     void clear_focus();
     void set_focus(int id);
+
+    bool is_pressed(int id) const;
+    void clear_pressed();
+    void set_pressed(int id);
+
+    bool is_alt_held() const { return state.mods & GLFW_MOD_ALT; }
 
     // Facilities for implementing widgets that require some form of text entry
     void begin_text_entry(int id, const char * contents = nullptr, bool selected = false);
@@ -145,6 +155,10 @@ public:
     bool clickable_widget(const rect<int> & bounds);            // Returns true if clicked, and consumes the click
     bool draggable_widget(int id, int2 dims, int2 & pos);       // Returns true if dragged, and modifies pos accordingly
     bool focusable_widget(int id, const rect<int> & bounds);    // Gains focus when clicked, loses focus when something else is clicked, returns true if currently focused
+
+    bool check_click(int id, const rect<int> & r);
+    bool check_pressed(int id);
+    bool check_release(int id);
 };
 
 // A text entry field allowing the user to edit the value of a utf-8 encoded string.
