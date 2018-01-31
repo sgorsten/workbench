@@ -5,6 +5,7 @@
 layout(set=PER_OBJECT,binding=0) uniform PerObject 
 { 
 	mat4 u_model_matrix;
+	mat4 u_model_matrix_it;
 	vec2 u_material; // roughness, metalness
 };
 layout(location=0) in vec3 v_position;
@@ -19,7 +20,7 @@ void main()
 {
 	position = (u_model_matrix * vec4(v_position,1)).xyz;
 	color = v_color;
-	normal = (u_model_matrix * vec4(v_normal,0)).xyz;
+	normal = (u_model_matrix_it * vec4(v_normal,0)).xyz;
 	texcoord = v_texcoord;
 	gl_Position = u_view_proj_matrix * vec4(position,1);
 }

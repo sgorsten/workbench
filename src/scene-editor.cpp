@@ -466,8 +466,9 @@ int main(int argc, const char * argv[]) try
         {
             if(!object.mesh || !object.albedo) continue;
 
-            struct { float4x4 model_matrix; float roughness, metalness; } per_object;
+            struct { float4x4 model_matrix, model_matrix_it; float roughness, metalness; } per_object;
             per_object.model_matrix = mul(translation_matrix(object.position), scaling_matrix(object.scale));
+            per_object.model_matrix_it = inverse(transpose(per_object.model_matrix));
             per_object.roughness = object.roughness;
             per_object.metalness = object.metalness;
             auto sphere_set = pool.descriptors->alloc(*per_object_layout);

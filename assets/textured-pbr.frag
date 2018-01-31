@@ -5,6 +5,7 @@
 layout(set=PER_OBJECT,binding=0) uniform PerObject 
 { 
 	mat4 u_model_matrix;
+	mat4 u_model_matrix_it;
 	vec2 u_material; // roughness, metalness
 };
 layout(set=PER_OBJECT,binding=1) uniform sampler2D u_albedo_tex;

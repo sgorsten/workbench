@@ -194,8 +194,9 @@ int main(int argc, const char * argv[]) try
 
         // Draw the ground
         cmd->bind_pipeline(*solid_pipe);
-        struct { float4x4 model_matrix; float roughness, metalness; } per_object;
+        struct { float4x4 model_matrix, model_matrix_it; float roughness, metalness; } per_object;
         per_object.model_matrix = translation_matrix(cam.coords(coord_axis::down)*0.5f);
+        per_object.model_matrix_it = inverse(transpose(per_object.model_matrix));
         per_object.roughness = 0.5f;
         per_object.metalness = 0.0f;
         auto ground_set = pool.descriptors->alloc(*per_object_layout);
@@ -210,6 +211,7 @@ int main(int argc, const char * argv[]) try
             for(int j=0; j<6; ++j)
             {
                 per_object.model_matrix = translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f));
+                per_object.model_matrix_it = inverse(transpose(per_object.model_matrix));
                 per_object.roughness = (j+0.5f)/6;
                 per_object.metalness = (i+0.5f)/6;
                 auto sphere_set = pool.descriptors->alloc(*per_object_layout);
