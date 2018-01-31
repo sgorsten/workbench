@@ -300,6 +300,10 @@ uint64_t gl_device::submit(command_buffer & cmd)
                 }
             }
         },
+        [&](const set_viewport_rect_command & c)
+        {
+            glViewport(c.x0, framebuffer_height-c.y1, c.x1-c.x0, c.y1-c.y0);
+        },
         [&](const set_scissor_rect_command & c)
         {
             glScissor(c.x0, framebuffer_height-c.y1, c.x1-c.x0, c.y1-c.y0);

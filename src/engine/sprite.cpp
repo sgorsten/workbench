@@ -406,6 +406,7 @@ void canvas::encode_commands(rhi::command_buffer & cmd, gfx::window & win)
     auto per_window_set = pool.descriptors->alloc(*device_objects.per_window_layout);
     per_window_set->write(0, pool.uniforms.upload(transform));
 
+    cmd.set_viewport_rect(0, 0, dims.x, dims.y);
     cmd.bind_pipeline(*device_objects.pipe);
     cmd.bind_descriptor_set(*device_objects.pipe_layout, 0, *per_window_set);
     cmd.bind_vertex_buffer(0, pool.vertices.end());

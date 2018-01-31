@@ -257,6 +257,11 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             const D3D11_RECT scissor {0, 0, fb.dims.x, fb.dims.y};
             ctx->RSSetScissorRects(1, &scissor);
         },
+        [&](const set_viewport_rect_command & c)
+        {
+            const D3D11_VIEWPORT viewport {exactly(c.x0), exactly(c.y0), exactly(c.x1-c.x0), exactly(c.y1-c.y0), 0, 1};
+            ctx->RSSetViewports(1, &viewport);
+        },
         [&](const set_scissor_rect_command & c)
         {
             const D3D11_RECT scissor {c.x0, c.y0, c.x1, c.y1};

@@ -211,6 +211,7 @@ namespace rhi
     {
         virtual void generate_mipmaps(image & image) = 0;
         virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
+        virtual void set_viewport_rect(int x0, int y0, int x1, int y1) = 0;
         virtual void set_scissor_rect(int x0, int y0, int x1, int y1) = 0;
         virtual void bind_pipeline(pipeline & pipe) = 0;
         virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) = 0;

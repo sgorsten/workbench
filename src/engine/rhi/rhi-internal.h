@@ -108,7 +108,8 @@ namespace rhi
 
     struct generate_mipmaps_command { ptr<image> im; };
     struct begin_render_pass_command { render_pass_desc pass; ptr<framebuffer> framebuffer; };
-    struct set_scissor_rect_command { int x0, y0, x1, y1; };
+    struct set_viewport_rect_command { int x0, y0, x1, y1; };
+    struct set_scissor_rect_command { int x0, y0, x1, y1; };    
     struct bind_pipeline_command { ptr<pipeline> pipe; };
     struct bind_descriptor_set_command { ptr<pipeline_layout> layout; int set_index; ptr<descriptor_set> set; };
     struct bind_vertex_buffer_command { int index; buffer_range range; };
@@ -119,11 +120,13 @@ namespace rhi
 
     struct emulated_command_buffer : command_buffer
     { 
-        using command = std::variant<generate_mipmaps_command, begin_render_pass_command, set_scissor_rect_command, bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
+        using command = std::variant<generate_mipmaps_command, begin_render_pass_command, set_viewport_rect_command, set_scissor_rect_command, 
+            bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
         std::vector<command> commands; 
     
         void generate_mipmaps(image & image) override { commands.push_back(generate_mipmaps_command{&image}); }
         void begin_render_pass(const render_pass_desc & pass, framebuffer & framebuffer) override { commands.push_back(begin_render_pass_command{pass, &framebuffer}); }
+        void set_viewport_rect(int x0, int y0, int x1, int y1) override { commands.push_back(set_viewport_rect_command{x0, y0, x1, y1}); }
         void set_scissor_rect(int x0, int y0, int x1, int y1) override { commands.push_back(set_scissor_rect_command{x0, y0, x1, y1}); }
         void bind_pipeline(pipeline & pipe) override { commands.push_back(bind_pipeline_command{&pipe}); }
         void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) override { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }

@@ -301,16 +301,17 @@ namespace rhi
         VkRenderPass current_pass;
 
         void record_reference(object & object);
-        virtual void generate_mipmaps(image & image) override;
-        virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
-        virtual void set_scissor_rect(int x0, int y0, int x1, int y1) override;
-        virtual void bind_pipeline(pipeline & pipe) override;
-        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) override;
-        virtual void bind_vertex_buffer(int index, buffer_range range) override;
-        virtual void bind_index_buffer(buffer_range range) override;
-        virtual void draw(int first_vertex, int vertex_count) override;
-        virtual void draw_indexed(int first_index, int index_count) override;
-        virtual void end_render_pass() override;
+        void generate_mipmaps(image & image) override;
+        void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
+        void set_viewport_rect(int x0, int y0, int x1, int y1) override;
+        void set_scissor_rect(int x0, int y0, int x1, int y1) override;
+        void bind_pipeline(pipeline & pipe) override;
+        void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) override;
+        void bind_vertex_buffer(int index, buffer_range range) override;
+        void bind_index_buffer(buffer_range range) override;
+        void draw(int first_vertex, int vertex_count) override;
+        void draw_indexed(int first_index, int index_count) override;
+        void end_render_pass() override;
     };
 
     ptr<buffer> vk_device::create_buffer(const buffer_desc & desc, const void * initial_data) { return new delete_when_unreferenced<vk_buffer>{this, desc, initial_data}; }
@@ -1198,23 +1199,29 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
         }
     }
 
+    current_pass = device->get_render_pass(fb.get_render_pass_desc(pass_desc));
+
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass_begin_info.renderPass = device->get_render_pass(fb.get_render_pass_desc(pass_desc));
+    pass_begin_info.renderPass = current_pass;
     pass_begin_info.framebuffer = fb.framebuffers[fb.current_index];
     pass_begin_info.renderArea = {{0,0},{exactly(fb.dims.x),exactly(fb.dims.y)}};
     pass_begin_info.clearValueCount = exactly(countof(clear_values));
     pass_begin_info.pClearValues = clear_values.data();
-    
     vkCmdBeginRenderPass(cmd, &pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-    const VkViewport viewports[] {{0, 0, exactly(fb.dims.x), exactly(fb.dims.y), 0, 1}};
-    vkCmdSetViewport(cmd, 0, exactly(countof(viewports)), viewports);
-    vkCmdSetScissor(cmd, 0, 1, &pass_begin_info.renderArea);    
-    current_pass = pass_begin_info.renderPass;
+
+    set_viewport_rect(0, 0, fb.dims.x, fb.dims.y);
+    set_scissor_rect(0, 0, fb.dims.x, fb.dims.y);
+}
+
+void vk_command_buffer::set_viewport_rect(int x0, int y0, int x1, int y1)
+{
+    const VkViewport viewport {exactly(x0), exactly(y0), exactly(x1-x0), exactly(y1-y0), 0, 1};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
 }
 
 void vk_command_buffer::set_scissor_rect(int x0, int y0, int x1, int y1)
 {
-    VkRect2D scissor {{exactly(x0), exactly(y0)}, {exactly(x1-x0), exactly(y1-y0)}};
+    const VkRect2D scissor {{exactly(x0), exactly(y0)}, {exactly(x1-x0), exactly(y1-y0)}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 

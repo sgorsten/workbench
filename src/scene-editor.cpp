@@ -7,18 +7,37 @@
 #include <chrono>
 #include <iostream>
 
+///////////////////////
+// Asset definitions //
+///////////////////////
+
+constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
+
+struct mesh_asset
+{
+    std::string name;
+    mesh cmesh;
+    gfx::simple_mesh gmesh;
+};
+
+struct asset_library
+{
+    std::vector<mesh_asset *> meshes;
+};
+
 //////////////////////
 // Scene definition //
 //////////////////////
-
-constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
 
 struct object
 {
     std::string name;
     float3 position;
+    float3 scale;
+    mesh_asset * mesh;
     float roughness;
     float metalness;
+    float3 light;
 };
 
 struct scene
@@ -32,6 +51,7 @@ struct scene
 
 struct editor
 {
+    asset_library & assets;
     scene & cur_scene;
     std::shared_ptr<gfx::window> win;
     camera cam;
@@ -44,10 +64,15 @@ struct editor
     int property_split = 100;
     size_t tab = 0;
 
-    editor(scene & cur_scene, std::shared_ptr<gfx::window> win) : cur_scene{cur_scene}, win{win}, cam{coords}
+    editor(asset_library & assets, scene & cur_scene, std::shared_ptr<gfx::window> win) : assets{assets}, cur_scene{cur_scene}, win{win}, cam{coords}
     {    
         cam.pitch += 0.8f;
         cam.move(coord_axis::back, 10.0f);
+    }
+
+    bool asset_combobox(gui & g, const int id, rect<int> bounds, mesh_asset * & mesh)
+    {
+        return combobox<mesh_asset *>(g, id, bounds, assets.meshes, [](const mesh_asset * mesh) { return std::string_view{mesh->name}; }, mesh);
     }
 
     void menu_gui(gui & g, const int id, rect<int> bounds)
@@ -82,7 +107,7 @@ struct editor
 
     void viewport_gui(gui & g, int id, rect<int> bounds, float timestep)
     {
-        viewport_rect = bounds;
+        viewport_rect = bounds.shrink(1);
 
         const double2 cursor = win->get_cursor_pos();
         if(g.focusable_widget(id, bounds))
@@ -146,12 +171,24 @@ struct editor
         edit(g, child_id++, value_bounds.take_y0(widget_height), selection->position);
         key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
 
+        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Scale");
+        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->scale);
+        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
+
+        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Mesh");
+        asset_combobox(g, child_id++, value_bounds.take_y0(widget_height), selection->mesh);
+        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
+
         g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Roughness");
         edit(g, child_id++, value_bounds.take_y0(widget_height), selection->roughness);
         key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
 
         g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Metalness");
         edit(g, child_id++, value_bounds.take_y0(widget_height), selection->metalness);
+        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
+
+        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Light");
+        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->light);
         key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
 
         g.end_group();
@@ -189,31 +226,32 @@ int main(int argc, const char * argv[]) try
     auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
     auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
     auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
-
     auto env_spheremap_img = loader.load_image("monument-valley.hdr");
-    auto ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f);
-    auto box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
-    auto sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
+
+    asset_library assets;
+    assets.meshes.push_back(new mesh_asset{"box", make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f})});
+    assets.meshes.push_back(new mesh_asset{"sphere", make_sphere_mesh(32, 32, 0.5f)});
+    assets.meshes.push_back(new mesh_asset{"plane", make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)});
 
     scene scene;
-    for(int i=0; i<3; ++i)
+    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light A", { 3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light A", { 3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light A", {-3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, assets.meshes[2], 0.5f, 0.0f});
+    for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
     {
-        for(int j=0; j<3; ++j)
-        {
-            scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), (j+0.5f)/3, (i+0.5f)/3});
-        }
+        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, assets.meshes[1], (j+0.5f)/3, (i+0.5f)/3});
     }
     
-    // Create a session for each device
+    // Create our device and load our device objects
     gfx::context context;
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
     auto dev = context.get_backends().back().create_device(debug);
 
     standard_device_objects standard = {dev, standard_sh};
     canvas_device_objects canvas_objects {*dev, compiler, sheet};
-    gfx::simple_mesh ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};
-    gfx::simple_mesh box = {*dev, box_mesh.vertices, box_mesh.triangles};
-    gfx::simple_mesh sphere = {*dev, sphere_mesh.vertices, sphere_mesh.triangles};
+    for(auto m : assets.meshes) m->gmesh = {*dev, m->cmesh.vertices, m->cmesh.triangles};
 
     // Samplers
     auto nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
@@ -282,7 +320,7 @@ int main(int argc, const char * argv[]) try
     gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
 
-    editor editor{scene, gwindow};
+    editor editor{assets, scene, gwindow};
 
     // Main loop
     double2 last_cursor;
@@ -312,12 +350,17 @@ int main(int argc, const char * argv[]) try
         gui g {gs, canvas, style, gwindow->get_glfw_window()};
         editor.on_gui(g, timestep);
 
+        auto vp = editor.viewport_rect;
+
         // Set up per scene uniforms
         struct pbr_per_scene_uniforms per_scene_uniforms {};
-        per_scene_uniforms.point_lights[0] = {{-3, -3, 8}, {23.47f, 21.31f, 20.79f}};
-        per_scene_uniforms.point_lights[1] = {{ 3, -3, 8}, {23.47f, 21.31f, 20.79f}};
-        per_scene_uniforms.point_lights[2] = {{ 3,  3, 8}, {23.47f, 21.31f, 20.79f}};
-        per_scene_uniforms.point_lights[3] = {{-3,  3, 8}, {23.47f, 21.31f, 20.79f}};
+        int num_lights = 0;
+        for(auto & obj : scene.objects)
+        {
+            if(obj.light == float3{0,0,0}) continue;
+            per_scene_uniforms.point_lights[num_lights++] = {obj.position, obj.light};
+            if(num_lights == 4) break;
+        }
 
         auto per_scene_set = pool.descriptors->alloc(*per_scene_layout);
         per_scene_set->write(0, pool.uniforms.upload(per_scene_uniforms));
@@ -329,7 +372,7 @@ int main(int argc, const char * argv[]) try
 
         // Set up per-view uniforms for a specific framebuffer
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
-        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), make_transform_4x4(coords, fb.get_ndc_coords()));
+        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, vp.aspect_ratio(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), make_transform_4x4(coords, fb.get_ndc_coords()));
 
         pbr_per_view_uniforms per_view_uniforms;
         per_view_uniforms.view_proj_matrix = mul(proj_matrix, editor.cam.get_view_matrix());
@@ -343,7 +386,7 @@ int main(int argc, const char * argv[]) try
 
         // Draw objects to our primary framebuffer
         rhi::render_pass_desc pass;
-        pass.color_attachments = {{rhi::dont_care{}, rhi::store{rhi::layout::present_source}}};
+        pass.color_attachments = {{rhi::clear_color{0.05f,0.05f,0.05f,1.0f}, rhi::store{rhi::layout::present_source}}};
         pass.depth_attachment = {rhi::clear_depth{1.0f,0}, rhi::dont_care{}};
         cmd->begin_render_pass(pass, fb);
 
@@ -351,47 +394,41 @@ int main(int argc, const char * argv[]) try
         cmd->bind_descriptor_set(*common_layout, pbr_per_scene_set_index, *per_scene_set);
         cmd->bind_descriptor_set(*common_layout, pbr_per_view_set_index, *per_view_set);
 
+        cmd->set_viewport_rect(vp.x0, vp.y0, vp.x1, vp.y1);
+
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe);
         auto skybox_set = pool.descriptors->alloc(*skybox_per_object_layout);
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
-        box.draw(*cmd);
+        assets.meshes[0]->gmesh.draw(*cmd);
         
         // Draw lights
-        cmd->bind_pipeline(*light_pipe);
-        for(auto & p : per_scene_uniforms.point_lights)
-        {
-            auto set = pool.descriptors->alloc(*per_object_layout);
-            set->write(0, pool.uniforms.upload(mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))));
-            set->write(1, *nearest, *checkerboard);
-            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *set);
-            sphere.draw(*cmd);
-        }
+        //cmd->bind_pipeline(*light_pipe);
+        //for(auto & p : per_scene_uniforms.point_lights)
+        //{
+        //    auto set = pool.descriptors->alloc(*per_object_layout);
+        //    set->write(0, pool.uniforms.upload(mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))));
+        //    set->write(1, *nearest, *checkerboard);
+        //    cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *set);
+        //    assets.meshes[1]->gmesh.draw(*cmd);
+        //}
 
-        // Draw the ground
+        // Draw our objects
         cmd->bind_pipeline(*solid_pipe);
-        struct { float4x4 model_matrix; float roughness, metalness; } per_object;
-        per_object.model_matrix = translation_matrix(editor.cam.coords(coord_axis::down)*0.5f);
-        per_object.roughness = 0.5f;
-        per_object.metalness = 0.0f;
-        auto ground_set = pool.descriptors->alloc(*per_object_layout);
-        ground_set->write(0, pool.uniforms.upload(per_object));
-        ground_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ground_set);
-        ground.draw(*cmd);
-
-        // Draw a bunch of spheres
         for(auto & object : scene.objects)
         {
-            per_object.model_matrix = translation_matrix(object.position);
+            if(!object.mesh) continue;
+            // TODO: Specify pipeline as either light_pipe or solid_pipe
+            struct { float4x4 model_matrix; float roughness, metalness; } per_object;
+            per_object.model_matrix = mul(translation_matrix(object.position), scaling_matrix(object.scale));
             per_object.roughness = object.roughness;
             per_object.metalness = object.metalness;
             auto sphere_set = pool.descriptors->alloc(*per_object_layout);
             sphere_set->write(0, pool.uniforms.upload(per_object));
             sphere_set->write(1, *nearest, *checkerboard);
             cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *sphere_set);
-            sphere.draw(*cmd);
+            object.mesh->gmesh.draw(*cmd);
         }
 
         canvas.encode_commands(*cmd, *gwindow);
