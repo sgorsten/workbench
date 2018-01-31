@@ -49,6 +49,30 @@ struct scene
 // Editor logic //
 //////////////////
 
+class property_editor
+{
+    gui & g;
+    asset_library & assets;
+    rect<int> key_bounds, value_bounds;
+    int next_id=0;
+
+    void edit_property(rect<int> bounds, std::string & prop) { ::edit(g, next_id++, bounds, prop); }
+    void edit_property(rect<int> bounds, float & prop) { ::edit(g, next_id++, bounds, prop); }
+    void edit_property(rect<int> bounds, float3 & prop) { ::edit(g, next_id++, bounds, prop); }
+    void edit_property(rect<int> bounds, mesh_asset * & prop) { combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * mesh) { return std::string_view{mesh->name}; }, prop); }
+public:
+    property_editor(gui & g, asset_library & assets, rect<int> bounds, int & split) : g{g}, assets{assets} { std::tie(key_bounds, value_bounds) = hsplitter(g, next_id++, bounds.shrink(4), split); }
+
+    template<class T> void edit(const char * label, T & field)
+    {
+        const int widget_height = g.get_style().def_font.line_height + 2;
+        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, label);
+        key_bounds.y0 += 4; 
+        edit_property(value_bounds.take_y0(widget_height), field);
+        value_bounds.y0 += 4;              
+    }
+};
+
 struct editor
 {
     asset_library & assets;
@@ -68,11 +92,6 @@ struct editor
     {    
         cam.pitch += 0.8f;
         cam.move(coord_axis::back, 10.0f);
-    }
-
-    bool asset_combobox(gui & g, const int id, rect<int> bounds, mesh_asset * & mesh)
-    {
-        return combobox<mesh_asset *>(g, id, bounds, assets.meshes, [](const mesh_asset * mesh) { return std::string_view{mesh->name}; }, mesh);
     }
 
     void menu_gui(gui & g, const int id, rect<int> bounds)
@@ -107,10 +126,11 @@ struct editor
 
     void viewport_gui(gui & g, int id, rect<int> bounds, float timestep)
     {
-        viewport_rect = bounds.shrink(1);
+        size_t tab=0;
+        viewport_rect = tabbed_container(g, bounds, {"Scene View"}, tab);
 
         const double2 cursor = win->get_cursor_pos();
-        if(g.focusable_widget(id, bounds))
+        if(g.focusable_widget(id, viewport_rect))
         {
             if(win->get_mouse_button(GLFW_MOUSE_BUTTON_LEFT))
             {
@@ -124,8 +144,6 @@ struct editor
             if(win->get_key(GLFW_KEY_D)) cam.move(coord_axis::right, timestep * 10);
         }
         last_cursor = cursor;
-
-        g.draw_wire_rect(bounds, 1, g.is_focused(id) ? float4{1,1,1,1} : float4{0.5f,0.5f,0.5f,1});
     }
 
     void object_list_gui(gui & g, const int id, rect<int> bounds)
@@ -138,7 +156,7 @@ struct editor
 
         static int scr=0;
         if(g.is_cursor_over(bounds)) scr -= g.get_scroll().y;
-        vscroll(g, id, bounds.take_x1(10), bounds.height(), (line_height+4)*cur_scene.objects.size()-4, scr);
+        vscroll(g, id, bounds.take_x1(10), bounds.height(), (line_height+4)*exact_cast<int>(cur_scene.objects.size())-4, scr);
         bounds.y0 -= scr;
 
         for(auto & obj : cur_scene.objects)
@@ -166,41 +184,16 @@ struct editor
         size_t tab=0;
         bounds = tabbed_container(g, bounds, {"Object Properties"}, tab).shrink(4);
         if(!selection) return;
-
-        const int widget_height = g.get_style().def_font.line_height + 2, vspacing = 4;
-
+        
         g.begin_group(id);
-        int child_id = 0;
-        auto [key_bounds, value_bounds] = hsplitter(g, child_id++, bounds.shrink(4), property_split);
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Name");
-        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->name);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Position");
-        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->position);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Scale");
-        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->scale);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Mesh");
-        asset_combobox(g, child_id++, value_bounds.take_y0(widget_height), selection->mesh);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Roughness");
-        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->roughness);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Metalness");
-        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->metalness);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
-        g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, "Light");
-        edit(g, child_id++, value_bounds.take_y0(widget_height), selection->light);
-        key_bounds.y0 += vspacing; value_bounds.y0 += vspacing;
-
+        property_editor p {g, assets, bounds, property_split};
+        p.edit("Name", selection->name);
+        p.edit("Position", selection->position);
+        p.edit("Scale", selection->scale);
+        p.edit("Mesh", selection->mesh);
+        p.edit("Roughness", selection->roughness);
+        p.edit("Metalness", selection->metalness);
+        p.edit("Light", selection->light);
         g.end_group();
     }
 
