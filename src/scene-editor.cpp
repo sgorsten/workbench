@@ -13,6 +13,12 @@
 
 constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
 
+struct texture_asset
+{
+    std::string name;
+    rhi::ptr<rhi::image> gtex;
+};
+
 struct mesh_asset
 {
     std::string name;
@@ -22,6 +28,7 @@ struct mesh_asset
 
 struct asset_library
 {
+    std::vector<texture_asset *> textures;
     std::vector<mesh_asset *> meshes;
 };
 
@@ -35,6 +42,7 @@ struct object
     float3 position;
     float3 scale;
     mesh_asset * mesh;
+    texture_asset * albedo;
     float roughness;
     float metalness;
     float3 light;
@@ -59,7 +67,11 @@ class property_editor
     void edit_property(rect<int> bounds, std::string & prop) { ::edit(g, next_id++, bounds, prop); }
     void edit_property(rect<int> bounds, float & prop) { ::edit(g, next_id++, bounds, prop); }
     void edit_property(rect<int> bounds, float3 & prop) { ::edit(g, next_id++, bounds, prop); }
-    void edit_property(rect<int> bounds, mesh_asset * & prop) { combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * mesh) { return std::string_view{mesh->name}; }, prop); }
+    void edit_property(rect<int> bounds, mesh_asset * & prop) { combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * m) { return std::string_view{m->name}; }, prop); }
+    void edit_property(rect<int> bounds, texture_asset * & prop) { icon_combobox<texture_asset *>(g, next_id++, bounds, assets.textures, 
+        [](const texture_asset * t) { return std::string_view{t->name}; }, 
+        [&](const texture_asset * t, const rect<int> & r) { g.draw_image(r, {1,1,1,1}, *t->gtex); }, prop);
+    }
 public:
     property_editor(gui & g, asset_library & assets, rect<int> bounds, int & split) : g{g}, assets{assets} { std::tie(key_bounds, value_bounds) = hsplitter(g, next_id++, bounds.shrink(4), split); }
 
@@ -191,6 +203,7 @@ struct editor
         p.edit("Position", selection->position);
         p.edit("Scale", selection->scale);
         p.edit("Mesh", selection->mesh);
+        p.edit("Albedo", selection->albedo);
         p.edit("Roughness", selection->roughness);
         p.edit("Metalness", selection->metalness);
         p.edit("Light", selection->light);
@@ -231,20 +244,28 @@ int main(int argc, const char * argv[]) try
     auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
     auto env_spheremap_img = loader.load_image("monument-valley.hdr");
 
+    auto box = new mesh_asset{"box", make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f})};
+    auto sphere = new mesh_asset{"sphere", make_sphere_mesh(32, 32, 0.5f)};
+    auto plane = new mesh_asset{"plane", make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)};
+
+    auto checker = new texture_asset{"checker.png"};
+    auto marble = new texture_asset{"marble.png"};
+    auto scratched = new texture_asset{"scratched.png"};
+    auto normal = new texture_asset{"normal.png"};
+
     asset_library assets;
-    assets.meshes.push_back(new mesh_asset{"box", make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f})});
-    assets.meshes.push_back(new mesh_asset{"sphere", make_sphere_mesh(32, 32, 0.5f)});
-    assets.meshes.push_back(new mesh_asset{"plane", make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)});
+    assets.meshes = {box, sphere, plane};
+    assets.textures = {checker, marble, scratched, normal};
 
     scene scene;
-    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, assets.meshes[2], 0.5f, 0.0f});
+    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, plane, marble, 0.5f, 0.0f});
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
     {
-        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, assets.meshes[1], (j+0.5f)/3, (i+0.5f)/3});
+        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, sphere, checker, (j+0.5f)/3, (i+0.5f)/3});
     }
     
     // Create our device and load our device objects
@@ -255,13 +276,16 @@ int main(int argc, const char * argv[]) try
     standard_device_objects standard = {dev, standard_sh};
     canvas_device_objects canvas_objects {*dev, compiler, sheet};
     for(auto m : assets.meshes) m->gmesh = {*dev, m->cmesh.vertices, m->cmesh.triangles};
+    for(auto t : assets.textures)
+    {
+        auto im = loader.load_image(t->name);
+        t->gtex = dev->create_image({rhi::image_shape::_2d, {im.dimensions,1}, 1, im.format, rhi::sampled_image_bit}, {im.get_pixels()});
+    }
 
     // Samplers
-    auto nearest = dev->create_sampler({rhi::filter::nearest, rhi::filter::nearest, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
+    auto linear = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
 
     // Images
-    const byte4 w{255,255,255,255}, g{128,128,128,255}, grid[]{w,g,w,g,g,w,g,w,w,g,w,g,g,w,g,w};
-    auto checkerboard = dev->create_image({rhi::image_shape::_2d, {4,4,1}, 1, rhi::image_format::rgba_unorm8, rhi::sampled_image_bit}, {grid});
     auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
 
     // Descriptor set layouts
@@ -405,31 +429,21 @@ int main(int argc, const char * argv[]) try
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
         assets.meshes[0]->gmesh.draw(*cmd);
-        
-        // Draw lights
-        //cmd->bind_pipeline(*light_pipe);
-        //for(auto & p : per_scene_uniforms.point_lights)
-        //{
-        //    auto set = pool.descriptors->alloc(*per_object_layout);
-        //    set->write(0, pool.uniforms.upload(mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))));
-        //    set->write(1, *nearest, *checkerboard);
-        //    cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *set);
-        //    assets.meshes[1]->gmesh.draw(*cmd);
-        //}
 
         // Draw our objects
-        cmd->bind_pipeline(*solid_pipe);
         for(auto & object : scene.objects)
         {
-            if(!object.mesh) continue;
-            // TODO: Specify pipeline as either light_pipe or solid_pipe
+            if(!object.mesh || !object.albedo) continue;
+
             struct { float4x4 model_matrix; float roughness, metalness; } per_object;
             per_object.model_matrix = mul(translation_matrix(object.position), scaling_matrix(object.scale));
             per_object.roughness = object.roughness;
             per_object.metalness = object.metalness;
             auto sphere_set = pool.descriptors->alloc(*per_object_layout);
             sphere_set->write(0, pool.uniforms.upload(per_object));
-            sphere_set->write(1, *nearest, *checkerboard);
+            sphere_set->write(1, *linear, *object.albedo->gtex);
+
+            cmd->bind_pipeline(object.light == float3{0,0,0} ? *solid_pipe : *light_pipe);
             cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *sphere_set);
             object.mesh->gmesh.draw(*cmd);
         }

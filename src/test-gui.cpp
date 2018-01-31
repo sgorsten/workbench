@@ -4,24 +4,6 @@
 
 float srgb_to_linear(float srgb) { return srgb <= 0.04045f ? srgb/12.92f : std::pow((srgb+0.055f)/1.055f, 2.4f); }
 
-enum direction { north, northeast, east, southeast, south, southwest, west, northwest };
-bool direction_combobox(gui & g, int id, const rect<int> & bounds, direction & texture)
-{
-    return combobox<direction>(g, id, bounds, {north, northeast, east, southeast, south, southwest, west, northwest}, 
-        [](direction d) { const char * labels[] {"north","northeast","east","southeast","south","southwest","west","northwest"}; return std::string_view{labels[d]}; }, texture);
-}
-
-struct texture_asset
-{
-    std::string name;
-    rhi::ptr<rhi::image> texture;
-};
-bool texture_combobox(gui & g, int id, const rect<int> & bounds, const std::vector<texture_asset *> & textures, texture_asset * & texture)
-{
-    return icon_combobox<texture_asset *>(g, id, bounds, textures, [](const texture_asset * t) { return std::string_view{t->name}; }, 
-        [&g](const texture_asset * t, const rect<int> & r) { g.draw_image(r, {1,1,1,1}, *t->texture); }, texture);
-}
-
 void draw_tooltip(gui & g, const int2 & loc, std::string_view text)
 {
     int w = g.get_style().def_font.get_text_width(text), h = g.get_style().def_font.line_height;
@@ -141,30 +123,7 @@ int main(int argc, const char * argv[]) try
     auto dev = context.get_backends().back().create_device(debug);
     canvas_device_objects device_objects {*dev, compiler, sheet};
     auto gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - GUI Test"));
-
-    std::vector<texture_asset *> textures;
-    textures.push_back(new texture_asset{"checker.png"});
-    textures.push_back(new texture_asset{"marble.png"});
-    textures.push_back(new texture_asset{"scratched.png"});
-    textures.push_back(new texture_asset{"normal.png"});
-    textures.push_back(new texture_asset{"checker.png"});
-    textures.push_back(new texture_asset{"marble.png"});
-    textures.push_back(new texture_asset{"scratched.png"});
-    textures.push_back(new texture_asset{"normal.png"});
-    textures.push_back(new texture_asset{"checker.png"});
-    textures.push_back(new texture_asset{"marble.png"});
-    textures.push_back(new texture_asset{"scratched.png"});
-    textures.push_back(new texture_asset{"normal.png"});
-    textures.push_back(new texture_asset{"checker.png"});
-    textures.push_back(new texture_asset{"marble.png"});
-    textures.push_back(new texture_asset{"scratched.png"});
-    textures.push_back(new texture_asset{"normal.png"});
-    for(auto tex : textures)
-    {
-        auto im = loader.load_image(tex->name);
-        tex->texture = dev->create_image({rhi::image_shape::_2d, {im.dimensions,1}, 1, im.format, rhi::sampled_image_bit}, {im.get_pixels()});
-    }
-
+    
     // Create transient resources
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
     int pool_index=0;
@@ -174,9 +133,6 @@ int main(int argc, const char * argv[]) try
     gwindow->on_mouse_button = [w=gwindow->get_glfw_window(), &gs](int button, int action, int mods) { gs.on_mouse_button(w, button, action, mods); };
     gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
-    int split = -300;
-    size_t tab = 0;
-    texture_asset * tex = 0;
 
     // Main loop
     while(!gwindow->should_close())
@@ -197,100 +153,10 @@ int main(int argc, const char * argv[]) try
         // Handle the menu
         const gui_style style {face, icons};
         gui g {gs, canvas, style, gwindow->get_glfw_window()};
-        g.begin_menu(0, client_rect.take_y0(20));
-            g.begin_popup(1, "File");
-                g.begin_popup(1, "New");
-                    g.menu_item("Game...", GLFW_MOD_CONTROL|GLFW_MOD_SHIFT, GLFW_KEY_N, 0);
-                    g.menu_item("Scene", GLFW_MOD_CONTROL, GLFW_KEY_N, 0);
-                g.end_popup();
-                g.menu_item("Open...", GLFW_MOD_CONTROL, GLFW_KEY_O, 0xf115);
-                g.menu_item("Save", GLFW_MOD_CONTROL, GLFW_KEY_S, 0xf0c7);
-                g.menu_item("Save As...", 0, 0, 0);
-                g.menu_seperator();
-                if(g.menu_item("Exit", GLFW_MOD_ALT, GLFW_KEY_F4, 0)) glfwSetWindowShouldClose(gwindow->get_glfw_window(), 1);
-            g.end_popup();
-            g.begin_popup(2, "Edit");
-                g.menu_item("Undo", GLFW_MOD_CONTROL, GLFW_KEY_Z, 0xf0e2);
-                g.menu_item("Redo", GLFW_MOD_CONTROL, GLFW_KEY_Y, 0xf01e);
-                g.menu_seperator();
-                g.menu_item("Cut", GLFW_MOD_CONTROL, GLFW_KEY_X, 0xf0c4);
-                g.menu_item("Copy", GLFW_MOD_CONTROL, GLFW_KEY_C, 0xf0c5);
-                g.menu_item("Paste", GLFW_MOD_CONTROL, GLFW_KEY_V, 0xf0ea);
-                g.menu_seperator();
-                g.menu_item("Select All", GLFW_MOD_CONTROL, GLFW_KEY_A, 0xf245);
-            g.end_popup();
-            g.begin_popup(3, "Help");
-                g.menu_item("View Help", GLFW_MOD_CONTROL, GLFW_KEY_F1, 0xf059);
-            g.end_popup();
-        g.end_menu();
-
-        auto [left_rect, right_rect] = hsplitter(g, 1, client_rect, split);
 
         // Draw nodes
-        g.begin_group(2);
-        g.begin_scissor(left_rect);
         for(auto & e : edges) e.draw(canvas);
         for(size_t i=0; i<countof(nodes); ++i) nodes[i].on_gui(g, exactly(i));
-        g.draw_wire_rect(left_rect, 1, {1,1,1,1});
-        g.end_scissor();
-        g.end_group();
-
-        g.begin_group(3);
-        auto client = tabbed_container(g, right_rect, {"Nodes", "Variables", "Subgraphs"}, tab);
-        {
-            int id = 0;
-            static int split = 120;
-            auto r = client.shrink(4);
-            auto s = hsplitter(g, id++, r, split);
-
-            const int widget_height = g.get_style().def_font.line_height + 2;
-            const int vspacing = widget_height + 4;
-
-            static struct
-            {
-                std::string name;
-                rigid_transform pose;
-                float3 scale;
-                texture_asset * diffuse;
-                texture_asset * normal;
-                direction dir;
-            } object;
-
-            g.begin_group(id);
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Name");
-            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.name);
-            r.y0 += vspacing;
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Position");
-            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.pose.translation);
-            r.y0 += vspacing;
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Orientation");
-            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.pose.rotation);
-            r.y0 += vspacing;
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Uniform Scale");
-            edit(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.scale);
-            r.y0 += vspacing;
-
-            //g.draw_shadowed_text(g.get_style().passive_text, {r.x0, r.y0+1}, "Mesh");
-            //assets.picker(g, child++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.mesh);
-            //r.y0 += vspacing;    
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Diffuse Map");
-            texture_combobox(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, textures, object.diffuse);
-            r.y0 += vspacing;
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Normal Map");
-            texture_combobox(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, textures, object.normal);
-            r.y0 += vspacing;
-
-            g.draw_shadowed_text({r.x0, r.y0+1}, g.get_style().passive_text, "Compass Direction");
-            direction_combobox(g, id++, {s.second.x0, r.y0, r.x1, r.y0 + widget_height}, object.dir);
-            r.y0 += vspacing;
-        }
-        g.end_group();
                 
         // Encode our command buffer
         auto cmd = dev->create_command_buffer();

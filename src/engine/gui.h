@@ -184,8 +184,8 @@ bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view
 template<class T, class F> 
 bool combobox(gui & g, int id, const rect<int> & r, array_view<T> items, F get_label, T & value)
 {
-    int index = std::find(items.begin(), items.end(), value) - items.begin();
-    bool b = combobox(g, id, r, items.size(), [=](int i) { return get_label(items[i]); }, index);
+    int index = exactly(std::find(items.begin(), items.end(), value) - items.begin());
+    bool b = combobox(g, id, r, exactly(items.size()), [=](int i) { return get_label(items[i]); }, index);
     if(b) value = items[index];
     return b;
 }
@@ -194,8 +194,8 @@ bool icon_combobox(gui & g, int id, const rect<int> & r, int num_items, function
 template<class T, class F, class G>
 bool icon_combobox(gui & g, int id, const rect<int> & r, array_view<T> items, F get_label, G draw_icon, T & value)
 {
-    int index = std::find(items.begin(), items.end(), value) - items.begin();
-    bool b = icon_combobox(g, id, r, items.size(), [=](int i) { return get_label(items[i]); }, [=](int i, const rect<int> & r) { draw_icon(items[i], r); }, index);
+    int index = exactly(std::find(items.begin(), items.end(), value) - items.begin());
+    bool b = icon_combobox(g, id, r, exactly(items.size()), [=](int i) { return get_label(items[i]); }, [=](int i, const rect<int> & r) { draw_icon(items[i], r); }, index);
     if(b) value = items[index];
     return b;
 }
