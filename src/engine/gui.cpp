@@ -219,6 +219,22 @@ bool gui::draggable_widget(int id, int2 dims, int2 & pos)
     return false;
 }
 
+bool gui::focusable_widget(int id, const rect<int> & bounds)
+{
+    if(is_focused(id))
+    {
+        if(is_mouse_clicked() && !is_cursor_over(bounds)) 
+        {
+            clear_focus();
+        }
+    }
+    else if(clickable_widget(bounds))
+    {
+        set_focus(id);
+    }
+    return is_focused(id);
+}
+
 bool gui::is_cursor_over(const rect<int> & r) const 
 { 
     return r.intersected_with(scissor_stack.back()).contains(local_cursor); 
@@ -767,6 +783,7 @@ rect<int> tabbed_container(gui & g, rect<int> bounds, array_view<std::string_vie
         if(g.is_mouse_clicked() && g.is_cursor_over(r))
         {
             g.consume_click();
+            g.clear_focus();
             active_tab = i;
         }
 

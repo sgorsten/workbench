@@ -142,8 +142,9 @@ public:
     void set_cursor_type(cursor_type type) { ctype = type; }
 
     // Standard widgets
-    bool clickable_widget(const rect<int> & bounds);        // Returns true if clicked, and consumes the click
-    bool draggable_widget(int id, int2 dims, int2 & pos);   // Returns true if dragged, and modifies pos accordingly
+    bool clickable_widget(const rect<int> & bounds);            // Returns true if clicked, and consumes the click
+    bool draggable_widget(int id, int2 dims, int2 & pos);       // Returns true if dragged, and modifies pos accordingly
+    bool focusable_widget(int id, const rect<int> & bounds);    // Gains focus when clicked, loses focus when something else is clicked, returns true if currently focused
 };
 
 // A text entry field allowing the user to edit the value of a utf-8 encoded string.
