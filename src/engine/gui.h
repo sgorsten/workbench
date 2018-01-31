@@ -178,6 +178,8 @@ std::pair<rect<int>, rect<int>> hsplitter(gui & g, int id, const rect<int> & r, 
 // in pixels of the bottom subregion, with the other region occupying whatever space is left over.
 std::pair<rect<int>, rect<int>> vsplitter(gui & g, int id, const rect<int> & r, int & split_value);
 
+void vscroll(gui & g, int id, const rect<int> & r, int slider_size, int range_size, int & value);
+
 bool combobox(gui & g, int id, const rect<int> & r, int num_items, function_view<std::string_view(int)> get_label, int & index);
 template<class T, class F> 
 bool combobox(gui & g, int id, const rect<int> & r, array_view<T> items, F get_label, T & value)

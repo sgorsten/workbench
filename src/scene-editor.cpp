@@ -132,6 +132,15 @@ struct editor
     {
         size_t tab=0;
         bounds = tabbed_container(g, bounds, {"Object List"}, tab);
+        g.begin_scissor(bounds);
+
+        const int line_height = g.get_style().def_font.line_height;
+
+        static int scr=0;
+        if(g.is_cursor_over(bounds)) scr -= g.get_scroll().y;
+        vscroll(g, id, bounds.take_x1(10), bounds.height(), (line_height+4)*cur_scene.objects.size()-4, scr);
+        bounds.y0 -= scr;
+
         for(auto & obj : cur_scene.objects)
         {
             auto r = bounds.take_y0(g.get_style().def_font.line_height);
@@ -149,12 +158,13 @@ struct editor
             g.draw_shadowed_text(r.corner00(), selection == &obj ? g.get_style().active_text : g.get_style().passive_text, obj.name);
             bounds.y0 += 4;
         }
+        g.end_scissor();
     }
 
     void property_list_gui(gui & g, const int id, rect<int> bounds)
     {
         size_t tab=0;
-        bounds = tabbed_container(g, bounds, {"Object Properties"}, tab);
+        bounds = tabbed_container(g, bounds, {"Object Properties"}, tab).shrink(4);
         if(!selection) return;
 
         const int widget_height = g.get_style().def_font.line_height + 2, vspacing = 4;
@@ -235,9 +245,9 @@ int main(int argc, const char * argv[]) try
 
     scene scene;
     scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light A", { 3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light A", { 3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light A", {-3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, assets.meshes[1], 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
     scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, assets.meshes[2], 0.5f, 0.0f});
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
     {
