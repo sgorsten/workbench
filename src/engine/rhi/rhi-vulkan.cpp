@@ -9,6 +9,8 @@
 #include <queue>
 #include <set>
 
+#include <iostream>
+
 auto get_tuple(const VkAttachmentDescription & desc) { return std::tie(desc.flags, desc.format, desc.samples, desc.loadOp, desc.storeOp, desc.stencilLoadOp, desc.stencilStoreOp, desc.initialLayout, desc.finalLayout); }
 bool operator < (const VkAttachmentDescription & a, const VkAttachmentDescription & b) { return get_tuple(a) < get_tuple(b); }
 bool operator < (const VkAttachmentReference & a, const VkAttachmentReference & b) { return std::tie(a.attachment, a.layout) < std::tie(b.attachment, b.layout); }
@@ -349,6 +351,19 @@ namespace rhi
         return std::find_if(begin(extensions), end(extensions), [name](const VkExtensionProperties & p) { return p.extensionName == name; }) != end(extensions);
     }
 
+    static VkPresentModeKHR select_present_mode(const std::vector<VkPresentModeKHR> & supported_modes)
+    {
+        for(auto mode : supported_modes) if(mode == VK_PRESENT_MODE_MAILBOX_KHR) return mode;
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    static std::optional<VkSurfaceFormatKHR> select_surface_format(const std::vector<VkSurfaceFormatKHR> & supported_formats)
+    {
+        if(supported_formats.size() == 1 && supported_formats[0].format == VK_FORMAT_UNDEFINED) return VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+        for(auto & f : supported_formats) if(f.format == VK_FORMAT_R8G8B8A8_SRGB || f.format == VK_FORMAT_B8G8R8A8_SRGB || f.format == VK_FORMAT_A8B8G8R8_SRGB_PACK32) return f;
+        return std::nullopt;
+    }
+
     static physical_device_selection select_physical_device(VkInstance instance, const std::vector<const char *> & required_extensions)
     {
         glfwDefaultWindowHints();
@@ -378,19 +393,14 @@ namespace rhi
             check("vkGetPhysicalDeviceSurfaceFormatsKHR", vkGetPhysicalDeviceSurfaceFormatsKHR(d, example_surface, &surface_format_count, nullptr));
             std::vector<VkSurfaceFormatKHR> surface_formats(surface_format_count);
             check("vkGetPhysicalDeviceSurfaceFormatsKHR", vkGetPhysicalDeviceSurfaceFormatsKHR(d, example_surface, &surface_format_count, surface_formats.data()));
+            auto surface_format = select_surface_format(surface_formats);
+            if(!surface_format) continue;
+
+            // Select a presentation mode
             check("vkGetPhysicalDeviceSurfacePresentModesKHR", vkGetPhysicalDeviceSurfacePresentModesKHR(d, example_surface, &present_mode_count, nullptr));
             std::vector<VkPresentModeKHR> surface_present_modes(present_mode_count);
             check("vkGetPhysicalDeviceSurfacePresentModesKHR", vkGetPhysicalDeviceSurfacePresentModesKHR(d, example_surface, &present_mode_count, surface_present_modes.data()));
-            if(surface_formats.empty() || surface_present_modes.empty()) continue;
-        
-            // Select a format
-            VkSurfaceFormatKHR surface_format = surface_formats[0];
-            for(auto f : surface_formats) if(f.format==VK_FORMAT_R8G8B8A8_UNORM && f.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) surface_format = f;
-            if(surface_format.format == VK_FORMAT_UNDEFINED) surface_format = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-
-            // Select a presentation mode
-            VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
-            for(auto mode : surface_present_modes) if(mode == VK_PRESENT_MODE_MAILBOX_KHR) present_mode = mode;
+            const VkPresentModeKHR present_mode = select_present_mode(surface_present_modes);
 
             // Look for a queue family that supports both graphics and presentation to our example surface
             uint32_t queue_family_count = 0;
@@ -405,7 +415,7 @@ namespace rhi
                 {
                     vkDestroySurfaceKHR(instance, example_surface, nullptr);
                     glfwDestroyWindow(example_window);
-                    return {d, i, surface_format, present_mode, std::min(surface_caps.minImageCount+1, surface_caps.maxImageCount), surface_caps.currentTransform};
+                    return {d, i, *surface_format, present_mode, std::min(surface_caps.minImageCount+1, surface_caps.maxImageCount), surface_caps.currentTransform};
                 }
             }
         }
@@ -779,8 +789,7 @@ vk_framebuffer::vk_framebuffer(vk_device * device, const framebuffer_desc & desc
 
 vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const std::string & title) : device{device} 
 {
-    const int2 dimensions = depth_image.desc.dimensions.xy();
-    const auto format = rhi::image_format::rgba_srgb8;    
+    const int2 dimensions = depth_image.desc.dimensions.xy();  
 
     const std::string buffer {begin(title), end(title)};
     glfwDefaultWindowHints();
@@ -804,8 +813,8 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
     VkSwapchainCreateInfoKHR swapchain_info {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
     swapchain_info.surface = surface;
     swapchain_info.minImageCount = device->selection.swap_image_count;
-    swapchain_info.imageFormat = convert_vk(format);
-    swapchain_info.imageColorSpace = VkColorSpaceKHR::VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; //selection.surface_format.colorSpace;
+    swapchain_info.imageFormat = device->selection.surface_format.format;
+    swapchain_info.imageColorSpace = device->selection.surface_format.colorSpace;
     swapchain_info.imageExtent = swap_extent;
     swapchain_info.imageArrayLayers = 1;
     swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -814,7 +823,6 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
     swapchain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     swapchain_info.presentMode = device->selection.present_mode;
     swapchain_info.clipped = VK_TRUE;
-
     check("vkCreateSwapchainKHR", vkCreateSwapchainKHR(device->dev, &swapchain_info, nullptr, &swapchain));    
 
     uint32_t swapchain_image_count;    
@@ -828,7 +836,7 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
         VkImageViewCreateInfo view_info {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view_info.image = swapchain_images[i];
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format = convert_vk(format);
+        view_info.format = device->selection.surface_format.format;
         view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info.subresourceRange.baseMipLevel = 0;
         view_info.subresourceRange.levelCount = 1;
@@ -840,7 +848,7 @@ vk_framebuffer::vk_framebuffer(vk_device * device, vk_image & depth_image, const
     // Create swapchain framebuffer
     dims = dimensions;
     framebuffers.resize(views.size());
-    color_formats = {convert_vk(format)};
+    color_formats = {device->selection.surface_format.format};
     depth_format = convert_vk(rhi::image_format::depth_float32);
     auto render_pass = device->get_render_pass(get_render_pass_desc({{{dont_care{}, dont_care{}}}, depth_attachment_desc{dont_care{}, dont_care{}}}));
     for(size_t i=0; i<views.size(); ++i)
