@@ -78,6 +78,54 @@ namespace gfx
         rhi::buffer_range upload(binary_view contents) { begin(); write(contents); return end(); }
     };
 
+    // gfx::pipeline_layout wraps rhi::pipeline_layout, but remembers which set layouts were used to create it
+    class pipeline_layout
+    {
+        const std::vector<rhi::ptr<const rhi::descriptor_set_layout>> set_layouts;
+        const rhi::ptr<const rhi::pipeline_layout> pipe_layout;
+    public:
+        pipeline_layout(rhi::device & dev, const std::vector<const rhi::descriptor_set_layout *> & sets) : pipe_layout{dev.create_pipeline_layout(sets)}, set_layouts{sets.begin(), sets.end()} {}
+
+        const rhi::pipeline_layout & get_rhi_pipeline_layout() const { return *pipe_layout; }
+        const rhi::descriptor_set_layout & get_rhi_descriptor_set_layout(int set_index) const { return *set_layouts[set_index]; }
+    };
+
+    // gfx::descriptor_set wraps rhi::descriptor_set, but remembers its pipeline and set index, and provides access to transient resources
+    class descriptor_set
+    {
+        const gfx::pipeline_layout & layout;
+        const int set_index;
+        gfx::dynamic_buffer & uniforms;
+        const rhi::ptr<rhi::descriptor_set> set;
+    public:
+        descriptor_set(rhi::descriptor_pool & pool, const gfx::pipeline_layout & layout, int set_index, gfx::dynamic_buffer & uniforms) : 
+            layout(layout), set_index(set_index), uniforms(uniforms), set{pool.alloc(layout.get_rhi_descriptor_set_layout(set_index))} {}
+
+        void write(int binding, rhi::buffer_range range) { set->write(binding, range); }
+        void write(int binding, gfx::binary_view view) { set->write(binding, uniforms.upload(view)); }
+        void write(int binding, rhi::sampler & sampler, rhi::image & image) { set->write(binding, sampler, image); }
+
+        void bind(rhi::command_buffer & cmd) const { cmd.bind_descriptor_set(layout.get_rhi_pipeline_layout(), set_index, *set); }
+    };
+
+    // gfx::pipeline wraps rhi::pipeline, but remembers which pipeline layout was used to create it
+    class pipeline
+    {
+        const pipeline_layout & layout;
+        rhi::ptr<const rhi::pipeline> pipe;        
+    public:
+        pipeline(rhi::device & dev, const pipeline_layout & layout, rhi::pipeline_desc desc) : layout{layout}
+        {
+            desc.layout = &layout.get_rhi_pipeline_layout();
+            pipe = dev.create_pipeline(desc);
+        }
+
+        const pipeline_layout & get_layout() const { return layout; }
+        const rhi::pipeline & get_rhi_pipeline() const { return *pipe; }
+        const rhi::pipeline_layout & get_rhi_pipeline_layout() const { return layout.get_rhi_pipeline_layout(); }
+        const rhi::descriptor_set_layout & get_rhi_descriptor_set_layout(int set_index) const { return layout.get_rhi_descriptor_set_layout(set_index); }
+    };
+
     struct transient_resource_pool
     {
         rhi::ptr<rhi::descriptor_pool> descriptors;
@@ -100,54 +148,10 @@ namespace gfx
             indices.reset();
         }
 
+        descriptor_set alloc_descriptor_set(const gfx::pipeline_layout & layout, int set_index) { return {*descriptors, layout, set_index, uniforms}; }
+        descriptor_set alloc_descriptor_set(const gfx::pipeline & pipeline, int set_index) { return {*descriptors, pipeline.get_layout(), set_index, uniforms}; }
+
         void end_frame(rhi::device & dev) { last_submission_id = dev.get_last_submission_id(); }
-    };
-
-    // gfx::pipeline_layout wraps rhi::pipeline_layout, but remembers which set layouts were used to create it
-    class pipeline_layout
-    {
-        std::vector<rhi::ptr<const rhi::descriptor_set_layout>> set_layouts;
-        rhi::ptr<const rhi::pipeline_layout> pipe_layout;
-    public:
-        pipeline_layout(rhi::device & dev, const std::vector<const rhi::descriptor_set_layout *> & sets) : pipe_layout{dev.create_pipeline_layout(sets)}, set_layouts{sets.begin(), sets.end()} {}
-
-        const rhi::pipeline_layout & get_rhi_pipeline_layout() const { return *pipe_layout; }
-        const rhi::descriptor_set_layout & get_rhi_descriptor_set_layout(int set_index) const { return *set_layouts[set_index]; }
-    };
-
-    // gfx::pipeline wraps rhi::pipeline, but remembers which pipeline layout was used to create it
-    class pipeline
-    {
-        const pipeline_layout & layout;
-        rhi::ptr<const rhi::pipeline> pipe;        
-    public:
-        pipeline(rhi::device & dev, const pipeline_layout & layout, rhi::pipeline_desc desc) : layout{layout}
-        {
-            desc.layout = &layout.get_rhi_pipeline_layout();
-            pipe = dev.create_pipeline(desc);
-        }
-
-        const rhi::pipeline & get_rhi_pipeline() const { return *pipe; }
-        const rhi::pipeline_layout & get_rhi_pipeline_layout() const { return layout.get_rhi_pipeline_layout(); }
-        const rhi::descriptor_set_layout & get_rhi_descriptor_set_layout(int set_index) const { return layout.get_rhi_descriptor_set_layout(set_index); }
-    };
-
-    // gfx::descriptor_set wraps rhi::descriptor_set, but remembers its pipeline and set index, and provides access to transient resources
-    class descriptor_set
-    {
-        gfx::transient_resource_pool & pool;
-        const gfx::pipeline & pipeline;
-        int set_index;
-        rhi::ptr<rhi::descriptor_set> set;
-    public:
-        descriptor_set(gfx::transient_resource_pool & pool, const gfx::pipeline & pipeline, int set_index) : 
-            pool(pool), pipeline(pipeline), set_index(set_index), set{pool.descriptors->alloc(pipeline.get_rhi_descriptor_set_layout(set_index))} {}
-
-        void write(int binding, rhi::buffer_range range) { set->write(binding, range); }
-        void write(int binding, gfx::binary_view view) { set->write(binding, pool.uniforms.upload(view)); }
-        void write(int binding, rhi::sampler & sampler, rhi::image & image) { set->write(binding, sampler, image); }
-
-        void bind(rhi::command_buffer & cmd) const { cmd.bind_descriptor_set(pipeline.get_rhi_pipeline_layout(), set_index, *set); }
     };
 
     class window

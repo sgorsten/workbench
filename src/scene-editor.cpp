@@ -76,6 +76,36 @@ struct scene
 // Editor logic //
 //////////////////
 
+struct gizmo
+{
+    const gfx::pipeline & pipe;
+    const mesh_asset * arrows[3];
+public:
+    gizmo(const gfx::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z) : pipe{pipe}, arrows{arrow_x, arrow_y, arrow_z}
+    {
+    
+    }
+
+    void draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool, const float3 & position) const
+    {
+        cmd.clear_depth(1.0);
+        cmd.bind_pipeline(pipe.get_rhi_pipeline());
+
+        auto object_set = pool.alloc_descriptor_set(pipe, pbr_per_object_set_index);
+        object_set.write(0, pbr_object_uniforms{translation_matrix(position)});
+        object_set.bind(cmd);
+
+        const float3 colors[] {{1,0,0},{0,1,0},{0,0,1}};
+        for(int i=0; i<3; ++i)
+        {
+            auto material_set = pool.alloc_descriptor_set(pipe, pbr_per_material_set_index);
+            material_set.write(0, pbr_material_uniforms{colors[i],0.8f,0.0f});        
+            material_set.bind(cmd); 
+            arrows[i]->gmesh.draw(cmd);
+        }
+    }
+};
+
 struct ranged_property { float & value; float min, max; };
 class property_editor
 {
@@ -400,6 +430,7 @@ int main(int argc, const char * argv[]) try
     gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
 
+    gizmo gizmo{colored_pbr_pipe, arrow_x, arrow_y, arrow_z};
     editor editor{assets, scene, gwindow};
 
     // Main loop
@@ -440,11 +471,11 @@ int main(int argc, const char * argv[]) try
             if(num_lights == 4) break;
         }
 
-        auto per_scene_set = pool.descriptors->alloc(*per_scene_layout);
-        per_scene_set->write(0, pool.uniforms.upload(per_scene_uniforms));
-        per_scene_set->write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
-        per_scene_set->write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
-        per_scene_set->write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
+        auto per_scene_set = pool.alloc_descriptor_set(common_layout, pbr_per_scene_set_index);
+        per_scene_set.write(0, per_scene_uniforms);
+        per_scene_set.write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
+        per_scene_set.write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
+        per_scene_set.write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
 
         // Set up per-view uniforms for a specific framebuffer
         pbr_view_uniforms per_view_uniforms;
@@ -454,8 +485,8 @@ int main(int argc, const char * argv[]) try
         per_view_uniforms.right_vector = editor.cam.get_direction(coord_axis::right);
         per_view_uniforms.down_vector = editor.cam.get_direction(coord_axis::down);
 
-        auto per_view_set = pool.descriptors->alloc(*per_view_layout);
-        per_view_set->write(0, pool.uniforms.upload(per_view_uniforms));
+        auto per_view_set = pool.alloc_descriptor_set(common_layout, pbr_per_view_set_index);
+        per_view_set.write(0, per_view_uniforms);
 
         // Draw objects to our primary framebuffer
         auto cmd = dev->create_command_buffer();
@@ -466,12 +497,12 @@ int main(int argc, const char * argv[]) try
         cmd->set_viewport_rect(vp.x0, vp.y0, vp.x1, vp.y1);
 
         // Bind common descriptors
-        cmd->bind_descriptor_set(common_layout.get_rhi_pipeline_layout(), pbr_per_scene_set_index, *per_scene_set);
-        cmd->bind_descriptor_set(common_layout.get_rhi_pipeline_layout(), pbr_per_view_set_index, *per_view_set);
+        per_scene_set.bind(*cmd);
+        per_view_set.bind(*cmd);
 
         // Draw skybox
         cmd->bind_pipeline(skybox_pipe.get_rhi_pipeline());
-        auto skybox_set = gfx::descriptor_set{pool, skybox_pipe, pbr_per_material_set_index};
+        auto skybox_set = pool.alloc_descriptor_set(skybox_pipe, pbr_per_material_set_index);
         skybox_set.write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         skybox_set.bind(*cmd);
         box->gmesh.draw(*cmd);
@@ -485,12 +516,12 @@ int main(int argc, const char * argv[]) try
 
             cmd->bind_pipeline(pipe.get_rhi_pipeline());
 
-            auto material_set = gfx::descriptor_set{pool, pipe, pbr_per_material_set_index};
+            auto material_set = pool.alloc_descriptor_set(pipe, pbr_per_material_set_index);
             material_set.write(0, object.material);
             if(!is_light) material_set.write(1, *linear, *object.albedo->gtex);
             material_set.bind(*cmd);
 
-            auto object_set = gfx::descriptor_set{pool, pipe, pbr_per_object_set_index};
+            auto object_set = pool.alloc_descriptor_set(pipe, pbr_per_object_set_index);
             object_set.write(0, object.get_object_uniforms());
             object_set.bind(*cmd);
 
@@ -500,17 +531,7 @@ int main(int argc, const char * argv[]) try
         // Draw our gizmo
         if(editor.selection)
         {
-            auto material_set_x = gfx::descriptor_set{pool,colored_pbr_pipe,2}; material_set_x.write(0, pbr_material_uniforms{{1,0,0},0.8f,0.0f});
-            auto material_set_y = gfx::descriptor_set{pool,colored_pbr_pipe,2}; material_set_y.write(0, pbr_material_uniforms{{0,1,0},0.8f,0.0f});
-            auto material_set_z = gfx::descriptor_set{pool,colored_pbr_pipe,2}; material_set_z.write(0, pbr_material_uniforms{{0,0,1},0.8f,0.0f});
-            auto object_set = gfx::descriptor_set{pool,colored_pbr_pipe,3}; object_set.write(0, pbr_object_uniforms{translation_matrix(editor.selection->position)});
-
-            cmd->clear_depth(1.0);
-            cmd->bind_pipeline(colored_pbr_pipe.get_rhi_pipeline());
-            object_set.bind(*cmd);
-            material_set_x.bind(*cmd); arrow_x->gmesh.draw(*cmd);
-            material_set_y.bind(*cmd); arrow_y->gmesh.draw(*cmd);
-            material_set_z.bind(*cmd); arrow_z->gmesh.draw(*cmd);
+            gizmo.draw(*cmd, pool, editor.selection->position);
         }
 
         canvas.encode_commands(*cmd, *gwindow);
