@@ -141,7 +141,7 @@ namespace rhi
         ptr<window> create_window(const int2 & dimensions, std::string_view title) override;
 
         ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override;
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override;
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) override;
         ptr<shader> create_shader(const shader_desc & desc) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;        
 
@@ -247,7 +247,7 @@ namespace rhi
         ptr<vk_device> device;
         VkPipelineLayout layout;
 
-        vk_pipeline_layout(vk_device * device, const std::vector<descriptor_set_layout *> & sets);
+        vk_pipeline_layout(vk_device * device, const std::vector<const descriptor_set_layout *> & sets);
         ~vk_pipeline_layout();
     };
 
@@ -265,12 +265,12 @@ namespace rhi
     {
         ptr<vk_device> device;
         pipeline_desc desc;
-        std::unordered_map<VkRenderPass, VkPipeline> pipeline_objects;
+        mutable std::unordered_map<VkRenderPass, VkPipeline> pipeline_objects;
 
         vk_pipeline(vk_device * device, const pipeline_desc & desc);
         ~vk_pipeline();
 
-        VkPipeline get_pipeline(VkRenderPass render_pass);
+        VkPipeline get_pipeline(VkRenderPass render_pass) const;
     };
 
     struct vk_descriptor_set : descriptor_set 
@@ -292,25 +292,25 @@ namespace rhi
         ~vk_descriptor_pool();
 
         void reset() override;
-        ptr<descriptor_set> alloc(descriptor_set_layout & layout) override;
+        ptr<descriptor_set> alloc(const descriptor_set_layout & layout) override;
     };
 
     struct vk_command_buffer : command_buffer
     {
         ptr<vk_device> device;
-        std::set<ptr<object>> referenced_objects;
+        std::set<ptr<const object>> referenced_objects;
         VkCommandBuffer cmd;
         VkRenderPass current_pass;
         vk_framebuffer * current_framebuffer;
 
-        void record_reference(object & object);
+        void record_reference(const object & object);
         void generate_mipmaps(image & image) override;
         void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
         void clear_depth(float depth) override;
         void set_viewport_rect(int x0, int y0, int x1, int y1) override;
         void set_scissor_rect(int x0, int y0, int x1, int y1) override;
-        void bind_pipeline(pipeline & pipe) override;
-        void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) override;
+        void bind_pipeline(const pipeline & pipe) override;
+        void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) override;
         void bind_vertex_buffer(int index, buffer_range range) override;
         void bind_index_buffer(buffer_range range) override;
         void draw(int first_vertex, int vertex_count) override;
@@ -325,7 +325,7 @@ namespace rhi
     ptr<window> vk_device::create_window(const int2 & dimensions, std::string_view title) { return new delete_when_unreferenced<vk_window>{this, dimensions, std::string{title}}; }
 
     ptr<descriptor_set_layout> vk_device::create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) { return new delete_when_unreferenced<vk_descriptor_set_layout>{this, bindings}; }
-    ptr<pipeline_layout> vk_device::create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) { return new delete_when_unreferenced<vk_pipeline_layout>{this, sets}; }
+    ptr<pipeline_layout> vk_device::create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) { return new delete_when_unreferenced<vk_pipeline_layout>{this, sets}; }
     ptr<shader> vk_device::create_shader(const shader_desc & desc) { return new delete_when_unreferenced<vk_shader>{this, desc}; }
     ptr<pipeline> vk_device::create_pipeline(const pipeline_desc & desc) { return new delete_when_unreferenced<vk_pipeline>{this, desc}; }
 
@@ -962,10 +962,10 @@ vk_descriptor_set_layout::~vk_descriptor_set_layout()
     device->destroy(layout);
 }
 
-vk_pipeline_layout::vk_pipeline_layout(vk_device * device, const std::vector<descriptor_set_layout *> & sets) : device{device}
+vk_pipeline_layout::vk_pipeline_layout(vk_device * device, const std::vector<const descriptor_set_layout *> & sets) : device{device}
 { 
     std::vector<VkDescriptorSetLayout> set_layouts;
-    for(auto s : sets) set_layouts.push_back(static_cast<vk_descriptor_set_layout *>(s)->layout);
+    for(auto s : sets) set_layouts.push_back(static_cast<const vk_descriptor_set_layout *>(s)->layout);
 
     VkPipelineLayoutCreateInfo create_info {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     create_info.setLayoutCount = exactly(set_layouts.size());
@@ -992,7 +992,7 @@ vk_shader::~vk_shader()
 
 vk_pipeline::vk_pipeline(vk_device * device, const pipeline_desc & desc) : device{device}, desc{desc} {}
 
-VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
+VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass) const
 {
     auto & pipe = pipeline_objects[render_pass];
     if(pipe) return pipe;
@@ -1000,7 +1000,7 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
     for(auto & s : desc.stages)
     {
-        auto & shader = static_cast<vk_shader &>(*s);
+        auto & shader = static_cast<const vk_shader &>(*s);
         shader_stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, shader.stage, shader.module, "main"});
     };
             
@@ -1052,7 +1052,7 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass)
         &depth_stencil_state,
         &color_blend_state,
         &dynamic_state,
-        static_cast<vk_pipeline_layout &>(*desc.layout).layout,
+        static_cast<const vk_pipeline_layout &>(*desc.layout).layout,
         render_pass, 0,
         VK_NULL_HANDLE, -1
     };
@@ -1103,13 +1103,13 @@ void vk_descriptor_pool::reset()
     vkResetDescriptorPool(device->dev, pool, 0);
     used_sets = 0;
 }
-ptr<descriptor_set> vk_descriptor_pool::alloc(descriptor_set_layout & layout) 
+ptr<descriptor_set> vk_descriptor_pool::alloc(const descriptor_set_layout & layout) 
 { 
     if(used_sets == sets.size()) throw std::logic_error("out of descriptor sets");
     VkDescriptorSetAllocateInfo alloc_info {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     alloc_info.descriptorPool = pool;
     alloc_info.descriptorSetCount = 1;
-    alloc_info.pSetLayouts = &static_cast<vk_descriptor_set_layout &>(layout).layout;
+    alloc_info.pSetLayouts = &static_cast<const vk_descriptor_set_layout &>(layout).layout;
     check("vkAllocateDescriptorSets", vkAllocateDescriptorSets(device->dev, &alloc_info, &sets[used_sets].set));
     return &sets[used_sets++];
 }
@@ -1138,7 +1138,7 @@ ptr<command_buffer> vk_device::create_command_buffer()
     return cmd;
 }
 
-void vk_command_buffer::record_reference(object & object)
+void vk_command_buffer::record_reference(const object & object)
 {
     auto it = referenced_objects.find(&object);
     if(it == referenced_objects.end()) referenced_objects.insert(&object);
@@ -1244,17 +1244,17 @@ void vk_command_buffer::set_scissor_rect(int x0, int y0, int x1, int y1)
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 }
 
-void vk_command_buffer::bind_pipeline(pipeline & pipe)
+void vk_command_buffer::bind_pipeline(const pipeline & pipe)
 {
     record_reference(pipe);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline &>(pipe).get_pipeline(current_pass));
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<const vk_pipeline &>(pipe).get_pipeline(current_pass));
 }
 
-void vk_command_buffer::bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set)
+void vk_command_buffer::bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set)
 {
     record_reference(layout);
     record_reference(set);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<vk_pipeline_layout &>(layout).layout, set_index, 1, &static_cast<vk_descriptor_set &>(set).set, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<const vk_pipeline_layout &>(layout).layout, set_index, 1, &static_cast<const vk_descriptor_set &>(set).set, 0, nullptr);
 }
 
 void vk_command_buffer::bind_vertex_buffer(int index, buffer_range range)

@@ -111,9 +111,9 @@ namespace rhi
     struct blend_state { bool enable; blend_equation color, alpha; };
     struct pipeline_desc
     {
-        ptr<pipeline_layout> layout;            // descriptors
+        ptr<const pipeline_layout> layout;      // descriptors
         std::vector<vertex_binding_desc> input; // input state
-        std::vector<ptr<shader>> stages;        // programmable stages
+        std::vector<ptr<const shader>> stages;  // programmable stages
         primitive_topology topology;            // rasterizer state
         front_face front_face;       
         cull_mode cull_mode;
@@ -148,8 +148,8 @@ namespace rhi
 
     struct object
     {
-        virtual void add_ref() = 0;
-        virtual void release() = 0;
+        virtual void add_ref() const = 0;
+        virtual void release() const = 0;
     };
 
     struct device : object
@@ -163,7 +163,7 @@ namespace rhi
         virtual ptr<window> create_window(const int2 & dimensions, std::string_view title) = 0;
 
         virtual ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) = 0;
-        virtual ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) = 0;
+        virtual ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) = 0;
         virtual ptr<shader> create_shader(const shader_desc & desc) = 0;
         virtual ptr<pipeline> create_pipeline(const pipeline_desc & desc) = 0;
 
@@ -204,7 +204,7 @@ namespace rhi
     struct descriptor_pool : object 
     {
         virtual void reset() = 0;
-        virtual ptr<descriptor_set> alloc(descriptor_set_layout & layout) = 0;
+        virtual ptr<descriptor_set> alloc(const descriptor_set_layout & layout) = 0;
     };    
 
     struct command_buffer : object
@@ -216,8 +216,8 @@ namespace rhi
         // TODO: virtual void clear_stencil(uint8_t stencil) = 0;
         virtual void set_viewport_rect(int x0, int y0, int x1, int y1) = 0;
         virtual void set_scissor_rect(int x0, int y0, int x1, int y1) = 0;
-        virtual void bind_pipeline(pipeline & pipe) = 0;
-        virtual void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) = 0;
+        virtual void bind_pipeline(const pipeline & pipe) = 0;
+        virtual void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) = 0;
         virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
         virtual void bind_index_buffer(buffer_range range) = 0;
         virtual void draw(int first_vertex, int vertex_count) = 0;

@@ -100,10 +100,54 @@ namespace gfx
             indices.reset();
         }
 
-        void end_frame(rhi::device & dev)
+        void end_frame(rhi::device & dev) { last_submission_id = dev.get_last_submission_id(); }
+    };
+
+    // gfx::pipeline_layout wraps rhi::pipeline_layout, but remembers which set layouts were used to create it
+    class pipeline_layout
+    {
+        std::vector<rhi::ptr<const rhi::descriptor_set_layout>> set_layouts;
+        rhi::ptr<const rhi::pipeline_layout> pipe_layout;
+    public:
+        pipeline_layout(rhi::device & dev, const std::vector<const rhi::descriptor_set_layout *> & sets) : pipe_layout{dev.create_pipeline_layout(sets)}, set_layouts{sets.begin(), sets.end()} {}
+
+        const rhi::pipeline_layout & get_rhi_pipeline_layout() const { return *pipe_layout; }
+        const rhi::descriptor_set_layout & get_rhi_descriptor_set_layout(int set_index) const { return *set_layouts[set_index]; }
+    };
+
+    // gfx::pipeline wraps rhi::pipeline, but remembers which pipeline layout was used to create it
+    class pipeline
+    {
+        const pipeline_layout & layout;
+        rhi::ptr<const rhi::pipeline> pipe;        
+    public:
+        pipeline(rhi::device & dev, const pipeline_layout & layout, rhi::pipeline_desc desc) : layout{layout}
         {
-            last_submission_id = dev.get_last_submission_id();
+            desc.layout = &layout.get_rhi_pipeline_layout();
+            pipe = dev.create_pipeline(desc);
         }
+
+        const rhi::pipeline & get_rhi_pipeline() const { return *pipe; }
+        const rhi::pipeline_layout & get_rhi_pipeline_layout() const { return layout.get_rhi_pipeline_layout(); }
+        const rhi::descriptor_set_layout & get_rhi_descriptor_set_layout(int set_index) const { return layout.get_rhi_descriptor_set_layout(set_index); }
+    };
+
+    // gfx::descriptor_set wraps rhi::descriptor_set, but remembers its pipeline and set index, and provides access to transient resources
+    class descriptor_set
+    {
+        gfx::transient_resource_pool & pool;
+        const gfx::pipeline & pipeline;
+        int set_index;
+        rhi::ptr<rhi::descriptor_set> set;
+    public:
+        descriptor_set(gfx::transient_resource_pool & pool, const gfx::pipeline & pipeline, int set_index) : 
+            pool(pool), pipeline(pipeline), set_index(set_index), set{pool.descriptors->alloc(pipeline.get_rhi_descriptor_set_layout(set_index))} {}
+
+        void write(int binding, rhi::buffer_range range) { set->write(binding, range); }
+        void write(int binding, gfx::binary_view view) { set->write(binding, pool.uniforms.upload(view)); }
+        void write(int binding, rhi::sampler & sampler, rhi::image & image) { set->write(binding, sampler, image); }
+
+        void bind(rhi::command_buffer & cmd) const { cmd.bind_descriptor_set(pipeline.get_rhi_pipeline_layout(), set_index, *set); }
     };
 
     class window

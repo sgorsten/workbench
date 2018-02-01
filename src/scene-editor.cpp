@@ -359,10 +359,10 @@ int main(int argc, const char * argv[]) try
     });
 
     // Pipeline layouts
-    auto common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
-    auto skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
-    auto colored_pipe_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
-    auto textured_pipe_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
+    auto common_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout});
+    auto skybox_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout, skybox_material_layout});
+    auto colored_pipe_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
+    auto textured_pipe_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
     
     const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
         .attribute(0, &mesh_vertex::position)
@@ -378,10 +378,10 @@ int main(int argc, const char * argv[]) try
     const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
     // Pipelines
-    auto light_pipe = dev->create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-    auto colored_pbr_pipe = dev->create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto textured_pbr_pipe = dev->create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto light_pipe = gfx::pipeline(*dev, colored_pipe_layout, {nullptr, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto skybox_pipe = gfx::pipeline(*dev, skybox_layout, {nullptr, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
+    auto colored_pbr_pipe = gfx::pipeline(*dev, colored_pipe_layout, {nullptr, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto textured_pbr_pipe = gfx::pipeline(*dev, textured_pipe_layout, {nullptr, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
 
     // Create transient resources
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
@@ -466,50 +466,51 @@ int main(int argc, const char * argv[]) try
         cmd->set_viewport_rect(vp.x0, vp.y0, vp.x1, vp.y1);
 
         // Bind common descriptors
-        cmd->bind_descriptor_set(*common_layout, pbr_per_scene_set_index, *per_scene_set);
-        cmd->bind_descriptor_set(*common_layout, pbr_per_view_set_index, *per_view_set);
+        cmd->bind_descriptor_set(common_layout.get_rhi_pipeline_layout(), pbr_per_scene_set_index, *per_scene_set);
+        cmd->bind_descriptor_set(common_layout.get_rhi_pipeline_layout(), pbr_per_view_set_index, *per_view_set);
 
         // Draw skybox
-        cmd->bind_pipeline(*skybox_pipe);
-        auto skybox_set = pool.descriptors->alloc(*skybox_material_layout);
-        skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
-        cmd->bind_descriptor_set(*skybox_layout, pbr_per_material_set_index, *skybox_set);
+        cmd->bind_pipeline(skybox_pipe.get_rhi_pipeline());
+        auto skybox_set = gfx::descriptor_set{pool, skybox_pipe, pbr_per_material_set_index};
+        skybox_set.write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
+        skybox_set.bind(*cmd);
         box->gmesh.draw(*cmd);
 
         // Draw our objects
         for(auto & object : scene.objects)
         {
             if(!object.mesh || !object.albedo) continue;
-
             bool is_light = object.light != float3{0,0,0};
-            cmd->bind_pipeline(is_light ? *light_pipe : *textured_pbr_pipe);
+            auto & pipe = is_light ? light_pipe : textured_pbr_pipe;
 
-            auto material_set = pool.descriptors->alloc(is_light ? *colored_pbr_layout : *textured_pbr_layout);
-            material_set->write(0, pool.uniforms.upload(object.material));
-            if(!is_light) material_set->write(1, *linear, *object.albedo->gtex);
+            cmd->bind_pipeline(pipe.get_rhi_pipeline());
 
-            auto object_set = pool.descriptors->alloc(*static_object_layout);
-            object_set->write(0, pool.uniforms.upload(object.get_object_uniforms()));
+            auto material_set = gfx::descriptor_set{pool, pipe, pbr_per_material_set_index};
+            material_set.write(0, object.material);
+            if(!is_light) material_set.write(1, *linear, *object.albedo->gtex);
+            material_set.bind(*cmd);
 
-            cmd->bind_descriptor_set(is_light ? *colored_pipe_layout : *textured_pipe_layout, pbr_per_material_set_index, *material_set);
-            cmd->bind_descriptor_set(is_light ? *colored_pipe_layout : *textured_pipe_layout, pbr_per_object_set_index, *object_set);
+            auto object_set = gfx::descriptor_set{pool, pipe, pbr_per_object_set_index};
+            object_set.write(0, object.get_object_uniforms());
+            object_set.bind(*cmd);
+
             object.mesh->gmesh.draw(*cmd);
         }
 
         // Draw our gizmo
         if(editor.selection)
         {
-            auto material_set_x = pool.descriptors->alloc(*colored_pbr_layout); material_set_x->write(0, pool.uniforms.upload(pbr_material_uniforms{{1,0,0},0.8f,0.0f}));
-            auto material_set_y = pool.descriptors->alloc(*colored_pbr_layout); material_set_y->write(0, pool.uniforms.upload(pbr_material_uniforms{{0,1,0},0.8f,0.0f}));
-            auto material_set_z = pool.descriptors->alloc(*colored_pbr_layout); material_set_z->write(0, pool.uniforms.upload(pbr_material_uniforms{{0,0,1},0.8f,0.0f}));
-            auto object_set = pool.descriptors->alloc(*static_object_layout); object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{translation_matrix(editor.selection->position)}));
+            auto material_set_x = gfx::descriptor_set{pool,colored_pbr_pipe,2}; material_set_x.write(0, pbr_material_uniforms{{1,0,0},0.8f,0.0f});
+            auto material_set_y = gfx::descriptor_set{pool,colored_pbr_pipe,2}; material_set_y.write(0, pbr_material_uniforms{{0,1,0},0.8f,0.0f});
+            auto material_set_z = gfx::descriptor_set{pool,colored_pbr_pipe,2}; material_set_z.write(0, pbr_material_uniforms{{0,0,1},0.8f,0.0f});
+            auto object_set = gfx::descriptor_set{pool,colored_pbr_pipe,3}; object_set.write(0, pbr_object_uniforms{translation_matrix(editor.selection->position)});
 
             cmd->clear_depth(1.0);
-            cmd->bind_pipeline(*colored_pbr_pipe);
-            cmd->bind_descriptor_set(*colored_pipe_layout, pbr_per_object_set_index, *object_set);
-            cmd->bind_descriptor_set(*colored_pipe_layout, pbr_per_material_set_index, *material_set_x); arrow_x->gmesh.draw(*cmd);
-            cmd->bind_descriptor_set(*colored_pipe_layout, pbr_per_material_set_index, *material_set_y); arrow_y->gmesh.draw(*cmd);
-            cmd->bind_descriptor_set(*colored_pipe_layout, pbr_per_material_set_index, *material_set_z); arrow_z->gmesh.draw(*cmd);
+            cmd->bind_pipeline(colored_pbr_pipe.get_rhi_pipeline());
+            object_set.bind(*cmd);
+            material_set_x.bind(*cmd); arrow_x->gmesh.draw(*cmd);
+            material_set_y.bind(*cmd); arrow_y->gmesh.draw(*cmd);
+            material_set_z.bind(*cmd); arrow_z->gmesh.draw(*cmd);
         }
 
         canvas.encode_commands(*cmd, *gwindow);

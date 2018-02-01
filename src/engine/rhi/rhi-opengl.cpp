@@ -48,7 +48,7 @@ namespace rhi
         std::map<uint64_t, GLsync> sync_objects;
         uint64_t submitted_index=0;
 
-        struct context_objects { std::unordered_map<gl_pipeline *, GLuint> vertex_array_objects;};
+        struct context_objects { std::unordered_map<const gl_pipeline *, GLuint> vertex_array_objects;};
         std::map<GLFWwindow *, context_objects> context_specific_objects;
 
         gl_device(std::function<void(const char *)> debug_callback);
@@ -56,7 +56,7 @@ namespace rhi
         void enable_debug_callback(GLFWwindow * window);
         void destroy_context_objects(GLFWwindow * context);
         void destroy_pipeline_objects(gl_pipeline * pipeline);
-        void bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline);
+        void bind_vertex_array(GLFWwindow * context, const gl_pipeline & pipeline);
 
         device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
 
@@ -67,7 +67,7 @@ namespace rhi
         ptr<window> create_window(const int2 & dimensions, std::string_view title) override;        
         
         ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
         ptr<shader> create_shader(const shader_desc & desc) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
 
@@ -220,7 +220,7 @@ void gl_device::destroy_pipeline_objects(gl_pipeline * pipeline)
     }
 }
 
-void gl_device::bind_vertex_array(GLFWwindow * context, gl_pipeline & pipeline)
+void gl_device::bind_vertex_array(GLFWwindow * context, const gl_pipeline & pipeline)
 {
     auto & vertex_array = context_specific_objects[context].vertex_array_objects[&pipeline];
     if(!vertex_array)
@@ -259,7 +259,7 @@ ptr<pipeline> gl_device::create_pipeline(const pipeline_desc & desc) { return ne
 uint64_t gl_device::submit(command_buffer & cmd)
 {
     GLFWwindow * context = hidden_window;
-    gl_pipeline * current_pipeline = nullptr;
+    const gl_pipeline * current_pipeline = nullptr;
     const char * base_indices_pointer = 0;
     int framebuffer_height = 0;
     glfwMakeContextCurrent(context);
@@ -319,7 +319,7 @@ uint64_t gl_device::submit(command_buffer & cmd)
         },
         [&](const bind_pipeline_command & c)
         {
-            auto & pipe = static_cast<gl_pipeline &>(*c.pipe);
+            auto & pipe = static_cast<const gl_pipeline &>(*c.pipe);
             glUseProgram(pipe.program_object);
             bind_vertex_array(context, pipe);
             glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
@@ -531,17 +531,17 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : devic
     std::vector<GLenum> shaders;
     for(auto s : desc.stages)
     {
-        auto & shader = static_cast<gl_shader &>(*s);
+        auto & shader = static_cast<const gl_shader &>(*s);
         spirv_cross::CompilerGLSL compiler(shader.desc.spirv);
 	    spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	    for(auto & resource : resources.uniform_buffers)
 	    {
-            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<emulated_pipeline_layout &>(*desc.layout).get_flat_buffer_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<const emulated_pipeline_layout &>(*desc.layout).get_flat_buffer_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
 		    compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	    }
 	    for(auto & resource : resources.sampled_images)
 	    {
-		    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<emulated_pipeline_layout &>(*desc.layout).get_flat_image_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+		    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<const emulated_pipeline_layout &>(*desc.layout).get_flat_image_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
             compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	    }
 

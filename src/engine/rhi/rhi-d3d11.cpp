@@ -120,7 +120,7 @@ namespace rhi
         ptr<window> create_window(const int2 & dimensions, std::string_view title) override;        
         
         ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
         ptr<shader> create_shader(const shader_desc & module) override;
         ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
 
@@ -221,7 +221,7 @@ ptr<pipeline> d3d_device::create_pipeline(const pipeline_desc & desc) { return n
 uint64_t d3d_device::submit(command_buffer & cmd)
 {
     d3d_framebuffer * current_framebuffer = 0;
-    d3d_pipeline * current_pipeline = 0;
+    const d3d_pipeline * current_pipeline = 0;
     ctx->ClearState();
     static_cast<const emulated_command_buffer &>(cmd).execute(overload(
         [this](const generate_mipmaps_command & c)
@@ -277,7 +277,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         [this,&current_pipeline](const bind_pipeline_command & c)
         {
             const float blend_factor[] {0,0,0,0};
-            current_pipeline = &static_cast<d3d_pipeline &>(*c.pipe);
+            current_pipeline = &static_cast<const d3d_pipeline &>(*c.pipe);
             ctx->IASetInputLayout(current_pipeline->layout);
             ctx->IASetPrimitiveTopology(current_pipeline->topology);
             ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
@@ -497,19 +497,19 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
 {
     for(auto & s : desc.stages)
     {
-        auto & shader = static_cast<d3d_shader &>(*s);
+        auto & shader = static_cast<const d3d_shader &>(*s);
 
         // Compile SPIR-V to HLSL
         spirv_cross::CompilerHLSL compiler(shader.desc.spirv);
 	    spirv_cross::ShaderResources resources = compiler.get_shader_resources();
 	    for(auto & resource : resources.uniform_buffers)
 	    {
-            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<emulated_pipeline_layout &>(*desc.layout).get_flat_buffer_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+            compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<const emulated_pipeline_layout &>(*desc.layout).get_flat_buffer_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
 		    compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	    }
 	    for(auto & resource : resources.sampled_images)
 	    {
-		    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<emulated_pipeline_layout &>(*desc.layout).get_flat_image_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
+		    compiler.set_decoration(resource.id, spv::DecorationBinding, exactly(static_cast<const emulated_pipeline_layout &>(*desc.layout).get_flat_image_binding(compiler.get_decoration(resource.id, spv::DecorationDescriptorSet), compiler.get_decoration(resource.id, spv::DecorationBinding))));
             compiler.unset_decoration(resource.id, spv::DecorationDescriptorSet);
 	    }
         spirv_cross::CompilerHLSL::Options options;

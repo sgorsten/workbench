@@ -7,18 +7,18 @@ namespace rhi
     // Used for objects whose ownership is shared by their references
     template<class T> struct delete_when_unreferenced : T
     {
-        std::atomic_uint32_t ref_count {0};
-        void add_ref() override { ++ref_count; }
-        void release() override { if(--ref_count == 0) delete this; }
+        mutable std::atomic_uint32_t ref_count {0};
+        void add_ref() const override { ++ref_count; }
+        void release() const override { if(--ref_count == 0) delete this; }
         using T::T;
     };
 
     // Used for objects which are reference counted but whose lifetime is controlled by another object
     template<class T> struct counted : T
     {
-        std::atomic_uint32_t ref_count {0};
-        void add_ref() override { ++ref_count; }
-        void release() override { --ref_count; }
+        mutable std::atomic_uint32_t ref_count {0};
+        void add_ref() const override { ++ref_count; }
+        void release() const override { --ref_count; }
         using T::T;
     };
 
@@ -45,11 +45,11 @@ namespace rhi
 
     struct emulated_pipeline_layout : pipeline_layout
     {
-        struct set { ptr<emulated_descriptor_set_layout> layout; size_t buffer_offset, image_offset; };
+        struct set { ptr<const emulated_descriptor_set_layout> layout; size_t buffer_offset, image_offset; };
         std::vector<set> sets;
         size_t num_buffers=0, num_images=0;
 
-        emulated_pipeline_layout(const std::vector<descriptor_set_layout *> & sets);
+        emulated_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets);
         size_t get_flat_buffer_binding(int set, int binding) const;
         size_t get_flat_image_binding(int set, int binding) const;        
     };
@@ -58,7 +58,7 @@ namespace rhi
     struct image_binding { ptr<sampler> sampler; ptr<image> image; };
     struct emulated_descriptor_set : descriptor_set
     {
-        ptr<emulated_descriptor_set_layout> layout;
+        ptr<const emulated_descriptor_set_layout> layout;
         buffer_binding * buffer_bindings;
         image_binding * image_bindings;
 
@@ -81,14 +81,14 @@ namespace rhi
         }
 
         void reset() override;
-        ptr<descriptor_set> alloc(descriptor_set_layout & layout) override;
+        ptr<descriptor_set> alloc(const descriptor_set_layout & layout) override;
     };
 
     template<class BindBufferFunction, class BindImageFunction>
-    void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set, BindBufferFunction bind_buffer, BindImageFunction bind_image)
+    void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set, BindBufferFunction bind_buffer, BindImageFunction bind_image)
     {
-        const auto & p = static_cast<emulated_pipeline_layout &>(layout);
-        const auto & s = static_cast<emulated_descriptor_set &>(set);
+        const auto & p = static_cast<const emulated_pipeline_layout &>(layout);
+        const auto & s = static_cast<const emulated_descriptor_set &>(set);
         if(s.layout != p.sets[set_index].layout) throw std::logic_error("descriptor_set_layout mismatch");
         for(size_t i=0; i<s.layout->num_buffers; ++i)
         {
@@ -111,8 +111,8 @@ namespace rhi
     struct clear_depth_command { float depth; };
     struct set_viewport_rect_command { int x0, y0, x1, y1; };
     struct set_scissor_rect_command { int x0, y0, x1, y1; };    
-    struct bind_pipeline_command { ptr<pipeline> pipe; };
-    struct bind_descriptor_set_command { ptr<pipeline_layout> layout; int set_index; ptr<descriptor_set> set; };
+    struct bind_pipeline_command { ptr<const pipeline> pipe; };
+    struct bind_descriptor_set_command { ptr<const pipeline_layout> layout; int set_index; ptr<const descriptor_set> set; };
     struct bind_vertex_buffer_command { int index; buffer_range range; };
     struct bind_index_buffer_command { buffer_range range; };
     struct draw_command { int first_vertex, vertex_count; };
@@ -130,8 +130,8 @@ namespace rhi
         void clear_depth(float depth) { commands.push_back(clear_depth_command{depth}); }
         void set_viewport_rect(int x0, int y0, int x1, int y1) override { commands.push_back(set_viewport_rect_command{x0, y0, x1, y1}); }
         void set_scissor_rect(int x0, int y0, int x1, int y1) override { commands.push_back(set_scissor_rect_command{x0, y0, x1, y1}); }
-        void bind_pipeline(pipeline & pipe) override { commands.push_back(bind_pipeline_command{&pipe}); }
-        void bind_descriptor_set(pipeline_layout & layout, int set_index, descriptor_set & set) override { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }
+        void bind_pipeline(const pipeline & pipe) override { commands.push_back(bind_pipeline_command{&pipe}); }
+        void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) override { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }
         void bind_vertex_buffer(int index, buffer_range range) override { commands.push_back(bind_vertex_buffer_command{index, range}); }
         void bind_index_buffer(buffer_range range) override { commands.push_back(bind_index_buffer_command{range}); }
         void draw(int first_vertex, int vertex_count) override { commands.push_back(draw_command{first_vertex, vertex_count}); }

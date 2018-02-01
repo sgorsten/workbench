@@ -59,11 +59,11 @@ size_t emulated_pipeline_layout::get_flat_image_binding(int set, int binding) co
     return sets[set].image_offset + it->second;
 }
 
-emulated_pipeline_layout::emulated_pipeline_layout(const std::vector<descriptor_set_layout *> & sets)
+emulated_pipeline_layout::emulated_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets)
 {
     for(auto & s : sets)
     {
-        auto & layout = static_cast<emulated_descriptor_set_layout &>(*s);
+        auto & layout = static_cast<const emulated_descriptor_set_layout &>(*s);
         this->sets.push_back({&layout, num_buffers, num_images});
         num_buffers += layout.num_buffers;
         num_images += layout.num_images;
@@ -78,9 +78,9 @@ void emulated_descriptor_pool::reset()
     used_buffer_bindings = used_image_bindings = used_sets = 0;
 }
 
-ptr<descriptor_set> emulated_descriptor_pool::alloc(descriptor_set_layout & layout)
+ptr<descriptor_set> emulated_descriptor_pool::alloc(const descriptor_set_layout & layout)
 {
-    auto & set_layout = static_cast<emulated_descriptor_set_layout &>(layout);
+    auto & set_layout = static_cast<const emulated_descriptor_set_layout &>(layout);
     const size_t needed_buffer_bindings = used_buffer_bindings + set_layout.num_buffers;
     const size_t needed_image_bindings = used_image_bindings + set_layout.num_images;
     if(needed_buffer_bindings > buffer_bindings.size()) throw std::logic_error("out of buffer bindings");
