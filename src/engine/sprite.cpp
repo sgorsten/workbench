@@ -207,7 +207,17 @@ canvas_sprites::canvas_sprites(sprite_sheet & sheet) : sheet{sheet}
 
 canvas_device_objects::canvas_device_objects(rhi::device & device, shader_compiler & compiler, const sprite_sheet & sheet)
 {
-    sprites = device.create_image({rhi::image_shape::_2d, {sheet.sheet_image.dims(),1}, 1, rhi::image_format::r_unorm8, rhi::sampled_image_bit}, {sheet.sheet_image.data()});
+    // Convert sprite sheet from alpha only to srgb_alpha
+    grid<byte4> pixels {sheet.sheet_image.dims(), {255,255,255,255}};
+    for(int y=0; y<pixels.height(); ++y)
+    {
+        for(int x=0; x<pixels.width(); ++x)
+        {
+            pixels[{x,y}].w = sheet.sheet_image[{x,y}];
+        }
+    }
+
+    sprites = device.create_image({rhi::image_shape::_2d, {pixels.dims(),1}, 1, rhi::image_format::rgba_srgb8, rhi::sampled_image_bit}, {pixels.data()});
     sampler = device.create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::repeat});
     per_window_layout = device.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
     per_texture_layout = device.create_descriptor_set_layout({{0, rhi::descriptor_type::combined_image_sampler, 1}});

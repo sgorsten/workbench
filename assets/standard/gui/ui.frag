@@ -5,5 +5,5 @@ layout(location=1) in vec4 color;
 layout(location=0) out vec4 f_color;
 void main() 
 {
-    f_color = vec4(color.rgb, color.a*texture(u_texture, texcoord).r);
+    f_color = color * texture(u_texture, texcoord);
 }
