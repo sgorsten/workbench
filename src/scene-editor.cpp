@@ -532,15 +532,8 @@ int main(int argc, const char * argv[]) try
         per_scene_set.write(3, pbr_objects.get_cubemap_sampler(), *env.reflectance_cubemap);
 
         // Set up per-view uniforms for a specific framebuffer
-        pbr::view_uniforms per_view_uniforms;
-        per_view_uniforms.view_proj_matrix = editor.cam.get_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
-        per_view_uniforms.skybox_view_proj_matrix = editor.cam.get_skybox_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
-        per_view_uniforms.eye_position = editor.cam.position;
-        per_view_uniforms.right_vector = editor.cam.get_direction(coord_axis::right);
-        per_view_uniforms.down_vector = editor.cam.get_direction(coord_axis::down);
-
         auto per_view_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr::view_set_index);
-        per_view_set.write(0, per_view_uniforms);
+        per_view_set.write(0, pbr::view_uniforms{editor.cam, vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range});
 
         // Draw objects to our primary framebuffer
         auto cmd = dev->create_command_buffer();

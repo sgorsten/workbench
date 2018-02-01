@@ -40,20 +40,24 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "shaders", "shaders", "{4EF8
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "standard", "standard", "{F53A9D50-8CB2-4DF0-A1CD-6AC1C1B489F4}"
 	ProjectSection(SolutionItems) = preProject
-		assets\standard\compute-brdf-integral-image.frag = assets\standard\compute-brdf-integral-image.frag
-		assets\standard\compute-irradiance-cubemap.frag = assets\standard\compute-irradiance-cubemap.frag
-		assets\standard\compute-reflectance-cubemap.frag = assets\standard\compute-reflectance-cubemap.frag
-		assets\standard\copy-cubemap-from-spheremap.frag = assets\standard\copy-cubemap-from-spheremap.frag
 		assets\standard\pbr.glsl = assets\standard\pbr.glsl
-		assets\standard\preamble.glsl = assets\standard\preamble.glsl
-		assets\standard\render-cubemap.vert = assets\standard\render-cubemap.vert
-		assets\standard\render-image.vert = assets\standard\render-image.vert
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ui", "ui", "{C5F5A7E6-A5AE-44BA-9A10-11D605A316CF}"
 	ProjectSection(SolutionItems) = preProject
 		assets\standard\gui\ui.frag = assets\standard\gui\ui.frag
 		assets\standard\gui\ui.vert = assets\standard\gui\ui.vert
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "pbr", "pbr", "{8D6A81A5-D3BF-4CB4-BEF7-648EB9E61A0C}"
+	ProjectSection(SolutionItems) = preProject
+		assets\standard\compute-brdf-integral-image.frag = assets\standard\compute-brdf-integral-image.frag
+		assets\standard\compute-irradiance-cubemap.frag = assets\standard\compute-irradiance-cubemap.frag
+		assets\standard\compute-reflectance-cubemap.frag = assets\standard\compute-reflectance-cubemap.frag
+		assets\standard\copy-cubemap-from-spheremap.frag = assets\standard\copy-cubemap-from-spheremap.frag
+		assets\standard\preamble.glsl = assets\standard\preamble.glsl
+		assets\standard\render-cubemap.vert = assets\standard\render-cubemap.vert
+		assets\standard\render-image.vert = assets\standard\render-image.vert
 	EndProjectSection
 EndProject
 Global
@@ -152,6 +156,7 @@ Global
 		{49E74213-0E94-4B0B-BE73-1DB8B49E27A1} = {7DE75E0D-FA7D-4A22-B1B6-BE75D4D9E0BB}
 		{F53A9D50-8CB2-4DF0-A1CD-6AC1C1B489F4} = {4EF81B37-C60C-4050-BDAB-010509AE9FB1}
 		{C5F5A7E6-A5AE-44BA-9A10-11D605A316CF} = {F53A9D50-8CB2-4DF0-A1CD-6AC1C1B489F4}
+		{8D6A81A5-D3BF-4CB4-BEF7-648EB9E61A0C} = {F53A9D50-8CB2-4DF0-A1CD-6AC1C1B489F4}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {BA05DCD5-82EA-4A15-821C-9CED95095DA8}

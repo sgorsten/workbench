@@ -14,7 +14,7 @@ int main(int argc, const char * argv[]) try
     loader.register_root(get_program_binary_path() + "../../assets");
 
     shader_compiler compiler{loader};
-    auto standard_sh = standard_shaders::compile(compiler);
+    auto standard_sh = pbr::shaders::compile(compiler);
     auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
     auto lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
     auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
@@ -35,7 +35,7 @@ int main(int argc, const char * argv[]) try
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
     auto dev = context.get_backends().back().create_device(debug);
 
-    standard_device_objects standard = {dev, standard_sh};
+    pbr::device_objects standard = {dev, standard_sh};
     gfx::simple_mesh ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};
     gfx::simple_mesh box = {*dev, box_mesh.vertices, box_mesh.triangles};
     gfx::simple_mesh sphere = {*dev, sphere_mesh.vertices, sphere_mesh.triangles};
@@ -144,13 +144,13 @@ int main(int argc, const char * argv[]) try
         pool.begin_frame(*dev);
 
         // Set up per scene uniforms
-        struct pbr_scene_uniforms per_scene_uniforms {};
+        pbr::scene_uniforms per_scene_uniforms {};
         per_scene_uniforms.point_lights[0] = {{-3, -3, 8}, {23.47f, 21.31f, 20.79f}};
         per_scene_uniforms.point_lights[1] = {{ 3, -3, 8}, {23.47f, 21.31f, 20.79f}};
         per_scene_uniforms.point_lights[2] = {{ 3,  3, 8}, {23.47f, 21.31f, 20.79f}};
         per_scene_uniforms.point_lights[3] = {{-3,  3, 8}, {23.47f, 21.31f, 20.79f}};
 
-        auto per_scene_set = pool.alloc_descriptor_set(*common_layout, pbr_per_scene_set_index);
+        auto per_scene_set = pool.alloc_descriptor_set(*common_layout, pbr::scene_set_index);
         per_scene_set.write(0, pool.uniforms.upload(per_scene_uniforms));
         per_scene_set.write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
         per_scene_set.write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
@@ -162,15 +162,8 @@ int main(int argc, const char * argv[]) try
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
         const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), make_transform_4x4(cam.coords, fb.get_ndc_coords()));
 
-        pbr_view_uniforms per_view_uniforms;
-        per_view_uniforms.view_proj_matrix = mul(proj_matrix, cam.get_view_matrix());
-        per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, cam.get_skybox_view_matrix());
-        per_view_uniforms.eye_position = cam.position;
-        per_view_uniforms.right_vector = cam.get_direction(coord_axis::right);
-        per_view_uniforms.down_vector = cam.get_direction(coord_axis::down);
-
-        auto per_view_set = pool.alloc_descriptor_set(*common_layout, pbr_per_view_set_index);
-        per_view_set.write(0, pool.uniforms.upload(per_view_uniforms));
+        auto per_view_set = pool.alloc_descriptor_set(*common_layout, pbr::view_set_index);
+        per_view_set.write(0, pbr::view_uniforms{cam, gwindow->get_aspect(), fb.get_ndc_coords(), dev->get_info().z_range});
 
         // Draw objects to our primary framebuffer
         rhi::render_pass_desc pass;
@@ -184,29 +177,29 @@ int main(int argc, const char * argv[]) try
 
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe);
-        auto skybox_set = pool.alloc_descriptor_set(*skybox_pipe, pbr_per_material_set_index);
+        auto skybox_set = pool.alloc_descriptor_set(*skybox_pipe, pbr::material_set_index);
         skybox_set.write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         skybox_set.bind(*cmd);
         box.draw(*cmd);
         
         // Draw lights
         cmd->bind_pipeline(*light_pipe);
-        auto material_set = pool.alloc_descriptor_set(*light_pipe, pbr_per_material_set_index);
-        material_set.write(0, pbr_material_uniforms{{0.5f,0.5f,0.5f},0.5f,0});
+        auto material_set = pool.alloc_descriptor_set(*light_pipe, pbr::material_set_index);
+        material_set.write(0, pbr::material_uniforms{{0.5f,0.5f,0.5f},0.5f,0});
         material_set.write(1, *nearest, *checkerboard);
         material_set.bind(*cmd);
         for(auto & p : per_scene_uniforms.point_lights)
         {
-            auto object_set = pool.alloc_descriptor_set(*light_pipe, pbr_per_object_set_index);
-            object_set.write(0, pbr_object_uniforms{mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))});
+            auto object_set = pool.alloc_descriptor_set(*light_pipe, pbr::object_set_index);
+            object_set.write(0, pbr::object_uniforms{mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))});
             object_set.bind(*cmd);
             sphere.draw(*cmd);
         }
 
         // Draw the ground
         cmd->bind_pipeline(*solid_pipe);
-        auto object_set = pool.alloc_descriptor_set(*solid_pipe, pbr_per_object_set_index);
-        object_set.write(0, pbr_object_uniforms{translation_matrix(cam.coords(coord_axis::down)*0.5f)});
+        auto object_set = pool.alloc_descriptor_set(*solid_pipe, pbr::object_set_index);
+        object_set.write(0, pbr::object_uniforms{translation_matrix(cam.coords(coord_axis::down)*0.5f)});
         object_set.bind(*cmd);
         ground.draw(*cmd);
 
@@ -215,13 +208,13 @@ int main(int argc, const char * argv[]) try
         {
             for(int j=0; j<6; ++j)
             {
-                auto material_set = pool.alloc_descriptor_set(*solid_pipe, pbr_per_material_set_index);
-                material_set.write(0, pbr_material_uniforms{{1,1,1},(j+0.5f)/6,(i+0.5f)/6});
+                auto material_set = pool.alloc_descriptor_set(*solid_pipe, pbr::material_set_index);
+                material_set.write(0, pbr::material_uniforms{{1,1,1},(j+0.5f)/6,(i+0.5f)/6});
                 material_set.write(1, *nearest, *checkerboard);
                 material_set.bind(*cmd);
 
-                auto object_set = pool.alloc_descriptor_set(*solid_pipe, pbr_per_object_set_index);
-                object_set.write(0, pbr_object_uniforms{translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f))});
+                auto object_set = pool.alloc_descriptor_set(*solid_pipe, pbr::object_set_index);
+                object_set.write(0, pbr::object_uniforms{translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f))});
                 object_set.bind(*cmd);
                 sphere.draw(*cmd);
             }

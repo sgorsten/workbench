@@ -1,6 +1,7 @@
 #pragma once
 #include "graphics.h"
 #include "shader.h"
+#include "camera.h"
 
 namespace pbr
 {
@@ -68,6 +69,15 @@ namespace pbr
         alignas(16) float3 eye_position;
         alignas(16) float3 right_vector;
         alignas(16) float3 down_vector;
+
+        view_uniforms(const camera & cam, float aspect, coord_system ndc_coords, linalg::z_range z_range)
+        {
+            view_proj_matrix = cam.get_view_proj_matrix(aspect, ndc_coords, z_range);
+            skybox_view_proj_matrix = cam.get_skybox_view_proj_matrix(aspect, ndc_coords, z_range);
+            eye_position = cam.position;
+            right_vector = cam.get_direction(coord_axis::right);
+            down_vector = cam.get_direction(coord_axis::down);
+        }
     };
 
     struct material_uniforms
