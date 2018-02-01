@@ -45,7 +45,7 @@ public:
     std::vector<std::byte> load_binary_file(std::string_view filename) const;
     std::vector<char> load_text_file(std::string_view filename) const;
 
-    image load_image(std::string_view filename);
+    image load_image(std::string_view filename, bool linear);
 };
 
 std::string get_program_binary_path();

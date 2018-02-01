@@ -44,7 +44,7 @@ std::vector<char> loader::load_text_file(std::string_view filename) const
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
-image loader::load_image(std::string_view filename)
+image loader::load_image(std::string_view filename, bool linear)
 {
     auto f = open_file(filename, file_mode::binary);
     
@@ -66,7 +66,7 @@ image loader::load_image(std::string_view filename)
     {   
         stbi__result_info ri;
         auto pixels = stbi__load_main(&context, &width, &height, nullptr, 4, &ri, 0);
-        if(pixels && ri.bits_per_channel==8) return {{width,height}, rhi::image_format::rgba_unorm8, std::shared_ptr<void>(pixels,stbi_image_free)};
+        if(pixels && ri.bits_per_channel==8) return {{width,height}, linear ? rhi::image_format::rgba_unorm8 : rhi::image_format::rgba_srgb8, std::shared_ptr<void>(pixels,stbi_image_free)};
         if(pixels && ri.bits_per_channel==16) return {{width,height}, rhi::image_format::rgba_unorm16, std::shared_ptr<void>(pixels,stbi_image_free)};
     }
     throw std::runtime_error(to_string("unknown image format for \"", f.get_path(), '"'));

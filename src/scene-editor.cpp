@@ -13,12 +13,6 @@
 
 constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
 
-struct texture_asset
-{
-    std::string name;
-    rhi::ptr<rhi::image> gtex;
-};
-
 struct mesh_asset
 {
     std::string name;
@@ -38,10 +32,25 @@ struct mesh_asset
     }
 };
 
+struct texture_asset
+{
+    std::string name;
+    bool linear;
+    rhi::ptr<rhi::image> gtex;
+};
+
+struct material_asset
+{
+    std::string name;
+    std::vector<std::string> texture_names;
+    rhi::ptr<const rhi::pipeline> pipe;
+};
+
 struct asset_library
 {
-    std::vector<texture_asset *> textures;
     std::vector<mesh_asset *> meshes;
+    std::vector<texture_asset *> textures;
+    std::vector<material_asset *> materials;
 };
 
 //////////////////////
@@ -54,8 +63,9 @@ struct object
     float3 position;
     float3 scale;
     mesh_asset * mesh;
-    texture_asset * albedo;
-    pbr_material_uniforms material;
+    material_asset * material;
+    std::vector<texture_asset *> textures;
+    pbr_material_uniforms uniforms;
     float3 light;
 
     float4x4 get_model_matrix() const { return mul(translation_matrix(position), scaling_matrix(scale)); }
@@ -114,25 +124,27 @@ class property_editor
     rect<int> key_bounds, value_bounds;
     int next_id=0;
 
-    void edit_property(rect<int> bounds, std::string & prop) { ::edit(g, next_id++, bounds, prop); }
-    void edit_property(rect<int> bounds, float & prop) { ::edit(g, next_id++, bounds, prop); }
-    void edit_property(rect<int> bounds, float3 & prop) { ::edit(g, next_id++, bounds, prop); }
-    void edit_property(rect<int> bounds, ranged_property & prop) { ::hslider(g, next_id++, bounds, prop.min, prop.max, prop.value); }
-    void edit_property(rect<int> bounds, mesh_asset * & prop) { combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * m) { return std::string_view{m->name}; }, prop); }
-    void edit_property(rect<int> bounds, texture_asset * & prop) { icon_combobox<texture_asset *>(g, next_id++, bounds, assets.textures, 
+    bool edit_property(rect<int> bounds, std::string & prop) { return ::edit(g, next_id++, bounds, prop); }
+    bool edit_property(rect<int> bounds, float & prop) { return ::edit(g, next_id++, bounds, prop); }
+    bool edit_property(rect<int> bounds, float3 & prop) { return ::edit(g, next_id++, bounds, prop); }
+    bool edit_property(rect<int> bounds, ranged_property & prop) { return ::hslider(g, next_id++, bounds, prop.min, prop.max, prop.value); }
+    bool edit_property(rect<int> bounds, mesh_asset * & prop) { return combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * m) { return std::string_view{m->name}; }, prop); }
+    bool edit_property(rect<int> bounds, texture_asset * & prop) { return icon_combobox<texture_asset *>(g, next_id++, bounds, assets.textures, 
         [](const texture_asset * t) { return std::string_view{t->name}; }, 
         [&](const texture_asset * t, const rect<int> & r) { g.draw_image(r, {1,1,1,1}, *t->gtex); }, prop);
     }
+    bool edit_property(rect<int> bounds, material_asset * & prop) { return combobox<material_asset *>(g, next_id++, bounds, assets.materials, [](const material_asset * m) { return std::string_view{m->name}; }, prop); }
 public:
     property_editor(gui & g, asset_library & assets, rect<int> bounds, int & split) : g{g}, assets{assets} { std::tie(key_bounds, value_bounds) = hsplitter(g, next_id++, bounds.shrink(4), split); }
 
-    template<class T> void edit(const char * label, T & field)
+    template<class T> bool edit(const char * label, T & field)
     {
         const int widget_height = g.get_style().def_font.line_height + 2;
         g.draw_shadowed_text(key_bounds.take_y0(widget_height).corner00() + int2{0,1}, g.get_style().passive_text, label);
-        key_bounds.y0 += 4; 
-        edit_property(value_bounds.take_y0(widget_height), field);
-        value_bounds.y0 += 4;              
+        key_bounds.y0 += 4;
+        bool r=edit_property(value_bounds.take_y0(widget_height), field);
+        value_bounds.y0 += 4;
+        return r;
     }
 };
 
@@ -266,17 +278,18 @@ struct editor
         size_t tab=0;
         bounds = tabbed_container(g, bounds, {"Object Properties"}, tab).shrink(4);
         if(!selection) return;
-        
+
         g.begin_group(id);
         property_editor p {g, assets, bounds, property_split};
         p.edit("Name", selection->name);
         p.edit("Position", selection->position);
         p.edit("Scale", selection->scale);
         p.edit("Mesh", selection->mesh);
-        p.edit("Albedo", selection->albedo);
-        p.edit("Albedo Tint", selection->material.albedo_tint);
-        p.edit("Roughness", ranged_property{selection->material.roughness,0,1});
-        p.edit("Metalness", ranged_property{selection->material.metalness,0,1});
+        if(p.edit("Material", selection->material)) selection->textures.resize(selection->material->texture_names.size());
+        for(size_t i=0; i<selection->material->texture_names.size(); ++i) p.edit(selection->material->texture_names[i].c_str(), selection->textures[i]);
+        p.edit("Albedo Tint", selection->uniforms.albedo_tint);
+        p.edit("Roughness", ranged_property{selection->uniforms.roughness,0,1});
+        p.edit("Metalness", ranged_property{selection->uniforms.metalness,0,1});
         p.edit("Light", selection->light);
         g.end_group();
     }
@@ -300,6 +313,7 @@ struct pipelines
     rhi::ptr<const rhi::pipeline> skybox_pipe;
     rhi::ptr<const rhi::pipeline> colored_pbr_pipe;
     rhi::ptr<const rhi::pipeline> textured_pbr_pipe;
+    rhi::ptr<const rhi::pipeline> bumped_pbr_pipe;
 };
 
 pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
@@ -324,6 +338,11 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
         {0, rhi::descriptor_type::uniform_buffer, 1},
         {1, rhi::descriptor_type::combined_image_sampler, 1}
     });
+    auto bumped_pbr_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+        {1, rhi::descriptor_type::combined_image_sampler, 1},
+        {2, rhi::descriptor_type::combined_image_sampler, 1},
+    });
     auto static_object_layout = dev.create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1},
     });
@@ -333,22 +352,27 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
     auto skybox_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
     auto colored_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
     auto textured_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
+    auto bumped_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, bumped_pbr_layout, static_object_layout});
     
     // Vertex input state
     const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
         .attribute(0, &mesh_vertex::position)
         .attribute(1, &mesh_vertex::normal)
-        .attribute(2, &mesh_vertex::texcoord);
+        .attribute(2, &mesh_vertex::texcoord)
+        .attribute(3, &mesh_vertex::tangent)
+        .attribute(4, &mesh_vertex::bitangent);
 
     // Shaders
-    auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
-    auto colored_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-pbr.frag");
-    auto textured_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
-    auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
     auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
     auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
+    auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
+    auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
+    auto colored_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-pbr.frag");
+    auto textured_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+    auto bumped_fs = compiler.compile_file(rhi::shader_stage::fragment, "bumped-pbr.frag");
 
-    auto vss = dev.create_shader(vs), unlit_fss = dev.create_shader(unlit_fs), colored_fss = dev.create_shader(colored_fs), textured_fss = dev.create_shader(textured_fs);
+    auto vss = dev.create_shader(vs), unlit_fss = dev.create_shader(unlit_fs);
+    auto colored_fss = dev.create_shader(colored_fs), textured_fss = dev.create_shader(textured_fs), bumped_fss = dev.create_shader(bumped_fs);
     auto skybox_vss = dev.create_shader(skybox_vs), skybox_fss = dev.create_shader(skybox_fs);
 
     // Blend states
@@ -360,8 +384,9 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
     auto skybox_pipe = dev.create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
     auto colored_pbr_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
     auto textured_pbr_pipe = dev.create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto bumped_pbr_pipe = dev.create_pipeline({bumped_pipe_layout, {mesh_vertex_binding}, {vss,bumped_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
 
-    return {common_layout, light_pipe, skybox_pipe, colored_pbr_pipe, textured_pbr_pipe};
+    return {common_layout, light_pipe, skybox_pipe, colored_pbr_pipe, textured_pbr_pipe, bumped_pbr_pipe};
 };
 
 int main(int argc, const char * argv[]) try
@@ -379,7 +404,7 @@ int main(int argc, const char * argv[]) try
 
     shader_compiler compiler{loader};
     auto standard_sh = standard_shaders::compile(compiler);
-    auto env_spheremap_img = loader.load_image("monument-valley.hdr");
+    auto env_spheremap_img = loader.load_image("monument-valley.hdr", true);
 
     const float2 arrow_points[] {{0, 0.05f}, {1, 0.05f}, {1, 0.10f}, {1.1f, 0.05f}, {1.15f, 0.025f}, {1.2f, 0}};
     auto arrow_x = new mesh_asset{"arrow_x", make_lathed_mesh({1,0,0}, {0,1,0}, {0,0,1}, 12, arrow_points)};
@@ -389,24 +414,31 @@ int main(int argc, const char * argv[]) try
     auto sphere = new mesh_asset{"sphere", make_sphere_mesh(32, 32, 0.5f)};
     auto plane = new mesh_asset{"plane", make_quad_mesh(coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)};
 
+    auto white = new texture_asset{"white.png"};
     auto checker = new texture_asset{"checker.png"};
     auto marble = new texture_asset{"marble.png"};
     auto scratched = new texture_asset{"scratched.png"};
-    auto normal = new texture_asset{"normal.png"};
+    auto normal = new texture_asset{"normal.png", true};
+
+    auto light_src = new material_asset{"Light Source", {}};
+    auto colored_pbr = new material_asset{"Colored PBR", {}};
+    auto textured_pbr = new material_asset{"Textured PBR", {"Albedo Map"}};
+    auto bumped_pbr = new material_asset{"Bumped PBR", {"Albedo Map", "Normal Map"}};
 
     asset_library assets;
     assets.meshes = {arrow_x, arrow_y, arrow_z, box, sphere, plane};
-    assets.textures = {checker, marble, scratched, normal};
+    assets.textures = {white, checker, marble, scratched, normal};
+    assets.materials = {light_src, colored_pbr, textured_pbr, bumped_pbr};
 
     scene scene;
-    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, plane, marble, {{0.5f,0.5f,0.5f}, 0.5f, 0.0f}});
+    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, plane, textured_pbr, {marble}, {{0.5f,0.5f,0.5f}, 0.5f, 0.0f}});
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
     {
-        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, sphere, checker, {{1,1,1}, (j+0.5f)/3, (i+0.5f)/3}});
+        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, sphere, textured_pbr, {checker}, {{1,1,1}, (j+0.5f)/3, (i+0.5f)/3}});
     }
     
     // Create our device and load our device objects
@@ -419,7 +451,7 @@ int main(int argc, const char * argv[]) try
     for(auto m : assets.meshes) m->gmesh = {*dev, m->cmesh.vertices, m->cmesh.triangles};
     for(auto t : assets.textures)
     {
-        auto im = loader.load_image(t->name);
+        auto im = loader.load_image(t->name, t->linear);
         t->gtex = dev->create_image({rhi::image_shape::_2d, {im.dimensions,1}, 1, im.format, rhi::sampled_image_bit}, {im.get_pixels()});
     }
 
@@ -430,6 +462,10 @@ int main(int argc, const char * argv[]) try
     auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
 
     auto pipelines = create_pipelines(*dev, compiler);
+    light_src->pipe = pipelines.light_pipe;
+    colored_pbr->pipe = pipelines.colored_pbr_pipe;
+    textured_pbr->pipe = pipelines.textured_pbr_pipe;
+    bumped_pbr->pipe = pipelines.bumped_pbr_pipe;
 
     // Create transient resources
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
@@ -528,15 +564,15 @@ int main(int argc, const char * argv[]) try
         // Draw our objects
         for(auto & object : scene.objects)
         {
-            if(!object.mesh || !object.albedo) continue;
-            bool is_light = object.light != float3{0,0,0};
-            auto & pipe = is_light ? pipelines.light_pipe : pipelines.textured_pbr_pipe;
+            if(!object.mesh || !object.material) continue;
+
+            auto & pipe = object.material->pipe;
 
             cmd->bind_pipeline(*pipe);
 
             auto material_set = pool.alloc_descriptor_set(*pipe, pbr_per_material_set_index);
-            material_set.write(0, object.material);
-            if(!is_light) material_set.write(1, *linear, *object.albedo->gtex);
+            material_set.write(0, object.uniforms);
+            for(size_t i=0; i<object.material->texture_names.size(); ++i) material_set.write(exactly(1+i), *linear, object.textures[i] ? *object.textures[i]->gtex : *white->gtex);
             material_set.bind(*cmd);
 
             auto object_set = pool.alloc_descriptor_set(*pipe, pbr_per_object_set_index);

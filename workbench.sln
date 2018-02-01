@@ -29,6 +29,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "graph-editor", "vs\graph-ed
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "shaders", "shaders", "{4EF81B37-C60C-4050-BDAB-010509AE9FB1}"
 	ProjectSection(SolutionItems) = preProject
+		assets\bumped-pbr.frag = assets\bumped-pbr.frag
 		assets\colored-pbr.frag = assets\colored-pbr.frag
 		assets\colored-unlit.frag = assets\colored-unlit.frag
 		assets\skybox.frag = assets\skybox.frag
