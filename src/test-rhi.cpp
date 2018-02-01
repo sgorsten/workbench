@@ -29,7 +29,7 @@ struct common_assets
         skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
         skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
 
-        env_spheremap = loader.load_image("monument-valley.hdr");
+        env_spheremap = loader.load_image("monument-valley.hdr", true);
 
         ground_mesh = make_quad_mesh(game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
         box_mesh = make_box_mesh({-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
@@ -110,7 +110,9 @@ public:
         const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
             .attribute(0, &mesh_vertex::position)
             .attribute(1, &mesh_vertex::normal)
-            .attribute(2, &mesh_vertex::texcoord);
+            .attribute(2, &mesh_vertex::texcoord)
+            .attribute(3, &mesh_vertex::tangent)
+            .attribute(4, &mesh_vertex::bitangent);
         const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
             .attribute(0, &ui_vertex::position)
             .attribute(1, &ui_vertex::texcoord)
