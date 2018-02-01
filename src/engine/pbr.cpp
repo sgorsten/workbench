@@ -1,22 +1,22 @@
 #include "pbr.h"
 #include <string>
 
-standard_shaders standard_shaders::compile(shader_compiler & compiler)
+pbr::shaders pbr::shaders::compile(shader_compiler & compiler)
 {
-    standard_shaders standard;
-    standard.render_image_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "standard/render-image.vert");
-    standard.compute_brdf_integral_image_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/compute-brdf-integral-image.frag");
-    standard.render_cubemap_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "standard/render-cubemap.vert");
-    standard.copy_cubemap_from_spheremap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/copy-cubemap-from-spheremap.frag");
-    standard.compute_irradiance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/compute-irradiance-cubemap.frag");
-    standard.compute_reflectance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/compute-reflectance-cubemap.frag");
+    pbr::shaders standard;
+    standard.render_image_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "standard/pbr/render-image.vert");
+    standard.compute_brdf_integral_image_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/pbr/compute-brdf-integral-image.frag");
+    standard.render_cubemap_vertex_shader = compiler.compile_file(rhi::shader_stage::vertex, "standard/pbr/render-cubemap.vert");
+    standard.copy_cubemap_from_spheremap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/pbr/copy-cubemap-from-spheremap.frag");
+    standard.compute_irradiance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/pbr/compute-irradiance-cubemap.frag");
+    standard.compute_reflectance_cubemap_fragment_shader = compiler.compile_file(rhi::shader_stage::fragment, "standard/pbr/compute-reflectance-cubemap.frag");
     return standard;
 }
 
 struct render_image_vertex { float2 position; float2 texcoord; };
 struct render_cubemap_vertex { float2 position; float3 direction; };
 
-template<class F> void standard_device_objects::render_to_image(rhi::image & target_image, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
+template<class F> void pbr::device_objects::render_to_image(rhi::image & target_image, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
 {
     auto fb = dev->create_framebuffer({dimensions, {{&target_image,mip,0}}});
     auto cmd = dev->create_command_buffer();
@@ -31,7 +31,7 @@ template<class F> void standard_device_objects::render_to_image(rhi::image & tar
     dev->wait_until_complete(dev->submit(*cmd));
 }
 
-template<class F> void standard_device_objects::render_to_cubemap(rhi::image & target_cube_map, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
+template<class F> void pbr::device_objects::render_to_cubemap(rhi::image & target_cube_map, int mip, const int2 & dimensions, bool generate_mips, F bind_pipeline)
 {
     auto cmd = dev->create_command_buffer();
     for(int i=0; i<6; ++i)
@@ -49,7 +49,7 @@ template<class F> void standard_device_objects::render_to_cubemap(rhi::image & t
     dev->wait_until_complete(dev->submit(*cmd));
 }
 
-standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, const standard_shaders & standard) : dev{dev}
+pbr::device_objects::device_objects(rhi::ptr<rhi::device> dev, const shaders & standard) : dev{dev}
 {
     image_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::clamp_to_edge, rhi::address_mode::clamp_to_edge});
     spheremap_sampler = dev->create_sampler({rhi::filter::linear, rhi::filter::linear, std::nullopt, rhi::address_mode::repeat, rhi::address_mode::clamp_to_edge});
@@ -92,7 +92,7 @@ standard_device_objects::standard_device_objects(rhi::ptr<rhi::device> dev, cons
     render_to_image(*brdf_integral_image, 0, {512,512}, false, [&](rhi::command_buffer & cmd) { cmd.bind_pipeline(*compute_brdf_integral_image_pipeline); });
 }
 
-rhi::ptr<rhi::image> standard_device_objects::create_cubemap_from_spheremap(gfx::transient_resource_pool & pool, int width, rhi::image & spheremap, const coord_system & preferred_coords)
+rhi::ptr<rhi::image> pbr::device_objects::create_cubemap_from_spheremap(gfx::transient_resource_pool & pool, int width, rhi::image & spheremap, const coord_system & preferred_coords)
 {
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, exactly(std::ceil(std::log2(width)+1)), rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
     auto set = pool.descriptors->alloc(*op_set_layout);
@@ -106,7 +106,7 @@ rhi::ptr<rhi::image> standard_device_objects::create_cubemap_from_spheremap(gfx:
     return target;
 }
 
-rhi::ptr<rhi::image> standard_device_objects::create_irradiance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap)
+rhi::ptr<rhi::image> pbr::device_objects::create_irradiance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap)
 {
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, 1, rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
     auto set = pool.descriptors->alloc(*op_set_layout);
@@ -119,7 +119,7 @@ rhi::ptr<rhi::image> standard_device_objects::create_irradiance_cubemap(gfx::tra
     return target;
 }
 
-rhi::ptr<rhi::image> standard_device_objects::create_reflectance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap)
+rhi::ptr<rhi::image> pbr::device_objects::create_reflectance_cubemap(gfx::transient_resource_pool & pool, int width, rhi::image & cubemap)
 {
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, 5, rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
     for(int mip=0; mip<5; ++mip)
@@ -137,12 +137,12 @@ rhi::ptr<rhi::image> standard_device_objects::create_reflectance_cubemap(gfx::tr
     return target;    
 }
 
-environment_map standard_device_objects::create_environment_map_from_cubemap(gfx::transient_resource_pool & pool, rhi::image & cubemap)
+pbr::environment_map pbr::device_objects::create_environment_map_from_cubemap(gfx::transient_resource_pool & pool, rhi::image & cubemap)
 {
     return {&cubemap, create_irradiance_cubemap(pool, 32, cubemap), create_reflectance_cubemap(pool, 128, cubemap)};
 }
 
-environment_map standard_device_objects::create_environment_map_from_spheremap(gfx::transient_resource_pool & pool, rhi::image & spheremap, int width, const coord_system & preferred_coords)
+pbr::environment_map pbr::device_objects::create_environment_map_from_spheremap(gfx::transient_resource_pool & pool, rhi::image & spheremap, int width, const coord_system & preferred_coords)
 {
     auto cubemap = create_cubemap_from_spheremap(pool, width, spheremap, preferred_coords);
     return create_environment_map_from_cubemap(pool, *cubemap);

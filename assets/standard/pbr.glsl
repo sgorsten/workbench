@@ -1,4 +1,4 @@
-#include "preamble.glsl"
+#include "pbr/preamble.glsl"
 
 // Descriptor set indices
 const int PER_SCENE = 0;	// Used for descriptors that are constant within the span of a single frame

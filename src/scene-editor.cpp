@@ -65,11 +65,11 @@ struct object
     mesh_asset * mesh;
     material_asset * material;
     std::vector<texture_asset *> textures;
-    pbr_material_uniforms uniforms;
+    pbr::material_uniforms uniforms;
     float3 light;
 
     float4x4 get_model_matrix() const { return mul(translation_matrix(position), scaling_matrix(scale)); }
-    pbr_object_uniforms get_object_uniforms() const { return {get_model_matrix()}; }
+    pbr::object_uniforms get_object_uniforms() const { return {get_model_matrix()}; }
 
     bool raycast(const ray & r) const
     {
@@ -101,15 +101,15 @@ public:
         cmd.clear_depth(1.0);
         cmd.bind_pipeline(*pipe);
 
-        auto object_set = pool.alloc_descriptor_set(*pipe, pbr_per_object_set_index);
-        object_set.write(0, pbr_object_uniforms{translation_matrix(position)});
+        auto object_set = pool.alloc_descriptor_set(*pipe, pbr::object_set_index);
+        object_set.write(0, pbr::object_uniforms{translation_matrix(position)});
         object_set.bind(cmd);
 
         const float3 colors[] {{1,0,0},{0,1,0},{0,0,1}};
         for(int i=0; i<3; ++i)
         {
-            auto material_set = pool.alloc_descriptor_set(*pipe, pbr_per_material_set_index);
-            material_set.write(0, pbr_material_uniforms{colors[i],0.8f,0.0f});        
+            auto material_set = pool.alloc_descriptor_set(*pipe, pbr::material_set_index);
+            material_set.write(0, pbr::material_uniforms{colors[i],0.8f,0.0f});        
             material_set.bind(cmd); 
             arrows[i]->gmesh.draw(cmd);
         }
@@ -403,7 +403,7 @@ int main(int argc, const char * argv[]) try
     sheet.prepare_sheet();
 
     shader_compiler compiler{loader};
-    auto standard_sh = standard_shaders::compile(compiler);
+    auto standard_sh = pbr::shaders::compile(compiler);
     auto env_spheremap_img = loader.load_image("monument-valley.hdr", true);
 
     const float2 arrow_points[] {{0, 0.05f}, {1, 0.05f}, {1, 0.10f}, {1.1f, 0.05f}, {1.15f, 0.025f}, {1.2f, 0}};
@@ -446,7 +446,7 @@ int main(int argc, const char * argv[]) try
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
     auto dev = context.get_backends().back().create_device(debug);
 
-    standard_device_objects standard = {dev, standard_sh};
+    pbr::device_objects pbr_objects = {dev, standard_sh};
     canvas_device_objects canvas_objects {*dev, compiler, sheet};
     for(auto m : assets.meshes) m->gmesh = {*dev, m->cmesh.vertices, m->cmesh.triangles};
     for(auto t : assets.textures)
@@ -473,7 +473,7 @@ int main(int argc, const char * argv[]) try
 
     // Do some initial work
     pools[pool_index].begin_frame(*dev);
-    auto env = standard.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, coords);
+    auto env = pbr_objects.create_environment_map_from_spheremap(pools[pool_index], *env_spheremap, 512, coords);
     pools[pool_index].end_frame(*dev);
 
     // Window
@@ -516,7 +516,7 @@ int main(int argc, const char * argv[]) try
         auto vp = editor.viewport_rect;
 
         // Set up per scene uniforms
-        struct pbr_scene_uniforms per_scene_uniforms {};
+        pbr::scene_uniforms per_scene_uniforms {};
         int num_lights = 0;
         for(auto & obj : scene.objects)
         {
@@ -525,21 +525,21 @@ int main(int argc, const char * argv[]) try
             if(num_lights == 4) break;
         }
 
-        auto per_scene_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr_per_scene_set_index);
+        auto per_scene_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr::scene_set_index);
         per_scene_set.write(0, per_scene_uniforms);
-        per_scene_set.write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
-        per_scene_set.write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
-        per_scene_set.write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
+        per_scene_set.write(1, pbr_objects.get_image_sampler(), pbr_objects.get_brdf_integral_image());
+        per_scene_set.write(2, pbr_objects.get_cubemap_sampler(), *env.irradiance_cubemap);
+        per_scene_set.write(3, pbr_objects.get_cubemap_sampler(), *env.reflectance_cubemap);
 
         // Set up per-view uniforms for a specific framebuffer
-        pbr_view_uniforms per_view_uniforms;
+        pbr::view_uniforms per_view_uniforms;
         per_view_uniforms.view_proj_matrix = editor.cam.get_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
         per_view_uniforms.skybox_view_proj_matrix = editor.cam.get_skybox_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
         per_view_uniforms.eye_position = editor.cam.position;
         per_view_uniforms.right_vector = editor.cam.get_direction(coord_axis::right);
         per_view_uniforms.down_vector = editor.cam.get_direction(coord_axis::down);
 
-        auto per_view_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr_per_view_set_index);
+        auto per_view_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr::view_set_index);
         per_view_set.write(0, per_view_uniforms);
 
         // Draw objects to our primary framebuffer
@@ -556,8 +556,8 @@ int main(int argc, const char * argv[]) try
 
         // Draw skybox
         cmd->bind_pipeline(*pipelines.skybox_pipe);
-        auto skybox_set = pool.alloc_descriptor_set(*pipelines.skybox_pipe, pbr_per_material_set_index);
-        skybox_set.write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
+        auto skybox_set = pool.alloc_descriptor_set(*pipelines.skybox_pipe, pbr::material_set_index);
+        skybox_set.write(0, pbr_objects.get_cubemap_sampler(), *env.environment_cubemap);
         skybox_set.bind(*cmd);
         box->gmesh.draw(*cmd);
 
@@ -570,12 +570,12 @@ int main(int argc, const char * argv[]) try
 
             cmd->bind_pipeline(*pipe);
 
-            auto material_set = pool.alloc_descriptor_set(*pipe, pbr_per_material_set_index);
+            auto material_set = pool.alloc_descriptor_set(*pipe, pbr::material_set_index);
             material_set.write(0, object.uniforms);
             for(size_t i=0; i<object.material->texture_names.size(); ++i) material_set.write(exactly(1+i), *linear, object.textures[i] ? *object.textures[i]->gtex : *white->gtex);
             material_set.bind(*cmd);
 
-            auto object_set = pool.alloc_descriptor_set(*pipe, pbr_per_object_set_index);
+            auto object_set = pool.alloc_descriptor_set(*pipe, pbr::object_set_index);
             object_set.write(0, object.get_object_uniforms());
             object_set.bind(*cmd);
 
