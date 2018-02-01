@@ -220,6 +220,7 @@ ptr<pipeline> d3d_device::create_pipeline(const pipeline_desc & desc) { return n
 
 uint64_t d3d_device::submit(command_buffer & cmd)
 {
+    d3d_framebuffer * current_framebuffer = 0;
     d3d_pipeline * current_pipeline = 0;
     ctx->ClearState();
     static_cast<const emulated_command_buffer &>(cmd).execute(overload(
@@ -227,7 +228,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         {
             ctx->GenerateMips(static_cast<d3d_image &>(*c.im).shader_resource_view);
         },
-        [this,&current_pipeline](const begin_render_pass_command & c)
+        [&](const begin_render_pass_command & c)
         {
             auto & pass = c.pass;
             auto & fb = static_cast<d3d_framebuffer &>(*c.framebuffer);
@@ -256,6 +257,12 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             ctx->RSSetViewports(1, &vp);
             const D3D11_RECT scissor {0, 0, fb.dims.x, fb.dims.y};
             ctx->RSSetScissorRects(1, &scissor);
+
+            current_framebuffer = &fb;
+        },
+        [&](const clear_depth_command & c)
+        {
+            ctx->ClearDepthStencilView(current_framebuffer->depth_stencil_view, D3D11_CLEAR_DEPTH, c.depth, 0);
         },
         [&](const set_viewport_rect_command & c)
         {

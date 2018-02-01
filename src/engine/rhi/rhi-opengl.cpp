@@ -300,6 +300,15 @@ uint64_t gl_device::submit(command_buffer & cmd)
                 }
             }
         },
+        [](const clear_depth_command & c)
+        {
+            GLint prev_mask;
+            glGetIntegerv(GL_DEPTH_WRITEMASK, &prev_mask);
+            glDepthMask(GL_TRUE);
+            glClearDepthf(c.depth);
+            glClear(GL_DEPTH_BUFFER_BIT);
+            glDepthMask(prev_mask);
+        },
         [&](const set_viewport_rect_command & c)
         {
             glViewport(c.x0, framebuffer_height-c.y1, c.x1-c.x0, c.y1-c.y0);

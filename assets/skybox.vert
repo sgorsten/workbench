@@ -4,9 +4,8 @@
 #include "standard/pbr.glsl"
 
 layout(location=0) in vec3 v_position;
-layout(location=1) in vec3 v_color;
-layout(location=2) in vec3 v_normal;
-layout(location=3) in vec2 v_texcoord;
+layout(location=1) in vec3 v_normal;
+layout(location=2) in vec2 v_texcoord;
 layout(location=0) out vec3 direction;
 void main()
 {

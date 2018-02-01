@@ -1,17 +1,21 @@
 #include "preamble.glsl"
 
+// Descriptor set indices
+const int PER_SCENE = 0;	// Used for descriptors that are constant within the span of a single frame
+const int PER_VIEW = 1;		// Used for descriptors that vary between viewpoints but are constant within a viewpoint
+const int PER_MATERIAL = 2;	// Used for textures and material properties which may be shared by several objects
+const int PER_OBJECT = 3;	// Used for static or skeletal mesh pose data specific to a single object (optional for skyboxes, particle systems, and instances)
+
 struct point_light { vec3 position, light; };
 
 // Per-scene descriptors
-const int PER_SCENE = 0;
-layout(set=PER_SCENE, binding=0) uniform PerScene { point_light u_point_lights[4]; }; 
+layout(set=PER_SCENE, binding=0, std140) uniform PerScene { point_light u_point_lights[4]; }; 
 layout(set=PER_SCENE, binding=1) uniform sampler2D u_brdf_integration_map;
 layout(set=PER_SCENE, binding=2) uniform samplerCube u_irradiance_map;
 layout(set=PER_SCENE, binding=3) uniform samplerCube u_reflectance_map;
 
 // Per-view descriptors
-const int PER_VIEW = 1;
-layout(set=PER_VIEW, binding=0) uniform PerView
+layout(set=PER_VIEW, binding=0, std140) uniform PerView
 {
     mat4 u_view_proj_matrix;
     mat4 u_skybox_view_proj_matrix;
@@ -19,9 +23,6 @@ layout(set=PER_VIEW, binding=0) uniform PerView
 	vec3 u_right_vector;
 	vec3 u_down_vector;
 };
-
-// Per-object descriptors should be defined in sets above this index
-const int PER_OBJECT = 2;
 
 // This function computes the full lighting to apply to a single fragment
 const float MAX_REFLECTANCE_LOD = 4.0;

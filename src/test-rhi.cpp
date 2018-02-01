@@ -13,7 +13,7 @@ struct common_assets
     standard_shaders standard;
     rhi::shader_desc vs, lit_fs, unlit_fs, skybox_vs, skybox_fs;
     image env_spheremap;
-    mesh basis_mesh, ground_mesh, box_mesh, sphere_mesh;
+    mesh ground_mesh, box_mesh, sphere_mesh;
 
     sprite_sheet sheet;
     canvas_sprites sprites;
@@ -31,9 +31,8 @@ struct common_assets
 
         env_spheremap = loader.load_image("monument-valley.hdr");
 
-        basis_mesh = make_basis_mesh();
-        ground_mesh = make_quad_mesh({0.5f,0.5f,0.5f}, game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
-        box_mesh = make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
+        ground_mesh = make_quad_mesh(game_coords(coord_axis::right)*8.0f, game_coords(coord_axis::forward)*8.0f);
+        box_mesh = make_box_mesh({-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f});
         sphere_mesh = make_sphere_mesh(32, 32, 0.5f);
 
         sheet.prepare_sheet();
@@ -50,7 +49,7 @@ class device_session
     gfx::transient_resource_pool pools[3];
     int pool_index=0;
 
-    gfx::simple_mesh basis, ground, box, sphere;
+    gfx::simple_mesh ground, box, sphere;
 
     rhi::ptr<rhi::image> font_image;
     rhi::ptr<rhi::image> checkerboard;
@@ -58,9 +57,9 @@ class device_session
 
     rhi::ptr<rhi::sampler> nearest;
 
-    rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, per_object_layout, skybox_per_object_layout;
+    rhi::ptr<rhi::descriptor_set_layout> per_scene_layout, per_view_layout, skybox_material_layout, pbr_material_layout, static_object_layout;
     rhi::ptr<rhi::pipeline_layout> common_layout, object_layout, skybox_layout;
-    rhi::ptr<rhi::pipeline> wire_pipe, light_pipe, solid_pipe, skybox_pipe;
+    rhi::ptr<rhi::pipeline> light_pipe, solid_pipe, skybox_pipe;
 
     std::unique_ptr<gfx::window> gwindow;
     double2 last_cursor;
@@ -69,7 +68,6 @@ public:
         assets{assets}, dev{dev}, standard{dev, assets.standard}, canvas_objects{*dev, assets.compiler, assets.sheet}, info{dev->get_info()}, pools{*dev, *dev, *dev}
     {
         // Buffers
-        basis = {*dev, assets.basis_mesh.vertices, assets.basis_mesh.lines};
         ground = {*dev, assets.ground_mesh.vertices, assets.ground_mesh.triangles};
         box = {*dev, assets.box_mesh.vertices, assets.box_mesh.triangles};
         sphere = {*dev, assets.sphere_mesh.vertices, assets.sphere_mesh.triangles};
@@ -93,24 +91,26 @@ public:
         per_view_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::uniform_buffer, 1}
         });
-        per_object_layout = dev->create_descriptor_set_layout({
+        skybox_material_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::combined_image_sampler, 1}
+        });
+        pbr_material_layout = dev->create_descriptor_set_layout({
             {0, rhi::descriptor_type::uniform_buffer, 1},
             {1, rhi::descriptor_type::combined_image_sampler, 1}
         });
-        skybox_per_object_layout = dev->create_descriptor_set_layout({
-            {0, rhi::descriptor_type::combined_image_sampler, 1}
+        static_object_layout = dev->create_descriptor_set_layout({
+            {0, rhi::descriptor_type::uniform_buffer, 1},
         });
 
         // Pipeline layouts
         common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
-        object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
-        skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
+        skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
+        object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, pbr_material_layout, static_object_layout});
 
         const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
             .attribute(0, &mesh_vertex::position)
-            .attribute(1, &mesh_vertex::color)
-            .attribute(2, &mesh_vertex::normal)
-            .attribute(3, &mesh_vertex::texcoord);
+            .attribute(1, &mesh_vertex::normal)
+            .attribute(2, &mesh_vertex::texcoord);
         const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
             .attribute(0, &ui_vertex::position)
             .attribute(1, &ui_vertex::texcoord)
@@ -125,7 +125,6 @@ public:
         const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
         // Pipelines
-        wire_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::lines, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});
         light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
         skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
@@ -167,7 +166,7 @@ public:
         pool.begin_frame(*dev);
 
         // Set up per scene uniforms
-        struct pbr_per_scene_uniforms per_scene_uniforms {};
+        struct pbr_scene_uniforms per_scene_uniforms {};
         per_scene_uniforms.point_lights[0] = {{-3, -3, 8}, {23.47f, 21.31f, 20.79f}};
         per_scene_uniforms.point_lights[1] = {{ 3, -3, 8}, {23.47f, 21.31f, 20.79f}};
         per_scene_uniforms.point_lights[2] = {{ 3,  3, 8}, {23.47f, 21.31f, 20.79f}};
@@ -185,7 +184,7 @@ public:
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
         const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, info.z_range), make_transform_4x4(cam.coords, fb.get_ndc_coords()));
 
-        pbr_per_view_uniforms per_view_uniforms;
+        pbr_view_uniforms per_view_uniforms;
         per_view_uniforms.view_proj_matrix = mul(proj_matrix, cam.get_view_matrix());
         per_view_uniforms.skybox_view_proj_matrix = mul(proj_matrix, cam.get_skybox_view_matrix());
         per_view_uniforms.eye_position = cam.position;
@@ -207,41 +206,31 @@ public:
 
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe);
-        auto skybox_set = pool.descriptors->alloc(*skybox_per_object_layout);
+        auto skybox_set = pool.descriptors->alloc(*skybox_material_layout);
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
-        cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
+        cmd->bind_descriptor_set(*skybox_layout, pbr_per_material_set_index, *skybox_set);
         box.draw(*cmd);
-
-        // Draw basis
-        cmd->bind_pipeline(*wire_pipe);
-        auto basis_set = pool.descriptors->alloc(*per_object_layout);
-        basis_set->write(0, pool.uniforms.upload(float4x4{linalg::identity}));
-        basis_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *basis_set);
-        basis.draw(*cmd);
 
         // Draw lights
         cmd->bind_pipeline(*light_pipe);
+        auto material_set = pool.descriptors->alloc(*pbr_material_layout);
+        material_set->write(0, pool.uniforms.upload(pbr_material_uniforms{{0.5f,0.5f,0.5f},0.5f,0}));
+        material_set->write(1, *nearest, *checkerboard);
+        cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set);
         for(auto & p : per_scene_uniforms.point_lights)
         {
-            auto set = pool.descriptors->alloc(*per_object_layout);
-            set->write(0, pool.uniforms.upload(mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))));
-            set->write(1, *nearest, *checkerboard);
-            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *set);
+            auto object_set = pool.descriptors->alloc(*static_object_layout);
+            object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))}));
+            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
+
             sphere.draw(*cmd);
         }
 
         // Draw the ground
         cmd->bind_pipeline(*solid_pipe);
-        struct { float4x4 model_matrix, model_matrix_it; float roughness, metalness; } per_object;
-        per_object.model_matrix = translation_matrix(cam.coords(coord_axis::down)*0.5f);
-        per_object.model_matrix_it = inverse(transpose(per_object.model_matrix));
-        per_object.roughness = 0.5f;
-        per_object.metalness = 0.0f;
-        auto ground_set = pool.descriptors->alloc(*per_object_layout);
-        ground_set->write(0, pool.uniforms.upload(per_object));
-        ground_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *ground_set);
+        auto object_set = pool.descriptors->alloc(*static_object_layout);
+        object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{translation_matrix(cam.coords(coord_axis::down)*0.5f)}));
+        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
         ground.draw(*cmd);
 
         // Draw a bunch of spheres
@@ -249,14 +238,15 @@ public:
         {
             for(int j=0; j<6; ++j)
             {
-                per_object.model_matrix = translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f));
-                per_object.model_matrix_it = inverse(transpose(per_object.model_matrix));
-                per_object.roughness = (j+0.5f)/6;
-                per_object.metalness = (i+0.5f)/6;
-                auto sphere_set = pool.descriptors->alloc(*per_object_layout);
-                sphere_set->write(0, pool.uniforms.upload(per_object));
-                sphere_set->write(1, *nearest, *checkerboard);
-                cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *sphere_set);
+                material_set = pool.descriptors->alloc(*pbr_material_layout);
+                material_set->write(0, pool.uniforms.upload(pbr_material_uniforms{{1,1,1},(j+0.5f)/6,(i+0.5f)/6}));
+                material_set->write(1, *nearest, *checkerboard);
+                cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set);
+
+                object_set = pool.descriptors->alloc(*static_object_layout);
+                object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f))}));
+                cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
+
                 sphere.draw(*cmd);
             }
         }

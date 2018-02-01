@@ -2,19 +2,18 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_GOOGLE_include_directive : enable
 #include "standard/pbr.glsl"
-layout(set=PER_OBJECT,binding=0) uniform PerObject 
-{ 
-	mat4 u_model_matrix;
-	mat4 u_model_matrix_it;
-	vec2 u_material; // roughness, metalness
+layout(set=PER_MATERIAL,binding=0,std140) uniform PerMaterial 
+{
+	vec3 u_albedo_tint;
+	float u_roughness;
+	float u_metalness;
 };
-layout(set=PER_OBJECT,binding=1) uniform sampler2D u_albedo_tex;
+layout(set=PER_MATERIAL,binding=1) uniform sampler2D u_albedo_tex;
 layout(location=0) in vec3 position;
-layout(location=1) in vec3 color;
-layout(location=2) in vec3 normal;
-layout(location=3) in vec2 texcoord;
+layout(location=1) in vec3 normal;
+layout(location=2) in vec2 texcoord;
 layout(location=0) out vec4 f_color;
 void main() 
 { 
-	f_color = vec4(compute_lighting(position, normalize(normal), color*texture(u_albedo_tex, texcoord).rgb, u_material.x, u_material.y, 1.0), 1);
+	f_color = vec4(compute_lighting(position, normalize(normal), u_albedo_tint*texture(u_albedo_tex, texcoord).rgb, u_roughness, u_metalness, 1.0), 1);
 }

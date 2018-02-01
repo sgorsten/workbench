@@ -41,7 +41,8 @@ public:
     constexpr array_view(const array_view & view) noexcept = default;
     constexpr array_view(const T * s, size_type count) noexcept : view_data{s}, view_size{count} {}
     constexpr array_view(const std::vector<T> & vec) noexcept : array_view{vec.data(), vec.size()} {}
-    constexpr array_view(std::initializer_list<T> ilist) noexcept : array_view{ilist.begin(), ilist.size()} {}    
+    constexpr array_view(std::initializer_list<T> ilist) noexcept : array_view{ilist.begin(), ilist.size()} {}   
+    template<size_type N> constexpr array_view(const T (& array)[N]) : array_view{array, N} {}
 
     constexpr array_view & operator = (const array_view & view) noexcept = default;
 

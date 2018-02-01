@@ -55,9 +55,11 @@ struct object
     float3 scale;
     mesh_asset * mesh;
     texture_asset * albedo;
-    float roughness;
-    float metalness;
+    pbr_material_uniforms material;
     float3 light;
+
+    float4x4 get_model_matrix() const { return mul(translation_matrix(position), scaling_matrix(scale)); }
+    pbr_object_uniforms get_object_uniforms() const { return {get_model_matrix()}; }
 
     bool raycast(const ray & r) const
     {
@@ -242,8 +244,9 @@ struct editor
         p.edit("Scale", selection->scale);
         p.edit("Mesh", selection->mesh);
         p.edit("Albedo", selection->albedo);
-        p.edit("Roughness", ranged_property{selection->roughness,0,1});
-        p.edit("Metalness", ranged_property{selection->metalness,0,1});
+        p.edit("Albedo Tint", selection->material.albedo_tint);
+        p.edit("Roughness", ranged_property{selection->material.roughness,0,1});
+        p.edit("Metalness", ranged_property{selection->material.metalness,0,1});
         p.edit("Light", selection->light);
         g.end_group();
     }
@@ -282,9 +285,13 @@ int main(int argc, const char * argv[]) try
     auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
     auto env_spheremap_img = loader.load_image("monument-valley.hdr");
 
-    auto box = new mesh_asset{"box", make_box_mesh({1,0,0}, {-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f})};
+    const float2 arrow_points[] {{0, 0.05f}, {1, 0.05f}, {1, 0.10f}, {1.1f, 0.05f}, {1.15f, 0.025f}, {1.2f, 0}};
+    auto arrow_x = new mesh_asset{"arrow_x", make_lathed_mesh({1,0,0}, {0,1,0}, {0,0,1}, 12, arrow_points)};
+    auto arrow_y = new mesh_asset{"arrow_y", make_lathed_mesh({0,1,0}, {0,0,1}, {1,0,0}, 12, arrow_points)};
+    auto arrow_z = new mesh_asset{"arrow_z", make_lathed_mesh({0,0,1}, {1,0,0}, {0,1,0}, 12, arrow_points)};
+    auto box = new mesh_asset{"box", make_box_mesh({-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f})};
     auto sphere = new mesh_asset{"sphere", make_sphere_mesh(32, 32, 0.5f)};
-    auto plane = new mesh_asset{"plane", make_quad_mesh({0.5f,0.5f,0.5f}, coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)};
+    auto plane = new mesh_asset{"plane", make_quad_mesh(coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)};
 
     auto checker = new texture_asset{"checker.png"};
     auto marble = new texture_asset{"marble.png"};
@@ -292,18 +299,18 @@ int main(int argc, const char * argv[]) try
     auto normal = new texture_asset{"normal.png"};
 
     asset_library assets;
-    assets.meshes = {box, sphere, plane};
+    assets.meshes = {arrow_x, arrow_y, arrow_z, box, sphere, plane};
     assets.textures = {checker, marble, scratched, normal};
 
     scene scene;
-    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, 0.5f, 0.0f, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, plane, marble, 0.5f, 0.0f});
+    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, checker, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, plane, marble, {{0.5f,0.5f,0.5f}, 0.5f, 0.0f}});
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
     {
-        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, sphere, checker, (j+0.5f)/3, (i+0.5f)/3});
+        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, sphere, checker, {{1,1,1}, (j+0.5f)/3, (i+0.5f)/3}});
     }
     
     // Create our device and load our device objects
@@ -336,24 +343,26 @@ int main(int argc, const char * argv[]) try
     auto per_view_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1}
     });
-    auto per_object_layout = dev->create_descriptor_set_layout({
+    auto skybox_material_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+    auto pbr_material_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1},
         {1, rhi::descriptor_type::combined_image_sampler, 1}
     });
-    auto skybox_per_object_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::combined_image_sampler, 1}
+    auto static_object_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
     });
 
     // Pipeline layouts
     auto common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
-    auto object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, per_object_layout});
-    auto skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_per_object_layout});
-
+    auto skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
+    auto object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, pbr_material_layout, static_object_layout});
+    
     const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
         .attribute(0, &mesh_vertex::position)
-        .attribute(1, &mesh_vertex::color)
-        .attribute(2, &mesh_vertex::normal)
-        .attribute(3, &mesh_vertex::texcoord);   
+        .attribute(1, &mesh_vertex::normal)
+        .attribute(2, &mesh_vertex::texcoord);
 
     // Shaders
     auto vss = dev->create_shader(vs), lit_fss = dev->create_shader(lit_fs), unlit_fss = dev->create_shader(unlit_fs);
@@ -416,7 +425,7 @@ int main(int argc, const char * argv[]) try
         auto vp = editor.viewport_rect;
 
         // Set up per scene uniforms
-        struct pbr_per_scene_uniforms per_scene_uniforms {};
+        struct pbr_scene_uniforms per_scene_uniforms {};
         int num_lights = 0;
         for(auto & obj : scene.objects)
         {
@@ -432,7 +441,7 @@ int main(int argc, const char * argv[]) try
         per_scene_set->write(3, standard.get_cubemap_sampler(), *env.reflectance_cubemap);
 
         // Set up per-view uniforms for a specific framebuffer
-        pbr_per_view_uniforms per_view_uniforms;
+        pbr_view_uniforms per_view_uniforms;
         per_view_uniforms.view_proj_matrix = editor.cam.get_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
         per_view_uniforms.skybox_view_proj_matrix = editor.cam.get_skybox_view_proj_matrix(vp.aspect_ratio(), fb.get_ndc_coords(), dev->get_info().z_range);
         per_view_uniforms.eye_position = editor.cam.position;
@@ -456,28 +465,43 @@ int main(int argc, const char * argv[]) try
 
         // Draw skybox
         cmd->bind_pipeline(*skybox_pipe);
-        auto skybox_set = pool.descriptors->alloc(*skybox_per_object_layout);
+        auto skybox_set = pool.descriptors->alloc(*skybox_material_layout);
         skybox_set->write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
-        cmd->bind_descriptor_set(*skybox_layout, pbr_per_object_set_index, *skybox_set);
-        assets.meshes[0]->gmesh.draw(*cmd);
+        cmd->bind_descriptor_set(*skybox_layout, pbr_per_material_set_index, *skybox_set);
+        box->gmesh.draw(*cmd);
 
         // Draw our objects
         for(auto & object : scene.objects)
         {
             if(!object.mesh || !object.albedo) continue;
 
-            struct { float4x4 model_matrix, model_matrix_it; float roughness, metalness; } per_object;
-            per_object.model_matrix = mul(translation_matrix(object.position), scaling_matrix(object.scale));
-            per_object.model_matrix_it = inverse(transpose(per_object.model_matrix));
-            per_object.roughness = object.roughness;
-            per_object.metalness = object.metalness;
-            auto sphere_set = pool.descriptors->alloc(*per_object_layout);
-            sphere_set->write(0, pool.uniforms.upload(per_object));
-            sphere_set->write(1, *linear, *object.albedo->gtex);
+            auto material_set = pool.descriptors->alloc(*pbr_material_layout);
+            material_set->write(0, pool.uniforms.upload(object.material));
+            material_set->write(1, *linear, *object.albedo->gtex);
+
+            auto object_set = pool.descriptors->alloc(*static_object_layout);
+            object_set->write(0, pool.uniforms.upload(object.get_object_uniforms()));
 
             cmd->bind_pipeline(object.light == float3{0,0,0} ? *solid_pipe : *light_pipe);
-            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *sphere_set);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
             object.mesh->gmesh.draw(*cmd);
+        }
+
+        // Draw our gizmo
+        if(editor.selection)
+        {
+            auto material_set_x = pool.descriptors->alloc(*pbr_material_layout); material_set_x->write(0, pool.uniforms.upload(pbr_material_uniforms{{1,0,0},0.8f,0.0f})); material_set_x->write(1, *linear, *checker->gtex);
+            auto material_set_y = pool.descriptors->alloc(*pbr_material_layout); material_set_y->write(0, pool.uniforms.upload(pbr_material_uniforms{{0,1,0},0.8f,0.0f})); material_set_y->write(1, *linear, *checker->gtex);
+            auto material_set_z = pool.descriptors->alloc(*pbr_material_layout); material_set_z->write(0, pool.uniforms.upload(pbr_material_uniforms{{0,0,1},0.8f,0.0f})); material_set_z->write(1, *linear, *checker->gtex);
+            auto object_set = pool.descriptors->alloc(*static_object_layout); object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{translation_matrix(editor.selection->position)}));
+
+            cmd->clear_depth(1.0);
+            cmd->bind_pipeline(*solid_pipe);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set_x); arrow_x->gmesh.draw(*cmd);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set_y); arrow_y->gmesh.draw(*cmd);
+            cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set_z); arrow_z->gmesh.draw(*cmd);
         }
 
         canvas.encode_commands(*cmd, *gwindow);

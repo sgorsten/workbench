@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 #include "geometry.h" // For coord_system
 
 struct GLFWwindow;
@@ -211,6 +211,9 @@ namespace rhi
     {
         virtual void generate_mipmaps(image & image) = 0;
         virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
+        // TODO: virtual void clear_color(int index, clear_color color) = 0;
+        virtual void clear_depth(float depth) = 0;
+        // TODO: virtual void clear_stencil(uint8_t stencil) = 0;
         virtual void set_viewport_rect(int x0, int y0, int x1, int y1) = 0;
         virtual void set_scissor_rect(int x0, int y0, int x1, int y1) = 0;
         virtual void bind_pipeline(pipeline & pipe) = 0;

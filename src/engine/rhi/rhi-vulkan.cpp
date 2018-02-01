@@ -301,10 +301,12 @@ namespace rhi
         std::set<ptr<object>> referenced_objects;
         VkCommandBuffer cmd;
         VkRenderPass current_pass;
+        vk_framebuffer * current_framebuffer;
 
         void record_reference(object & object);
         void generate_mipmaps(image & image) override;
         void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
+        void clear_depth(float depth) override;
         void set_viewport_rect(int x0, int y0, int x1, int y1) override;
         void set_scissor_rect(int x0, int y0, int x1, int y1) override;
         void bind_pipeline(pipeline & pipe) override;
@@ -1200,13 +1202,14 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
     }
     if(pass_desc.depth_attachment)
     {
-        if(auto op = std::get_if<clear_depth>(&pass_desc.depth_attachment->load_op))
+        if(auto op = std::get_if<rhi::clear_depth>(&pass_desc.depth_attachment->load_op))
         {
             clear_values.resize(pass_desc.color_attachments.size()+1);
             clear_values.back().depthStencil = {op->depth, op->stencil};
         }
     }
 
+    current_framebuffer = &fb;
     current_pass = device->get_render_pass(fb.get_render_pass_desc(pass_desc));
 
     VkRenderPassBeginInfo pass_begin_info {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -1219,6 +1222,14 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
 
     set_viewport_rect(0, 0, fb.dims.x, fb.dims.y);
     set_scissor_rect(0, 0, fb.dims.x, fb.dims.y);
+}
+
+void vk_command_buffer::clear_depth(float depth)
+{
+    VkClearAttachment clear {VK_IMAGE_ASPECT_DEPTH_BIT};
+    clear.clearValue.depthStencil.depth = depth;
+    const VkClearRect rect {{{0,0}, {current_framebuffer->dims.x,current_framebuffer->dims.y}}, 0, 1};
+    vkCmdClearAttachments(cmd, 1, &clear, 1, &rect);
 }
 
 void vk_command_buffer::set_viewport_rect(int x0, int y0, int x1, int y1)

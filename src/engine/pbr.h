@@ -49,19 +49,33 @@ public:
 
 constexpr int pbr_per_scene_set_index = 0;
 constexpr int pbr_per_view_set_index = 1;
-constexpr int pbr_per_object_set_index = 2;
+constexpr int pbr_per_material_set_index = 2;
+constexpr int pbr_per_object_set_index = 3;
 
-struct pbr_per_scene_uniforms
+struct pbr_scene_uniforms
 {
     struct point_light { alignas(16) float3 position, light; };
     point_light point_lights[4];
 };
 
-struct pbr_per_view_uniforms
+struct pbr_view_uniforms
 {
     alignas(16) float4x4 view_proj_matrix;
     alignas(16) float4x4 skybox_view_proj_matrix;
     alignas(16) float3 eye_position;
     alignas(16) float3 right_vector;
     alignas(16) float3 down_vector;
+};
+
+struct pbr_material_uniforms
+{
+    alignas(16) float3 albedo_tint;
+    alignas(4) float roughness, metalness;
+};
+
+struct pbr_object_uniforms
+{
+    alignas(16) float4x4 model_matrix;
+    alignas(16) float4x4 model_matrix_it;
+    pbr_object_uniforms(float4x4 model_matrix) : model_matrix{model_matrix}, model_matrix_it{inverse(transpose(model_matrix))} {}
 };
