@@ -131,27 +131,27 @@ namespace rhi
         uint64_t submit(const VkSubmitInfo & submit_info);
 
         // info
-        device_info get_info() const override { return {linalg::zero_to_one, false}; }
+        device_info get_info() const final { return {linalg::zero_to_one, false}; }
 
         // resources
-        ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) override;
-        ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) override;
-        ptr<sampler> create_sampler(const sampler_desc & desc) override;
-        ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) override;
-        ptr<window> create_window(const int2 & dimensions, std::string_view title) override;
+        ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) final;
+        ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) final;
+        ptr<sampler> create_sampler(const sampler_desc & desc) final;
+        ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) final;
+        ptr<window> create_window(const int2 & dimensions, std::string_view title) final;
 
-        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override;
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) override;
-        ptr<shader> create_shader(const shader_desc & desc) override;
-        ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;        
+        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) final;
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) final;
+        ptr<shader> create_shader(const shader_desc & desc) final;
+        ptr<pipeline> create_pipeline(const pipeline_desc & desc) final;        
 
-        ptr<descriptor_pool> create_descriptor_pool() override;
-        ptr<command_buffer> create_command_buffer() override;
+        ptr<descriptor_pool> create_descriptor_pool() final;
+        ptr<command_buffer> create_command_buffer() final;
 
-        uint64_t submit(command_buffer & cmd) override;
-        uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
-        uint64_t get_last_submission_id() override { return submitted_index; }
-        void wait_until_complete(uint64_t submit_id) override;
+        uint64_t submit(command_buffer & cmd) final;
+        uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) final;
+        uint64_t get_last_submission_id() final { return submitted_index; }
+        void wait_until_complete(uint64_t submit_id) final;
     };
 
     autoregister_backend<vk_device> autoregister_vk_backend {"Vulkan 1.0"};
@@ -166,8 +166,8 @@ namespace rhi
         vk_buffer(vk_device * device, const buffer_desc & desc, const void * initial_data);
         ~vk_buffer();
 
-        size_t get_offset_alignment() override { return exactly(device->device_props.limits.minUniformBufferOffsetAlignment); }
-        char * get_mapped_memory() override { return mapped; }
+        size_t get_offset_alignment() final { return exactly(device->device_props.limits.minUniformBufferOffsetAlignment); }
+        char * get_mapped_memory() final { return mapped; }
     };
 
     struct vk_image : image
@@ -214,7 +214,7 @@ namespace rhi
         vk_framebuffer(vk_device * device, vk_image & depth_image, const std::string & title);
         ~vk_framebuffer();
 
-        coord_system get_ndc_coords() const override { return {coord_axis::right, coord_axis::down, coord_axis::forward}; }
+        coord_system get_ndc_coords() const final { return {coord_axis::right, coord_axis::down, coord_axis::forward}; }
 
         vk_render_pass_desc get_render_pass_desc(const render_pass_desc & desc) const;
     };
@@ -242,7 +242,7 @@ namespace rhi
         ~vk_descriptor_set_layout();
     };
 
-    struct vk_pipeline_layout : pipeline_layout
+    struct vk_pipeline_layout : base_pipeline_layout
     {
         ptr<vk_device> device;
         VkPipelineLayout layout;
@@ -261,7 +261,7 @@ namespace rhi
         ~vk_shader();
     };
 
-    struct vk_pipeline : pipeline
+    struct vk_pipeline : base_pipeline
     {
         ptr<vk_device> device;
         pipeline_desc desc;
@@ -278,8 +278,8 @@ namespace rhi
         VkDevice device;
         VkDescriptorSet set;
 
-        void write(int binding, buffer_range range) override;
-        void write(int binding, sampler & sampler, image & image) override;
+        void write(int binding, buffer_range range) final;
+        void write(int binding, sampler & sampler, image & image) final;
     };
     struct vk_descriptor_pool : descriptor_pool 
     {
@@ -291,8 +291,8 @@ namespace rhi
         vk_descriptor_pool(vk_device * device);
         ~vk_descriptor_pool();
 
-        void reset() override;
-        ptr<descriptor_set> alloc(const descriptor_set_layout & layout) override;
+        void reset() final;
+        ptr<descriptor_set> alloc(const descriptor_set_layout & layout) final;
     };
 
     struct vk_command_buffer : command_buffer
@@ -304,18 +304,18 @@ namespace rhi
         vk_framebuffer * current_framebuffer;
 
         void record_reference(const object & object);
-        void generate_mipmaps(image & image) override;
-        void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) override;
-        void clear_depth(float depth) override;
-        void set_viewport_rect(int x0, int y0, int x1, int y1) override;
-        void set_scissor_rect(int x0, int y0, int x1, int y1) override;
-        void bind_pipeline(const pipeline & pipe) override;
-        void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) override;
-        void bind_vertex_buffer(int index, buffer_range range) override;
-        void bind_index_buffer(buffer_range range) override;
-        void draw(int first_vertex, int vertex_count) override;
-        void draw_indexed(int first_index, int index_count) override;
-        void end_render_pass() override;
+        void generate_mipmaps(image & image) final;
+        void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) final;
+        void clear_depth(float depth) final;
+        void set_viewport_rect(int x0, int y0, int x1, int y1) final;
+        void set_scissor_rect(int x0, int y0, int x1, int y1) final;
+        void bind_pipeline(const pipeline & pipe) final;
+        void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) final;
+        void bind_vertex_buffer(int index, buffer_range range) final;
+        void bind_index_buffer(buffer_range range) final;
+        void draw(int first_vertex, int vertex_count) final;
+        void draw_indexed(int first_index, int index_count) final;
+        void end_render_pass() final;
     };
 
     ptr<buffer> vk_device::create_buffer(const buffer_desc & desc, const void * initial_data) { return new delete_when_unreferenced<vk_buffer>{this, desc, initial_data}; }
@@ -336,8 +336,8 @@ namespace rhi
 {
     struct vulkan_error : public std::error_category
     {
-        const char * name() const noexcept override { return "VkResult"; }
-        std::string message(int value) const override { return std::to_string(value); }
+        const char * name() const noexcept final { return "VkResult"; }
+        std::string message(int value) const final { return std::to_string(value); }
         static const std::error_category & instance() { static vulkan_error inst; return inst; }
     };
     void check(const char * func, VkResult result)
@@ -962,7 +962,7 @@ vk_descriptor_set_layout::~vk_descriptor_set_layout()
     device->destroy(layout);
 }
 
-vk_pipeline_layout::vk_pipeline_layout(vk_device * device, const std::vector<const descriptor_set_layout *> & sets) : device{device}
+vk_pipeline_layout::vk_pipeline_layout(vk_device * device, const std::vector<const descriptor_set_layout *> & sets) : base_pipeline_layout{sets}, device{device}
 { 
     std::vector<VkDescriptorSetLayout> set_layouts;
     for(auto s : sets) set_layouts.push_back(static_cast<const vk_descriptor_set_layout *>(s)->layout);
@@ -990,7 +990,7 @@ vk_shader::~vk_shader()
     device->destroy(module);
 }
 
-vk_pipeline::vk_pipeline(vk_device * device, const pipeline_desc & desc) : device{device}, desc{desc} {}
+vk_pipeline::vk_pipeline(vk_device * device, const pipeline_desc & desc) : base_pipeline{*desc.layout}, device{device}, desc{desc} {}
 
 VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass) const
 {

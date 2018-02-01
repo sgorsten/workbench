@@ -8,8 +8,8 @@ namespace rhi
     template<class T> struct delete_when_unreferenced : T
     {
         mutable std::atomic_uint32_t ref_count {0};
-        void add_ref() const override { ++ref_count; }
-        void release() const override { if(--ref_count == 0) delete this; }
+        void add_ref() const final { ++ref_count; }
+        void release() const final { if(--ref_count == 0) delete this; }
         using T::T;
     };
 
@@ -17,9 +17,30 @@ namespace rhi
     template<class T> struct counted : T
     {
         mutable std::atomic_uint32_t ref_count {0};
-        void add_ref() const override { ++ref_count; }
-        void release() const override { --ref_count; }
+        void add_ref() const final { ++ref_count; }
+        void release() const final { --ref_count; }
         using T::T;
+    };
+
+    // This class is used to ensure that all implementations of pipeline_layout remember the descriptor_set_layouts used to create them
+    struct base_pipeline_layout : pipeline_layout
+    {
+        std::vector<rhi::ptr<const rhi::descriptor_set_layout>> set_layouts;
+
+        base_pipeline_layout(array_view<const rhi::descriptor_set_layout *> set_layouts) : set_layouts{set_layouts.begin(), set_layouts.end()} {}
+
+        int get_descriptor_set_count() const final { return exactly(set_layouts.size()); }
+        const descriptor_set_layout & get_descriptor_set_layout(int index) const final { return *set_layouts[index]; }
+    };
+
+    // This class is used to ensure that all implementations of pipeline remember the pipeline_layout used to create them
+    struct base_pipeline : pipeline 
+    {
+        rhi::ptr<const rhi::pipeline_layout> layout;
+
+        base_pipeline(const rhi::pipeline_layout & layout) : layout{&layout} {}
+
+        const pipeline_layout & get_layout() const final { return *layout; }
     };
 
     std::vector<backend_info> & global_backend_list();
@@ -43,7 +64,7 @@ namespace rhi
         emulated_descriptor_set_layout(const std::vector<descriptor_binding> & bindings);
     };
 
-    struct emulated_pipeline_layout : pipeline_layout
+    struct emulated_pipeline_layout : base_pipeline_layout
     {
         struct set { ptr<const emulated_descriptor_set_layout> layout; size_t buffer_offset, image_offset; };
         std::vector<set> sets;
@@ -62,8 +83,8 @@ namespace rhi
         buffer_binding * buffer_bindings;
         image_binding * image_bindings;
 
-        void write(int binding, buffer_range range) override;
-        void write(int binding, sampler & sampler, image & image) override;
+        void write(int binding, buffer_range range) final;
+        void write(int binding, sampler & sampler, image & image) final;
     };
 
     struct emulated_descriptor_pool : descriptor_pool
@@ -80,8 +101,8 @@ namespace rhi
 
         }
 
-        void reset() override;
-        ptr<descriptor_set> alloc(const descriptor_set_layout & layout) override;
+        void reset() final;
+        ptr<descriptor_set> alloc(const descriptor_set_layout & layout) final;
     };
 
     template<class BindBufferFunction, class BindImageFunction>
@@ -125,18 +146,18 @@ namespace rhi
             bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
         std::vector<command> commands; 
     
-        void generate_mipmaps(image & image) override { commands.push_back(generate_mipmaps_command{&image}); }
-        void begin_render_pass(const render_pass_desc & pass, framebuffer & framebuffer) override { commands.push_back(begin_render_pass_command{pass, &framebuffer}); }
+        void generate_mipmaps(image & image) final { commands.push_back(generate_mipmaps_command{&image}); }
+        void begin_render_pass(const render_pass_desc & pass, framebuffer & framebuffer) final { commands.push_back(begin_render_pass_command{pass, &framebuffer}); }
         void clear_depth(float depth) { commands.push_back(clear_depth_command{depth}); }
-        void set_viewport_rect(int x0, int y0, int x1, int y1) override { commands.push_back(set_viewport_rect_command{x0, y0, x1, y1}); }
-        void set_scissor_rect(int x0, int y0, int x1, int y1) override { commands.push_back(set_scissor_rect_command{x0, y0, x1, y1}); }
-        void bind_pipeline(const pipeline & pipe) override { commands.push_back(bind_pipeline_command{&pipe}); }
-        void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) override { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }
-        void bind_vertex_buffer(int index, buffer_range range) override { commands.push_back(bind_vertex_buffer_command{index, range}); }
-        void bind_index_buffer(buffer_range range) override { commands.push_back(bind_index_buffer_command{range}); }
-        void draw(int first_vertex, int vertex_count) override { commands.push_back(draw_command{first_vertex, vertex_count}); }
-        void draw_indexed(int first_index, int index_count) override { commands.push_back(draw_indexed_command{first_index, index_count}); }
-        void end_render_pass() override { commands.push_back(end_render_pass_command{}); }
+        void set_viewport_rect(int x0, int y0, int x1, int y1) final { commands.push_back(set_viewport_rect_command{x0, y0, x1, y1}); }
+        void set_scissor_rect(int x0, int y0, int x1, int y1) final { commands.push_back(set_scissor_rect_command{x0, y0, x1, y1}); }
+        void bind_pipeline(const pipeline & pipe) final { commands.push_back(bind_pipeline_command{&pipe}); }
+        void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) final { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }
+        void bind_vertex_buffer(int index, buffer_range range) final { commands.push_back(bind_vertex_buffer_command{index, range}); }
+        void bind_index_buffer(buffer_range range) final { commands.push_back(bind_index_buffer_command{range}); }
+        void draw(int first_vertex, int vertex_count) final { commands.push_back(draw_command{first_vertex, vertex_count}); }
+        void draw_indexed(int first_index, int index_count) final { commands.push_back(draw_indexed_command{first_index, index_count}); }
+        void end_render_pass() final { commands.push_back(end_render_pass_command{}); }
 
         template<class ExecuteCommandFunction> void execute(ExecuteCommandFunction execute_command) const { for(auto & command : commands) std::visit(execute_command, command); }
     };

@@ -78,10 +78,10 @@ struct scene
 
 struct gizmo
 {
-    const gfx::pipeline & pipe;
+    rhi::ptr<const rhi::pipeline> pipe;
     const mesh_asset * arrows[3];
 public:
-    gizmo(const gfx::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z) : pipe{pipe}, arrows{arrow_x, arrow_y, arrow_z}
+    gizmo(const rhi::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z) : pipe{&pipe}, arrows{arrow_x, arrow_y, arrow_z}
     {
     
     }
@@ -89,16 +89,16 @@ public:
     void draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool, const float3 & position) const
     {
         cmd.clear_depth(1.0);
-        cmd.bind_pipeline(pipe.get_rhi_pipeline());
+        cmd.bind_pipeline(*pipe);
 
-        auto object_set = pool.alloc_descriptor_set(pipe, pbr_per_object_set_index);
+        auto object_set = pool.alloc_descriptor_set(*pipe, pbr_per_object_set_index);
         object_set.write(0, pbr_object_uniforms{translation_matrix(position)});
         object_set.bind(cmd);
 
         const float3 colors[] {{1,0,0},{0,1,0},{0,0,1}};
         for(int i=0; i<3; ++i)
         {
-            auto material_set = pool.alloc_descriptor_set(pipe, pbr_per_material_set_index);
+            auto material_set = pool.alloc_descriptor_set(*pipe, pbr_per_material_set_index);
             material_set.write(0, pbr_material_uniforms{colors[i],0.8f,0.0f});        
             material_set.bind(cmd); 
             arrows[i]->gmesh.draw(cmd);
@@ -293,6 +293,77 @@ struct editor
     }
 };
 
+struct pipelines
+{
+    rhi::ptr<const rhi::pipeline_layout> common_layout;
+    rhi::ptr<const rhi::pipeline> light_pipe;
+    rhi::ptr<const rhi::pipeline> skybox_pipe;
+    rhi::ptr<const rhi::pipeline> colored_pbr_pipe;
+    rhi::ptr<const rhi::pipeline> textured_pbr_pipe;
+};
+
+pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
+{
+    // Descriptor set layouts
+    auto per_scene_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+        {1, rhi::descriptor_type::combined_image_sampler, 1},
+        {2, rhi::descriptor_type::combined_image_sampler, 1},
+        {3, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+    auto per_view_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1}
+    });
+    auto skybox_material_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+    auto colored_pbr_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+    });
+    auto textured_pbr_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+        {1, rhi::descriptor_type::combined_image_sampler, 1}
+    });
+    auto static_object_layout = dev.create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+    });
+
+    // Pipeline layouts
+    auto common_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout});
+    auto skybox_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
+    auto colored_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
+    auto textured_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
+    
+    // Vertex input state
+    const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
+        .attribute(0, &mesh_vertex::position)
+        .attribute(1, &mesh_vertex::normal)
+        .attribute(2, &mesh_vertex::texcoord);
+
+    // Shaders
+    auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
+    auto colored_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-pbr.frag");
+    auto textured_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
+    auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
+    auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
+    auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
+
+    auto vss = dev.create_shader(vs), unlit_fss = dev.create_shader(unlit_fs), colored_fss = dev.create_shader(colored_fs), textured_fss = dev.create_shader(textured_fs);
+    auto skybox_vss = dev.create_shader(skybox_vs), skybox_fss = dev.create_shader(skybox_fs);
+
+    // Blend states
+    const rhi::blend_state opaque {false};
+    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
+
+    // Pipelines
+    auto light_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto skybox_pipe = dev.create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
+    auto colored_pbr_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto textured_pbr_pipe = dev.create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+
+    return {common_layout, light_pipe, skybox_pipe, colored_pbr_pipe, textured_pbr_pipe};
+};
+
 int main(int argc, const char * argv[]) try
 {
     // Register asset paths
@@ -308,12 +379,6 @@ int main(int argc, const char * argv[]) try
 
     shader_compiler compiler{loader};
     auto standard_sh = standard_shaders::compile(compiler);
-    auto vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
-    auto colored_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-pbr.frag");
-    auto textured_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");
-    auto unlit_fs = compiler.compile_file(rhi::shader_stage::fragment, "colored-unlit.frag");
-    auto skybox_vs = compiler.compile_file(rhi::shader_stage::vertex, "skybox.vert");
-    auto skybox_fs = compiler.compile_file(rhi::shader_stage::fragment, "skybox.frag");
     auto env_spheremap_img = loader.load_image("monument-valley.hdr");
 
     const float2 arrow_points[] {{0, 0.05f}, {1, 0.05f}, {1, 0.10f}, {1.1f, 0.05f}, {1.15f, 0.025f}, {1.2f, 0}};
@@ -364,54 +429,7 @@ int main(int argc, const char * argv[]) try
     // Images
     auto env_spheremap = dev->create_image({rhi::image_shape::_2d, {env_spheremap_img.dimensions,1}, 1, env_spheremap_img.format, rhi::sampled_image_bit}, {env_spheremap_img.get_pixels()});
 
-    // Descriptor set layouts
-    auto per_scene_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::uniform_buffer, 1},
-        {1, rhi::descriptor_type::combined_image_sampler, 1},
-        {2, rhi::descriptor_type::combined_image_sampler, 1},
-        {3, rhi::descriptor_type::combined_image_sampler, 1}
-    });
-    auto per_view_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::uniform_buffer, 1}
-    });
-    auto skybox_material_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::combined_image_sampler, 1}
-    });
-    auto colored_pbr_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::uniform_buffer, 1},
-    });
-    auto textured_pbr_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::uniform_buffer, 1},
-        {1, rhi::descriptor_type::combined_image_sampler, 1}
-    });
-    auto static_object_layout = dev->create_descriptor_set_layout({
-        {0, rhi::descriptor_type::uniform_buffer, 1},
-    });
-
-    // Pipeline layouts
-    auto common_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout});
-    auto skybox_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout, skybox_material_layout});
-    auto colored_pipe_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
-    auto textured_pipe_layout = gfx::pipeline_layout(*dev, {per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
-    
-    const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
-        .attribute(0, &mesh_vertex::position)
-        .attribute(1, &mesh_vertex::normal)
-        .attribute(2, &mesh_vertex::texcoord);
-
-    // Shaders
-    auto vss = dev->create_shader(vs), unlit_fss = dev->create_shader(unlit_fs), colored_fss = dev->create_shader(colored_fs), textured_fss = dev->create_shader(textured_fs);
-    auto skybox_vss = dev->create_shader(skybox_vs), skybox_fss = dev->create_shader(skybox_fs);
-
-    // Blend states
-    const rhi::blend_state opaque {false};
-    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
-
-    // Pipelines
-    auto light_pipe = gfx::pipeline(*dev, colored_pipe_layout, {nullptr, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto skybox_pipe = gfx::pipeline(*dev, skybox_layout, {nullptr, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-    auto colored_pbr_pipe = gfx::pipeline(*dev, colored_pipe_layout, {nullptr, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto textured_pbr_pipe = gfx::pipeline(*dev, textured_pipe_layout, {nullptr, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto pipelines = create_pipelines(*dev, compiler);
 
     // Create transient resources
     gfx::transient_resource_pool pools[3] {*dev, *dev, *dev};
@@ -430,7 +448,7 @@ int main(int argc, const char * argv[]) try
     gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
 
-    gizmo gizmo{colored_pbr_pipe, arrow_x, arrow_y, arrow_z};
+    gizmo gizmo{*pipelines.colored_pbr_pipe, arrow_x, arrow_y, arrow_z};
     editor editor{assets, scene, gwindow};
 
     // Main loop
@@ -471,7 +489,7 @@ int main(int argc, const char * argv[]) try
             if(num_lights == 4) break;
         }
 
-        auto per_scene_set = pool.alloc_descriptor_set(common_layout, pbr_per_scene_set_index);
+        auto per_scene_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr_per_scene_set_index);
         per_scene_set.write(0, per_scene_uniforms);
         per_scene_set.write(1, standard.get_image_sampler(), standard.get_brdf_integral_image());
         per_scene_set.write(2, standard.get_cubemap_sampler(), *env.irradiance_cubemap);
@@ -485,7 +503,7 @@ int main(int argc, const char * argv[]) try
         per_view_uniforms.right_vector = editor.cam.get_direction(coord_axis::right);
         per_view_uniforms.down_vector = editor.cam.get_direction(coord_axis::down);
 
-        auto per_view_set = pool.alloc_descriptor_set(common_layout, pbr_per_view_set_index);
+        auto per_view_set = pool.alloc_descriptor_set(*pipelines.common_layout, pbr_per_view_set_index);
         per_view_set.write(0, per_view_uniforms);
 
         // Draw objects to our primary framebuffer
@@ -501,8 +519,8 @@ int main(int argc, const char * argv[]) try
         per_view_set.bind(*cmd);
 
         // Draw skybox
-        cmd->bind_pipeline(skybox_pipe.get_rhi_pipeline());
-        auto skybox_set = pool.alloc_descriptor_set(skybox_pipe, pbr_per_material_set_index);
+        cmd->bind_pipeline(*pipelines.skybox_pipe);
+        auto skybox_set = pool.alloc_descriptor_set(*pipelines.skybox_pipe, pbr_per_material_set_index);
         skybox_set.write(0, standard.get_cubemap_sampler(), *env.environment_cubemap);
         skybox_set.bind(*cmd);
         box->gmesh.draw(*cmd);
@@ -512,16 +530,16 @@ int main(int argc, const char * argv[]) try
         {
             if(!object.mesh || !object.albedo) continue;
             bool is_light = object.light != float3{0,0,0};
-            auto & pipe = is_light ? light_pipe : textured_pbr_pipe;
+            auto & pipe = is_light ? pipelines.light_pipe : pipelines.textured_pbr_pipe;
 
-            cmd->bind_pipeline(pipe.get_rhi_pipeline());
+            cmd->bind_pipeline(*pipe);
 
-            auto material_set = pool.alloc_descriptor_set(pipe, pbr_per_material_set_index);
+            auto material_set = pool.alloc_descriptor_set(*pipe, pbr_per_material_set_index);
             material_set.write(0, object.material);
             if(!is_light) material_set.write(1, *linear, *object.albedo->gtex);
             material_set.bind(*cmd);
 
-            auto object_set = pool.alloc_descriptor_set(pipe, pbr_per_object_set_index);
+            auto object_set = pool.alloc_descriptor_set(*pipe, pbr_per_object_set_index);
             object_set.write(0, object.get_object_uniforms());
             object_set.bind(*cmd);
 

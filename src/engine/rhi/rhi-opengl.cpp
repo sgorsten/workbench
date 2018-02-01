@@ -58,26 +58,26 @@ namespace rhi
         void destroy_pipeline_objects(gl_pipeline * pipeline);
         void bind_vertex_array(GLFWwindow * context, const gl_pipeline & pipeline);
 
-        device_info get_info() const override { return {linalg::neg_one_to_one, false}; }
+        device_info get_info() const final { return {linalg::neg_one_to_one, false}; }
 
-        ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) override;
-        ptr<sampler> create_sampler(const sampler_desc & desc) override;
-        ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) override;
-        ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) override;
-        ptr<window> create_window(const int2 & dimensions, std::string_view title) override;        
+        ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) final;
+        ptr<sampler> create_sampler(const sampler_desc & desc) final;
+        ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) final;
+        ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) final;
+        ptr<window> create_window(const int2 & dimensions, std::string_view title) final;        
         
-        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
-        ptr<shader> create_shader(const shader_desc & desc) override;
-        ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
+        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) final { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) final { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
+        ptr<shader> create_shader(const shader_desc & desc) final;
+        ptr<pipeline> create_pipeline(const pipeline_desc & desc) final;
 
-        ptr<descriptor_pool> create_descriptor_pool() override { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
-        ptr<command_buffer> create_command_buffer() override { return new delete_when_unreferenced<emulated_command_buffer>(); }
+        ptr<descriptor_pool> create_descriptor_pool() final { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
+        ptr<command_buffer> create_command_buffer() final { return new delete_when_unreferenced<emulated_command_buffer>(); }
 
-        uint64_t submit(command_buffer & cmd) override;
-        uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
-        uint64_t get_last_submission_id() override { return submitted_index; }
-        void wait_until_complete(uint64_t submit_id) override;
+        uint64_t submit(command_buffer & cmd) final;
+        uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) final;
+        uint64_t get_last_submission_id() final { return submitted_index; }
+        void wait_until_complete(uint64_t submit_id) final;
     };
 
     autoregister_backend<gl_device> autoregister_gl_backend {"OpenGL 4.5 Core"};
@@ -90,8 +90,8 @@ namespace rhi
 
         gl_buffer(gl_device * device, const buffer_desc & desc, const void * initial_data);
         ~gl_buffer();
-        size_t get_offset_alignment() override { GLint alignment; glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment); return alignment; }
-        char * get_mapped_memory() override { return mapped; }
+        size_t get_offset_alignment() final { GLint alignment; glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment); return alignment; }
+        char * get_mapped_memory() final { return mapped; }
     };
 
     struct gl_sampler : sampler
@@ -123,7 +123,7 @@ namespace rhi
         gl_framebuffer(gl_device * device, const framebuffer_desc & desc);
         gl_framebuffer(gl_device * device, const int2 & dimensions, const std::string & title);
         ~gl_framebuffer();
-        coord_system get_ndc_coords() const override { return {coord_axis::right, framebuffer_object ? coord_axis::down : coord_axis::up, coord_axis::forward}; }
+        coord_system get_ndc_coords() const final { return {coord_axis::right, framebuffer_object ? coord_axis::down : coord_axis::up, coord_axis::forward}; }
     };
 
     struct gl_window : window
@@ -131,8 +131,8 @@ namespace rhi
         ptr<gl_framebuffer> fb;
 
         gl_window(gl_device * device, const int2 & dimensions, std::string title);
-        GLFWwindow * get_glfw_window() override { return fb->glfw_window; }
-        framebuffer & get_swapchain_framebuffer() override { return *fb; }
+        GLFWwindow * get_glfw_window() final { return fb->glfw_window; }
+        framebuffer & get_swapchain_framebuffer() final { return *fb; }
     };
 
     struct gl_shader : shader
@@ -142,7 +142,7 @@ namespace rhi
         gl_shader(const shader_desc & desc) : desc{desc} {}
     };
 
-    struct gl_pipeline : pipeline
+    struct gl_pipeline : base_pipeline
     {
         struct gl_blend { GLenum color_op, alpha_op, src_color, dst_color, src_alpha, dst_alpha; };
         ptr<gl_device> device;
@@ -526,7 +526,7 @@ gl_window::gl_window(gl_device * device, const int2 & dimensions, std::string ti
     fb = new delete_when_unreferenced<gl_framebuffer>{device, dimensions, title};
 }
 
-gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : device{device}, input{desc.input}
+gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : base_pipeline{*desc.layout}, device{device}, input{desc.input}
 {
     std::vector<GLenum> shaders;
     for(auto s : desc.stages)

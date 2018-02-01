@@ -59,7 +59,7 @@ size_t emulated_pipeline_layout::get_flat_image_binding(int set, int binding) co
     return sets[set].image_offset + it->second;
 }
 
-emulated_pipeline_layout::emulated_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets)
+emulated_pipeline_layout::emulated_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) : base_pipeline_layout{sets}
 {
     for(auto & s : sets)
     {

@@ -18,6 +18,10 @@ gfx::context::~context() { glfwTerminate(); }
 const std::vector<rhi::backend_info> & gfx::context::get_backends() { return rhi::global_backend_list(); }
 void gfx::context::poll_events() { glfwPollEvents(); }
 
+////////////
+// window //
+////////////
+
 static gfx::window & get(GLFWwindow * window) { return *reinterpret_cast<gfx::window *>(glfwGetWindowUserPointer(window)); }
 
 gfx::window::window(rhi::device & dev, const int2 & dimensions, const std::string & title) : rhi_window{dev.create_window(dimensions, title)}, glfw_window{rhi_window->get_glfw_window()}

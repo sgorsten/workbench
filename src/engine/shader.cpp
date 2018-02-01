@@ -316,8 +316,8 @@ struct shader_compiler_impl : glslang::TShader::Includer
     }
 
     // Implement glslang::TShader::Includer
-    IncludeResult * includeSystem(const char * header_name, const char * includer_name, size_t inclusion_depth) override { return nullptr; }
-    IncludeResult * includeLocal(const char * header_name, const char * includer_name, size_t inclusion_depth) override 
+    IncludeResult * includeSystem(const char * header_name, const char * includer_name, size_t inclusion_depth) final { return nullptr; }
+    IncludeResult * includeLocal(const char * header_name, const char * includer_name, size_t inclusion_depth) final 
     {
         std::string path {includer_name};
         size_t off = path.rfind('/');
@@ -325,7 +325,7 @@ struct shader_compiler_impl : glslang::TShader::Includer
         else path.clear();
         return get_header(path + header_name);
     }
-    void releaseInclude(IncludeResult * result) override {}
+    void releaseInclude(IncludeResult * result) final {}
 };
 
 shader_compiler::shader_compiler(loader & loader)

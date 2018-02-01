@@ -191,9 +191,16 @@ namespace rhi
     };
 
     struct descriptor_set_layout : object {};
-    struct pipeline_layout : object {};
+    struct pipeline_layout : object 
+    {
+        virtual int get_descriptor_set_count() const = 0;
+        virtual const descriptor_set_layout & get_descriptor_set_layout(int index) const = 0;
+    };
     struct shader : object {};
-    struct pipeline : object {};
+    struct pipeline : object 
+    {
+        virtual const pipeline_layout & get_layout() const = 0;
+    };
 
     struct buffer_range { buffer & buffer; size_t offset, size; };
     struct descriptor_set : object 

@@ -49,8 +49,8 @@ namespace rhi
 
     struct d3d_error : public std::error_category
     {
-        const char * name() const noexcept override { return "HRESULT"; }
-        std::string message(int value) const override { return std::to_string(value); }
+        const char * name() const noexcept final { return "HRESULT"; }
+        std::string message(int value) const final { return std::to_string(value); }
         static const std::error_category & instance() { static d3d_error inst; return inst; }
     };
     void check(const char * func, HRESULT result)
@@ -111,26 +111,26 @@ namespace rhi
             check("ID3D11Device5::CreateFence", dev->CreateFence(0, D3D11_FENCE_FLAG_NONE, __uuidof(ID3D11Fence), (void **)&fence));
         }
 
-        device_info get_info() const override { return {linalg::zero_to_one, true}; }
+        device_info get_info() const final { return {linalg::zero_to_one, true}; }
 
-        ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) override;
-        ptr<sampler> create_sampler(const sampler_desc & desc) override;
-        ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) override;
-        ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) override;
-        ptr<window> create_window(const int2 & dimensions, std::string_view title) override;        
+        ptr<buffer> create_buffer(const buffer_desc & desc, const void * initial_data) final;
+        ptr<sampler> create_sampler(const sampler_desc & desc) final;
+        ptr<image> create_image(const image_desc & desc, std::vector<const void *> initial_data) final;
+        ptr<framebuffer> create_framebuffer(const framebuffer_desc & desc) final;
+        ptr<window> create_window(const int2 & dimensions, std::string_view title) final;        
         
-        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) override { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
-        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) override { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
-        ptr<shader> create_shader(const shader_desc & module) override;
-        ptr<pipeline> create_pipeline(const pipeline_desc & desc) override;
+        ptr<descriptor_set_layout> create_descriptor_set_layout(const std::vector<descriptor_binding> & bindings) final { return new delete_when_unreferenced<emulated_descriptor_set_layout>{bindings}; }
+        ptr<pipeline_layout> create_pipeline_layout(const std::vector<const descriptor_set_layout *> & sets) final { return new delete_when_unreferenced<emulated_pipeline_layout>{sets}; }
+        ptr<shader> create_shader(const shader_desc & module) final;
+        ptr<pipeline> create_pipeline(const pipeline_desc & desc) final;
 
-        ptr<descriptor_pool> create_descriptor_pool() override { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
-        ptr<command_buffer> create_command_buffer() override { return new delete_when_unreferenced<emulated_command_buffer>(); }
+        ptr<descriptor_pool> create_descriptor_pool() final { return new delete_when_unreferenced<emulated_descriptor_pool>{}; }
+        ptr<command_buffer> create_command_buffer() final { return new delete_when_unreferenced<emulated_command_buffer>(); }
 
-        uint64_t submit(command_buffer & cmd) override;
-        uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) override;
-        uint64_t get_last_submission_id() override { return submitted_index; }
-        void wait_until_complete(uint64_t submit_id) override;
+        uint64_t submit(command_buffer & cmd) final;
+        uint64_t acquire_and_submit_and_present(command_buffer & cmd, window & window) final;
+        uint64_t get_last_submission_id() final { return submitted_index; }
+        void wait_until_complete(uint64_t submit_id) final;
     };
 
     autoregister_backend<d3d_device> autoregister_d3d_backend {"Direct3D 11.1"};
@@ -141,8 +141,8 @@ namespace rhi
         char * mapped = 0;
 
         d3d_buffer(ID3D11Device & device, ID3D11DeviceContext & ctx, const buffer_desc & desc, const void * initial_data);
-        size_t get_offset_alignment() override { return 256; } // 16 constants * 4 channels * 4 bytes per channel
-        char * get_mapped_memory() override { return mapped; }
+        size_t get_offset_alignment() final { return 256; } // 16 constants * 4 channels * 4 bytes per channel
+        char * get_mapped_memory() final { return mapped; }
     };
 
     struct d3d_sampler : sampler
@@ -169,7 +169,7 @@ namespace rhi
 
         d3d_framebuffer() {}
         d3d_framebuffer(ID3D11Device & device, const framebuffer_desc & desc);
-        coord_system get_ndc_coords() const override { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
+        coord_system get_ndc_coords() const final { return {coord_axis::right, coord_axis::up, coord_axis::forward}; }
     };
 
     struct d3d_window : window
@@ -182,8 +182,8 @@ namespace rhi
 
         d3d_window(d3d_device & device, const int2 & dimensions, std::string title);
         ~d3d_window() { fb=nullptr; depth_image=nullptr; swap_chain_view=nullptr; swap_chain=nullptr; glfwDestroyWindow(w); }
-        GLFWwindow * get_glfw_window() override { return w; }
-        framebuffer & get_swapchain_framebuffer() override { return *fb; }
+        GLFWwindow * get_glfw_window() final { return w; }
+        framebuffer & get_swapchain_framebuffer() final { return *fb; }
     };
 
     struct d3d_shader : shader
@@ -193,7 +193,7 @@ namespace rhi
         d3d_shader(const shader_desc & desc) : desc{desc} {}
     };
     
-    struct d3d_pipeline : pipeline
+    struct d3d_pipeline : base_pipeline
     {
         std::vector<rhi::vertex_binding_desc> input;
         com_ptr<ID3D11InputLayout> layout;
@@ -493,7 +493,7 @@ d3d_window::d3d_window(d3d_device & device, const int2 & dimensions, std::string
     fb->depth_stencil_view = create_depth_stencil_view(*device.dev, depth_image->resource, image_format::depth_float32, 0, 0);
 }
 
-d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : input{desc.input}
+d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : base_pipeline{*desc.layout}, input{desc.input}
 {
     for(auto & s : desc.stages)
     {
