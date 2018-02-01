@@ -61,7 +61,10 @@ int main(int argc, const char * argv[]) try
     auto skybox_material_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::combined_image_sampler, 1}
     });
-    auto pbr_material_layout = dev->create_descriptor_set_layout({
+    auto colored_pbr_layout = dev->create_descriptor_set_layout({
+        {0, rhi::descriptor_type::uniform_buffer, 1},
+    });
+    auto textured_pbr_layout = dev->create_descriptor_set_layout({
         {0, rhi::descriptor_type::uniform_buffer, 1},
         {1, rhi::descriptor_type::combined_image_sampler, 1}
     });
@@ -72,7 +75,8 @@ int main(int argc, const char * argv[]) try
     // Pipeline layouts
     auto common_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout});
     auto skybox_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
-    auto object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, pbr_material_layout, static_object_layout});
+    auto colored_object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
+    auto textured_object_layout = dev->create_pipeline_layout({per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
 
     const auto mesh_vertex_binding = gfx::vertex_binder<mesh_vertex>(0)
         .attribute(0, &mesh_vertex::position)
@@ -88,8 +92,8 @@ int main(int argc, const char * argv[]) try
     const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
     // Pipelines
-    auto light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto light_pipe = dev->create_pipeline({textured_object_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto solid_pipe = dev->create_pipeline({textured_object_layout, {mesh_vertex_binding}, {vss,lit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
     auto skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
 
     // Create transient resources
@@ -185,15 +189,15 @@ int main(int argc, const char * argv[]) try
         
         // Draw lights
         cmd->bind_pipeline(*light_pipe);
-        auto material_set = pool.descriptors->alloc(*pbr_material_layout);
+        auto material_set = pool.descriptors->alloc(*textured_pbr_layout);
         material_set->write(0, pool.uniforms.upload(pbr_material_uniforms{{0.5f,0.5f,0.5f},0.5f,0}));
         material_set->write(1, *nearest, *checkerboard);
-        cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set);
+        cmd->bind_descriptor_set(*textured_object_layout, pbr_per_material_set_index, *material_set);
         for(auto & p : per_scene_uniforms.point_lights)
         {
             auto object_set = pool.descriptors->alloc(*static_object_layout);
             object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{mul(translation_matrix(p.position), scaling_matrix(float3{0.5f}))}));
-            cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
+            cmd->bind_descriptor_set(*textured_object_layout, pbr_per_object_set_index, *object_set);
 
             sphere.draw(*cmd);
         }
@@ -202,7 +206,7 @@ int main(int argc, const char * argv[]) try
         cmd->bind_pipeline(*solid_pipe);
         auto object_set = pool.descriptors->alloc(*static_object_layout);
         object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{translation_matrix(cam.coords(coord_axis::down)*0.5f)}));
-        cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
+        cmd->bind_descriptor_set(*textured_object_layout, pbr_per_object_set_index, *object_set);
         ground.draw(*cmd);
 
         // Draw a bunch of spheres
@@ -210,14 +214,14 @@ int main(int argc, const char * argv[]) try
         {
             for(int j=0; j<6; ++j)
             {
-                material_set = pool.descriptors->alloc(*pbr_material_layout);
+                material_set = pool.descriptors->alloc(*textured_pbr_layout);
                 material_set->write(0, pool.uniforms.upload(pbr_material_uniforms{{1,1,1},(j+0.5f)/6,(i+0.5f)/6}));
                 material_set->write(1, *nearest, *checkerboard);
-                cmd->bind_descriptor_set(*object_layout, pbr_per_material_set_index, *material_set);
+                cmd->bind_descriptor_set(*textured_object_layout, pbr_per_material_set_index, *material_set);
 
                 object_set = pool.descriptors->alloc(*static_object_layout);
                 object_set->write(0, pool.uniforms.upload(pbr_object_uniforms{translation_matrix(cam.coords(coord_axis::right)*(i*2-5.f) + cam.coords(coord_axis::forward)*(j*2-5.f))}));
-                cmd->bind_descriptor_set(*object_layout, pbr_per_object_set_index, *object_set);
+                cmd->bind_descriptor_set(*textured_object_layout, pbr_per_object_set_index, *object_set);
 
                 sphere.draw(*cmd);
             }
