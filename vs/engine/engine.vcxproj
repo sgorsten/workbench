@@ -183,8 +183,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\dep\glad\src\glad.c" />
+    <ClCompile Include="..\..\src\engine\asset.cpp" />
     <ClCompile Include="..\..\src\engine\core.cpp" />
     <ClCompile Include="..\..\src\engine\geometry.cpp" />
+    <ClCompile Include="..\..\src\engine\gizmo.cpp" />
     <ClCompile Include="..\..\src\engine\graphics.cpp" />
     <ClCompile Include="..\..\src\engine\grid.cpp" />
     <ClCompile Include="..\..\src\engine\gui.cpp" />
@@ -197,11 +199,14 @@
     <ClCompile Include="..\..\src\engine\rhi\rhi-vulkan.cpp" />
     <ClCompile Include="..\..\src\engine\shader.cpp" />
     <ClCompile Include="..\..\src\engine\sprite.cpp" />
+    <ClCompile Include="..\..\src\engine\transform.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\src\engine\asset.h" />
     <ClInclude Include="..\..\src\engine\camera.h" />
     <ClInclude Include="..\..\src\engine\core.h" />
     <ClInclude Include="..\..\src\engine\geometry.h" />
+    <ClInclude Include="..\..\src\engine\gizmo.h" />
     <ClInclude Include="..\..\src\engine\graphics.h" />
     <ClInclude Include="..\..\src\engine\grid.h" />
     <ClInclude Include="..\..\src\engine\gui.h" />
@@ -212,6 +217,7 @@
     <ClInclude Include="..\..\src\engine\rhi\rhi-internal.h" />
     <ClInclude Include="..\..\src\engine\shader.h" />
     <ClInclude Include="..\..\src\engine\sprite.h" />
+    <ClInclude Include="..\..\src\engine\transform.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\src\engine\rhi\rhi-tables.inl" />

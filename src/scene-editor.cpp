@@ -1,8 +1,10 @@
 #include "engine/pbr.h"
 #include "engine/mesh.h"
-#include "engine/camera.h"
+//#include "engine/camera.h"
 #include "engine/load.h"
-#include "engine/gui.h"
+//#include "engine/gui.h"
+//#include "engine/asset.h"
+#include "engine/gizmo.h"
 
 #include <chrono>
 #include <iostream>
@@ -12,41 +14,6 @@
 ///////////////////////
 
 constexpr coord_system coords {coord_axis::right, coord_axis::forward, coord_axis::up};
-
-struct mesh_asset
-{
-    std::string name;
-    mesh cmesh;
-    gfx::simple_mesh gmesh;
-
-    std::optional<ray_mesh_hit> raycast(const ray & r) const
-    {
-        std::optional<ray_mesh_hit> result;
-        for(size_t i=0; i<cmesh.triangles.size(); ++i)
-        {
-            auto [i0, i1, i2] = cmesh.triangles[i];
-            if(auto hit = intersect_ray_triangle(r, cmesh.vertices[i0].position, cmesh.vertices[i1].position, cmesh.vertices[i2].position); hit && (!result || hit->t < result->t))
-            {
-                result = {hit->t, i, hit->uv};
-            }
-        }
-        return result;
-    }
-};
-
-struct texture_asset
-{
-    std::string name;
-    bool linear;
-    rhi::ptr<rhi::image> gtex;
-};
-
-struct material_asset
-{
-    std::string name;
-    std::vector<std::string> texture_names;
-    rhi::ptr<const rhi::pipeline> pipe;
-};
 
 struct asset_library
 {
@@ -62,20 +29,19 @@ struct asset_library
 struct object
 {
     std::string name;
-    float3 position;
-    float3 scale;
+    scaled_transform transform;
     mesh_asset * mesh;
     material_asset * material;
     std::vector<texture_asset *> textures;
     pbr::material_uniforms uniforms;
     float3 light;
 
-    float4x4 get_model_matrix() const { return mul(translation_matrix(position), scaling_matrix(scale)); }
+    float4x4 get_model_matrix() const { return get_transform_matrix(transform); }
     pbr::object_uniforms get_object_uniforms() const { return {get_model_matrix()}; }
 
     std::optional<ray_mesh_hit> raycast(const ray & r) const
     {
-        return mesh ? mesh->raycast({(r.origin-position)/scale, r.direction/scale}) : std::nullopt;
+        return mesh ? mesh->raycast(detransform(transform, r)) : std::nullopt;
     }
 };
 
@@ -88,121 +54,6 @@ struct scene
 // Editor logic //
 //////////////////
 
-enum class gizmo_mode { none, translate_x, translate_y, translate_z, translate_yz, translate_zx, translate_xy };
-struct gizmo
-{
-    // Rendering state
-    rhi::ptr<const rhi::pipeline> pipe;
-    const mesh_asset * arrows[3];
-    gizmo_mode mode, mouseover_mode;
-    float3 click_offset, original_position;
-
-    void plane_translation_dragger(gui & g, const rect<int> & viewport, const camera & cam, const float3 & plane_normal, float3 & point) const
-    {
-        // Define the plane to contain the original position of the object
-        const float3 plane_point = original_position;
-
-        // Define a ray emitting from the camera underneath the cursor
-        const ray ray = cam.get_ray_from_pixel(g.get_cursor(), viewport);
-
-        // If an intersection exists between the ray and the plane, place the object at that point
-        const float denom = dot(ray.direction, plane_normal);
-        if(std::abs(denom) == 0) return;
-        const float t = dot(plane_point - ray.origin, plane_normal) / denom;
-        if(t < 0) return;
-        point = ray.origin + ray.direction * t;
-    }
-
-    void axis_translation_dragger(gui & g, const rect<int> & viewport, const camera & cam, const float3 & axis, float3 & point) const
-    {
-        // First apply a plane translation dragger with a plane that contains the desired axis and is oriented to face the camera
-        const float3 plane_tangent = cross(axis, point - cam.position);
-        const float3 plane_normal = cross(axis, plane_tangent);
-        plane_translation_dragger(g, viewport, cam, plane_normal, point);
-
-        // Constrain object motion to be along the desired axis
-        point = original_position + axis * dot(point - original_position, axis);
-    }
-
-public:
-    gizmo(const rhi::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z) : pipe{&pipe}, arrows{arrow_x, arrow_y, arrow_z}
-    {
-    
-    }
-
-    gizmo_mode get_mode() const { return mode; }
-    gizmo_mode get_mouseover_mode() const { return mouseover_mode; }
-
-    void draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool, const float3 & position) const
-    {
-        cmd.clear_depth(1.0);
-        cmd.bind_pipeline(*pipe);
-
-        auto object_set = pool.alloc_descriptor_set(*pipe, pbr::object_set_index);
-        object_set.write(0, pbr::object_uniforms{translation_matrix(position)});
-        object_set.bind(cmd);
-
-        float3 colors[] {{1,0,0},{0,1,0},{0,0,1}};
-        switch(mode != gizmo_mode::none ? mode : mouseover_mode)
-        {
-        case gizmo_mode::translate_x: colors[0] = {1.0f, 0.5f, 0.5f}; break;
-        case gizmo_mode::translate_y: colors[1] = {0.5f, 1.0f, 0.5f}; break;
-        case gizmo_mode::translate_z: colors[2] = {0.5f, 0.5f, 1.0f}; break;
-        }
-        for(int i=0; i<3; ++i)
-        {
-            auto material_set = pool.alloc_descriptor_set(*pipe, pbr::material_set_index);
-            material_set.write(0, pbr::material_uniforms{colors[i],0.8f,0.0f});        
-            material_set.bind(cmd); 
-            arrows[i]->gmesh.draw(cmd);
-        }
-    }
-
-    void position_gizmo(gui & g, int id, const rect<int> & viewport, const camera & cam, float3 & position)
-    {
-        // Determine which gizmo the user's mouse is over
-        float best_t = std::numeric_limits<float>::infinity();
-        auto ray = cam.get_ray_from_pixel(g.get_cursor(), viewport);
-        ray.origin -= position;
-        mouseover_mode = gizmo_mode::none;
-        if(g.is_cursor_over(viewport))
-        {
-            if(auto hit = arrows[0]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_x; best_t = hit->t; }
-            if(auto hit = arrows[1]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_y; best_t = hit->t; }
-            if(auto hit = arrows[2]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_z; best_t = hit->t; }
-        }
-
-        // On click, set the gizmo mode based on which component the user clicked on
-        if(g.is_mouse_clicked() && mouseover_mode != gizmo_mode::none)
-        {
-            mode = mouseover_mode;
-            click_offset = ray.origin + ray.direction*best_t;
-            original_position = position + click_offset;
-            g.set_pressed(id);
-            g.consume_click();
-        }
-
-        // If the user has previously clicked on a gizmo component, allow the user to interact with that gizmo
-        if(g.is_pressed(id))
-        {
-            position += click_offset;
-            switch(mode)
-            {
-            case gizmo_mode::translate_x: axis_translation_dragger(g, viewport, cam, {1,0,0}, position); break;
-            case gizmo_mode::translate_y: axis_translation_dragger(g, viewport, cam, {0,1,0}, position); break;
-            case gizmo_mode::translate_z: axis_translation_dragger(g, viewport, cam, {0,0,1}, position); break;
-            case gizmo_mode::translate_yz: plane_translation_dragger(g, viewport, cam, {1,0,0}, position); break;
-            case gizmo_mode::translate_zx: plane_translation_dragger(g, viewport, cam, {0,1,0}, position); break;
-            case gizmo_mode::translate_xy: plane_translation_dragger(g, viewport, cam, {0,0,1}, position); break;
-            }        
-            position -= click_offset;
-        }
-
-        // On release, deactivate the current gizmo mode
-        if(g.check_release(id)) mode = gizmo_mode::none;
-    }
-};
-
 struct ranged_property { float & value; float min, max; };
 class property_editor
 {
@@ -213,7 +64,9 @@ class property_editor
 
     bool edit_property(rect<int> bounds, std::string & prop) { return ::edit(g, next_id++, bounds, prop); }
     bool edit_property(rect<int> bounds, float & prop) { return ::edit(g, next_id++, bounds, prop); }
+    bool edit_property(rect<int> bounds, float2 & prop) { return ::edit(g, next_id++, bounds, prop); }
     bool edit_property(rect<int> bounds, float3 & prop) { return ::edit(g, next_id++, bounds, prop); }
+    bool edit_property(rect<int> bounds, float4 & prop) { return ::edit(g, next_id++, bounds, prop); }
     bool edit_property(rect<int> bounds, ranged_property & prop) { return ::hslider(g, next_id++, bounds, prop.min, prop.max, prop.value); }
     bool edit_property(rect<int> bounds, mesh_asset * & prop) { return combobox<mesh_asset *>(g, next_id++, bounds, assets.meshes, [](const mesh_asset * m) { return std::string_view{m->name}; }, prop); }
     bool edit_property(rect<int> bounds, texture_asset * & prop) { return icon_combobox<texture_asset *>(g, next_id++, bounds, assets.textures, 
@@ -294,7 +147,7 @@ struct editor
 
         if(selection)
         {
-            gizmo.position_gizmo(g, id, viewport_rect, cam, selection->position);
+            gizmo.position_gizmo(g, id, viewport_rect, cam, selection->transform.translation);
         }
 
         // First handle click selections
@@ -374,8 +227,9 @@ struct editor
         g.begin_group(id);
         property_editor p {g, assets, bounds, property_split};
         p.edit("Name", selection->name);
-        p.edit("Position", selection->position);
-        p.edit("Scale", selection->scale);
+        p.edit("Position", selection->transform.translation);
+        p.edit("Orientation", selection->transform.rotation.quaternion);
+        p.edit("Scale", selection->transform.scaling.factors);
         p.edit("Mesh", selection->mesh);
         if(p.edit("Material", selection->material)) selection->textures.resize(selection->material->texture_names.size());
         for(size_t i=0; i<selection->material->texture_names.size(); ++i) p.edit(selection->material->texture_names[i].c_str(), selection->textures[i]);
@@ -523,14 +377,14 @@ int main(int argc, const char * argv[]) try
     assets.materials = {light_src, colored_pbr, textured_pbr, bumped_pbr};
 
     scene scene;
-    scene.objects.push_back({"Light A", {-3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light B", { 3, -3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light C", { 3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Light D", {-3,  3, 8}, {0.5f,0.5f,0.5f}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
-    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, {1,1,1}, plane, textured_pbr, {marble}, {{0.5f,0.5f,0.5f}, 0.5f, 0.0f}});
+    scene.objects.push_back({"Light A", {scaling_factors{0.5f}, float3{-3, -3, 8}}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light B", {scaling_factors{0.5f}, float3{ 3, -3, 8}}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light C", {scaling_factors{0.5f}, float3{ 3,  3, 8}}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Light D", {scaling_factors{0.5f}, float3{-3,  3, 8}}, sphere, light_src, {}, {{1,1,1}, 0.5f, 0.0f}, {23.47f, 21.31f, 20.79f}});
+    scene.objects.push_back({"Ground", coords(coord_axis::down)*0.5f, plane, textured_pbr, {marble}, {{0.5f,0.5f,0.5f}, 0.5f, 0.0f}});
     for(int i=0; i<3; ++i) for(int j=0; j<3; ++j)
     {
-        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), {1,1,1}, sphere, textured_pbr, {checker}, {{1,1,1}, (j+0.5f)/3, (i+0.5f)/3}});
+        scene.objects.push_back({to_string("Sphere ", static_cast<char>('A'+i*3+j)), coords(coord_axis::right)*(i*2-2.f) + coords(coord_axis::forward)*(j*2-2.f), sphere, textured_pbr, {checker}, {{1,1,1}, (j+0.5f)/3, (i+0.5f)/3}});
     }
     
     // Create our device and load our device objects
@@ -613,7 +467,7 @@ int main(int argc, const char * argv[]) try
         for(auto & obj : scene.objects)
         {
             if(obj.light == float3{0,0,0}) continue;
-            per_scene_uniforms.point_lights[num_lights++] = {obj.position, obj.light};
+            per_scene_uniforms.point_lights[num_lights++] = {obj.transform.translation, obj.light};
             if(num_lights == 4) break;
         }
 
@@ -669,7 +523,7 @@ int main(int argc, const char * argv[]) try
         // Draw our gizmo
         if(editor.selection)
         {
-            gizmo.draw(*cmd, pool, editor.selection->position);
+            gizmo.draw(*cmd, pool, editor.selection->transform.translation);
         }
 
         canvas.encode_commands(*cmd, *gwindow);

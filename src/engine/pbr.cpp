@@ -97,7 +97,7 @@ rhi::ptr<rhi::image> pbr::device_objects::create_cubemap_from_spheremap(gfx::tra
     auto target = dev->create_image({rhi::image_shape::cube, {width,width,1}, exactly(std::ceil(std::log2(width)+1)), rhi::image_format::rgba_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
     auto set = pool.descriptors->alloc(*op_set_layout);
     set->write(0, *spheremap_sampler, spheremap);
-    set->write(1, pool.uniforms.upload(make_transform_4x4(preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward})));
+    set->write(1, pool.uniforms.upload(get_transform_matrix(coord_transform{preferred_coords, {coord_axis::right, coord_axis::down, coord_axis::forward}})));
     render_to_cubemap(*target, 0, {width,width}, true, [&](rhi::command_buffer & cmd)
     {
         cmd.bind_pipeline(*copy_cubemap_from_spheremap_pipeline);

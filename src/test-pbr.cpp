@@ -160,7 +160,7 @@ int main(int argc, const char * argv[]) try
 
         // Set up per-view uniforms for a specific framebuffer
         auto & fb = gwindow->get_rhi_window().get_swapchain_framebuffer();
-        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), make_transform_4x4(cam.coords, fb.get_ndc_coords()));
+        const auto proj_matrix = mul(linalg::perspective_matrix(1.0f, gwindow->get_aspect(), 0.1f, 100.0f, linalg::pos_z, dev->get_info().z_range), get_transform_matrix(coord_transform{cam.coords, fb.get_ndc_coords()}));
 
         auto per_view_set = pool.alloc_descriptor_set(*common_layout, pbr::view_set_index);
         per_view_set.write(0, pbr::view_uniforms{cam, gwindow->get_aspect(), fb.get_ndc_coords(), dev->get_info().z_range});

@@ -9,14 +9,14 @@ struct camera
     float3 position;
     float pitch, yaw;
 
-    float4 get_orientation() const { return qmul(rotation_quat(coords.cross(coord_axis::forward, coord_axis::right), yaw), rotation_quat(coords.cross(coord_axis::forward, coord_axis::down), pitch)); }
-    float3 get_direction(coord_axis axis) const { return qrot(get_orientation(), coords(axis)); }
+    pure_rotation get_orientation() const { return mul(pure_rotation(coords.cross(coord_axis::forward, coord_axis::right), yaw), pure_rotation(coords.cross(coord_axis::forward, coord_axis::down), pitch)); }
+    float3 get_direction(coord_axis axis) const { return transform_direction(get_orientation(), coords(axis)); }
 
     rigid_transform get_pose() const { return {get_orientation(), position}; }
-    float4x4 get_view_matrix() const { return get_pose().inverse().matrix(); }
-    float4x4 get_skybox_view_matrix() const { return rotation_matrix(qconj(get_orientation())); }
+    float4x4 get_view_matrix() const { return get_inverse_transform_matrix(get_pose()); }
+    float4x4 get_skybox_view_matrix() const { return get_inverse_transform_matrix(get_orientation()); }
 
-    float4x4 get_proj_matrix(float aspect, const coord_system & ndc_coords, linalg::z_range z_range) const { return mul(linalg::perspective_matrix(1.0f, aspect, 0.1f, 100.0f, linalg::pos_z, z_range), make_transform_4x4(coords, ndc_coords)); }
+    float4x4 get_proj_matrix(float aspect, const coord_system & ndc_coords, linalg::z_range z_range) const { return mul(linalg::perspective_matrix(1.0f, aspect, 0.1f, 100.0f, linalg::pos_z, z_range), get_transform_matrix(coord_transform{coords, ndc_coords})); }
     float4x4 get_view_proj_matrix(float aspect, const coord_system & ndc_coords, linalg::z_range z_range) const { return mul(get_proj_matrix(aspect, ndc_coords, z_range), get_view_matrix()); }
     float4x4 get_skybox_view_proj_matrix(float aspect, const coord_system & ndc_coords, linalg::z_range z_range) const { return mul(get_proj_matrix(aspect, ndc_coords, z_range), get_skybox_view_matrix()); }
 

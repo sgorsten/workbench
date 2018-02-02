@@ -411,7 +411,7 @@ void canvas::encode_commands(rhi::command_buffer & cmd, gfx::window & win)
     const coord_system ndc_coords = win.get_rhi_window().get_swapchain_framebuffer().get_ndc_coords();
     const int2 dims = win.get_window_size();   
     const auto ortho = float4x4{{2.0f/dims.x,0,0,0}, {0,2.0f/dims.y,0,0}, {0,0,1,0}, {-1,-1,0,1}};
-    const auto transform = mul(make_transform_4x4(ui_coords, ndc_coords), ortho);
+    const auto transform = mul(get_transform_matrix(coord_transform{ui_coords, ndc_coords}), ortho);
 
     auto per_window_set = pool.descriptors->alloc(*device_objects.per_window_layout);
     per_window_set->write(0, pool.uniforms.upload(transform));
