@@ -42,8 +42,9 @@ inline float2 compute_sphere_texcoords(float3 direction) { return float2{std::at
 struct ray { float3 origin, direction; };
 inline ray transform(const rigid_transform & t, const ray & r) { return {t.transform_point(r.origin), t.transform_vector(r.direction)}; }
 inline ray detransform(const rigid_transform & t, const ray & r) { return {t.detransform_point(r.origin), t.detransform_vector(r.direction)}; }
+struct ray_triangle_hit { float t; float2 uv; };
+struct ray_mesh_hit { float t; size_t triangle; float2 uv; };
 
 // Shape intersection routines
-struct ray_triangle_hit { float t; float2 uv; };
 std::optional<float> intersect_ray_plane(const ray & ray, const float4 & plane);
 std::optional<ray_triangle_hit> intersect_ray_triangle(const ray & ray, const float3 & v0, const float3 & v1, const float3 & v2);
