@@ -396,7 +396,7 @@ gl_buffer::gl_buffer(gl_device * device, const buffer_desc & desc, const void * 
     GLbitfield flags = 0;
     if(desc.flags & rhi::mapped_memory_bit) flags |= GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT;
     glNamedBufferStorage(buffer_object, desc.size, initial_data, flags);
-    if(desc.flags & rhi::mapped_memory_bit) mapped = reinterpret_cast<char *>(glMapNamedBuffer(buffer_object, GL_WRITE_ONLY));
+    if(desc.flags & rhi::mapped_memory_bit) mapped = reinterpret_cast<char *>(glMapNamedBufferRange(buffer_object, 0, desc.size, flags));
 }
 gl_buffer::~gl_buffer()
 {
