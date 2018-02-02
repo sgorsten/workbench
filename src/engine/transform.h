@@ -2,11 +2,16 @@
 #pragma once
 #include "core.h"
 
-// vector    - a quantity of oriented length, having direction and magnitude, represented by its components in x, y, z order
-// point     - a location in space, represented by the displacement vector from the origin
-// bivector  - a quantity of oriented area, the exterior product of two vectors, represented by its components in yz, zx, xy order
-// direction - an oriented one dimensional subspace, represented by a vector of unit length
-// normal    - an oriented two dimensional subspace, represented by a bivector of unit area
+//////////////////////////////
+// Transformable quantities //
+//////////////////////////////
+
+// vector      - a quantity with direction and magnitude, represented as x*e1 + y*e2 + z*e3
+// point       - a specific location in space, represented as the displacement vector from the origin
+// bivector    - the exterior product of two vectors, represented as x*e2*e3 + y*e3*e1 + z*e1*e2
+// quaternion  - the sum of a bivector and a scalar, represented as x*e2*e3 + y*e3*e1 + z*e1*e2 + w
+// unit_vector - a vector of unit length
+// normal      - a bivector of unit length
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Transform types advertise traits, which allow many transformation and detransformation functions to be generated automatically //
@@ -43,20 +48,20 @@ template<class Transform> float3 transform_bivector(const Transform & transform,
     if constexpr(preserves_handedness<Transform>) return transform_vector(transform, bivector); // Transforms which preserve handedness can treat bivectors as vectors
     else return transform_bivector(get_transform_matrix(transform), bivector); // Otherwise fall back to using matrices (which requires an expensive inverse transpose)
 }
-template<class Transform> float3 transform_direction(const Transform & transform, const float3 & direction)
-{
-    if constexpr(preserves_scale<Transform>) return transform_vector(transform, direction); // Transforms which preserve scale can treat directions as vectors
-    else return normalize(transform_vector(transform, direction)); // Otherwise they must be renormalized after transformation
-}
-template<class Transform> float3 transform_normal(const Transform & transform, const float3 & normal) 
-{ 
-    if constexpr(preserves_handedness<Transform>) return transform_direction(transform, normal); // Transforms which preserve handedness can treat normals as directions
-    else if constexpr(preserves_scale<Transform>) return transform_bivector(transform, normal); // Transforms which preserve scale can treat normals as bivectors
-    else return normalize(transform_bivector(transform, normal)); // Otherwise they must be renormalized after transformation
-}
 template<class Transform> float4 transform_quaternion(const Transform & transform, const float4 & quaternion)
 {
     return {transform_bivector(transform, quaternion.xyz()), quaternion.w};
+}
+template<class Transform> float3 transform_unit_vector(const Transform & transform, const float3 & unit_vector)
+{
+    if constexpr(preserves_scale<Transform>) return transform_vector(transform, unit_vector); // Transforms which preserve scale can treat unit_vectors as vectors
+    else return normalize(transform_vector(transform, unit_vector)); // Otherwise they must be renormalized after transformation
+}
+template<class Transform> float3 transform_normal(const Transform & transform, const float3 & normal) 
+{ 
+    if constexpr(preserves_handedness<Transform>) return transform_unit_vector(transform, normal); // Transforms which preserve handedness can treat normals as unit_vectors
+    else if constexpr(preserves_scale<Transform>) return transform_bivector(transform, normal); // Transforms which preserve scale can treat normals as bivectors
+    else return normalize(transform_bivector(transform, normal)); // Otherwise they must be renormalized after transformation
 }
 
 // If a transform is not invertible, we can always fall back to inverting its 4x4 matrix representation
@@ -82,22 +87,22 @@ template<class Transform> float3 detransform_bivector(const Transform & transfor
     else if constexpr(is_invertible<Transform>) return transform_bivector(inverse(transform), bivector);
     else return transform_bivector(get_inverse_transform_matrix(transform), bivector);
 }
-template<class Transform> float3 detransform_direction(const Transform & transform, const float3 & direction)
-{ 
-    if constexpr(preserves_scale<Transform>) return detransform_vector(transform, direction);
-    else if constexpr(is_invertible<Transform>) return transform_direction(inverse(transform), direction);
-    else return normalize(detransform_direction(transform, direction));
-}
-template<class Transform> float3 detransform_normal(const Transform & transform, const float3 & normal) 
-{ 
-    if constexpr(preserves_handedness<Transform>) return detransform_direction(transform, normal);
-    else if constexpr(preserves_scale<Transform>) return detransform_bivector(transform, normal);
-    else if constexpr(is_invertible<Transform>) return transform_normal(inverse(transform), normal);
-    else return normalize(detransform_bivector(transform, normal));
-}
 template<class Transform> float4 detransform_quaternion(const Transform & transform, const float4 & quaternion)
 {
     return {detransform_bivector(transform, quaternion.xyz()), quaternion.w};
+}
+template<class Transform> float3 detransform_unit_vector(const Transform & transform, const float3 & unit_vector)
+{ 
+    if constexpr(preserves_scale<Transform>) return detransform_vector(transform, unit_vector);
+    else if constexpr(is_invertible<Transform>) return transform_unit_vector(inverse(transform), unit_vector);
+    else return normalize(detransform_unit_vector(transform, unit_vector));
+}
+template<class Transform> float3 detransform_normal(const Transform & transform, const float3 & normal) 
+{ 
+    if constexpr(preserves_handedness<Transform>) return detransform_unit_vector(transform, normal);
+    else if constexpr(preserves_scale<Transform>) return detransform_bivector(transform, normal);
+    else if constexpr(is_invertible<Transform>) return transform_normal(inverse(transform), normal);
+    else return normalize(detransform_bivector(transform, normal));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -105,19 +110,18 @@ template<class Transform> float4 detransform_quaternion(const Transform & transf
 ///////////////////////////////////////////////////////////////////////////////
 
 template<> struct transform_traits<float4x4> : std::integral_constant<int, transform_is_composable_bit | transform_is_invertible_bit> {};
-inline float3 transform_vector  (const float4x4 & t, const float3 & vector) { return mul(t, float4{vector,0}).xyz(); }
-inline float3 transform_point   (const float4x4 & t, const float3 & point) { auto r=mul(t, float4{point,1}); return r.xyz()/r.w; }
-inline float3 transform_bivector(const float4x4 & t, const float3 & bivector) { return mul(inverse(transpose(t)), float4{bivector,0}).xyz(); }
+inline float3 transform_vector   (const float4x4 & t, const float3 & vector)   { return mul(t, float4{vector,0}).xyz(); }
+inline float3 transform_point    (const float4x4 & t, const float3 & point)    { auto r=mul(t, float4{point,1}); return r.xyz()/r.w; }
+inline float3 transform_bivector (const float4x4 & t, const float3 & bivector) { return mul(inverse(transpose(t)), float4{bivector,0}).xyz(); }
 
 /////////////////////////////////////////////////////////////////////////////
 // 3x3 matrices are useful when representing purely linear transformations //
 /////////////////////////////////////////////////////////////////////////////
 
 template<> struct transform_traits<float3x3> : std::integral_constant<int, transform_is_linear_bit | transform_is_composable_bit | transform_is_invertible_bit> {};
-inline float4x4 get_transform_matrix(const float3x3 & t) { return {{t.x,0},{t.y,0},{t.z,0},{0,0,0,1}}; }
-inline float3 transform_vector  (const float3x3 & t, const float3 & v) { return mul(t, v); }
-inline float3 transform_bivector(const float3x3 & t, const float3 & b) { return mul(inverse(transpose(t)), b); }
-inline float3 transform_point   (const float3x3 & t, const float3 & p) { return transform_vector(t, p); }
+inline float4x4 get_transform_matrix (const float3x3 & t)                          { return {{t.x,0},{t.y,0},{t.z,0},{0,0,0,1}}; }
+inline float3 transform_vector       (const float3x3 & t, const float3 & vector)   { return mul(t, vector); }
+inline float3 transform_bivector     (const float3x3 & t, const float3 & bivector) { return mul(inverse(transpose(t)), bivector); }
 
 ////////////////////////////////////////////////////////////////
 // scaling factors represent distinct scaling along each axis //

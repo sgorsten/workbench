@@ -10,7 +10,7 @@ struct camera
     float pitch, yaw;
 
     pure_rotation get_orientation() const { return mul(pure_rotation(coords.cross(coord_axis::forward, coord_axis::right), yaw), pure_rotation(coords.cross(coord_axis::forward, coord_axis::down), pitch)); }
-    float3 get_direction(coord_axis axis) const { return transform_direction(get_orientation(), coords(axis)); }
+    float3 get_direction(coord_axis axis) const { return transform_unit_vector(get_orientation(), coords(axis)); }
 
     rigid_transform get_pose() const { return {get_orientation(), position}; }
     float4x4 get_view_matrix() const { return get_inverse_transform_matrix(get_pose()); }
@@ -25,9 +25,9 @@ struct camera
     ray camera::get_ray_from_pixel(const int2 & pixel, const rect<int> & viewport) const
     {
         const coord_system pixel_coords {coord_axis::right, coord_axis::down, coord_axis::forward};
-        const float4x4 inv_view_proj = inverse(get_view_proj_matrix(viewport.aspect_ratio(), pixel_coords, linalg::zero_to_one));
+        const float4x4 view_proj = get_view_proj_matrix(viewport.aspect_ratio(), pixel_coords, linalg::zero_to_one);
         const float2 p = float2(pixel - viewport.corner00())/float2(viewport.dims()) * 2.0f - 1.0f;       
-        const float4 p0 = mul(inv_view_proj, float4(p,0,1)), p1 = mul(inv_view_proj, float4(p,1,1));
-        return {position, p1.xyz()*p0.w - p0.xyz()*p1.w};
+        const float3 p0 = detransform_point(view_proj, {p,0}), p1 = detransform_point(view_proj, {p,1});
+        return {p0, p1 - p0};
     }
 };
