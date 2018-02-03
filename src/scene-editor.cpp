@@ -326,11 +326,11 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
     const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
     // Pipelines
-    auto light_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto skybox_pipe = dev.create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {opaque}});
-    auto colored_pbr_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto textured_pbr_pipe = dev.create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
-    auto bumped_pbr_pipe = dev.create_pipeline({bumped_pipe_layout, {mesh_vertex_binding}, {vss,bumped_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::less, true, {opaque}});       
+    auto light_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
+    auto skybox_pipe = dev.create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::back, rhi::compare_op::always, false, {opaque}});
+    auto colored_pbr_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
+    auto textured_pbr_pipe = dev.create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
+    auto bumped_pbr_pipe = dev.create_pipeline({bumped_pipe_layout, {mesh_vertex_binding}, {vss,bumped_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back , rhi::compare_op::less, true, {opaque}});       
 
     return {common_layout, light_pipe, skybox_pipe, colored_pbr_pipe, textured_pbr_pipe, bumped_pbr_pipe};
 };
@@ -356,6 +356,10 @@ int main(int argc, const char * argv[]) try
     auto arrow_x = new mesh_asset{"arrow_x", make_lathed_mesh({1,0,0}, {0,1,0}, {0,0,1}, 12, arrow_points)};
     auto arrow_y = new mesh_asset{"arrow_y", make_lathed_mesh({0,1,0}, {0,0,1}, {1,0,0}, 12, arrow_points)};
     auto arrow_z = new mesh_asset{"arrow_z", make_lathed_mesh({0,0,1}, {1,0,0}, {0,1,0}, 12, arrow_points)};
+    auto box_yz = new mesh_asset{"box_yz", make_box_mesh({-0.01f,0,0}, {0.01f,0.4f,0.4f})};
+    auto box_zx = new mesh_asset{"box_zx", make_box_mesh({0,-0.01f,0}, {0.4f,0.01f,0.4f})};
+    auto box_xy = new mesh_asset{"box_xy", make_box_mesh({0,0,-0.01f}, {0.4f,0.4f,0.01f})};
+
     auto box = new mesh_asset{"box", make_box_mesh({-0.3f,-0.3f,-0.3f}, {0.3f,0.3f,0.3f})};
     auto sphere = new mesh_asset{"sphere", make_sphere_mesh(32, 32, 0.5f)};
     auto plane = new mesh_asset{"plane", make_quad_mesh(coords(coord_axis::right)*8.0f, coords(coord_axis::forward)*8.0f)};
@@ -372,7 +376,7 @@ int main(int argc, const char * argv[]) try
     auto bumped_pbr = new material_asset{"Bumped PBR", {"Albedo Map", "Normal Map"}};
 
     asset_library assets;
-    assets.meshes = {arrow_x, arrow_y, arrow_z, box, sphere, plane};
+    assets.meshes = {arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy, box, sphere, plane};
     assets.textures = {white, checker, marble, scratched, normal};
     assets.materials = {light_src, colored_pbr, textured_pbr, bumped_pbr};
 
@@ -430,7 +434,7 @@ int main(int argc, const char * argv[]) try
     gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
 
-    gizmo gizmo{*pipelines.colored_pbr_pipe, arrow_x, arrow_y, arrow_z};
+    gizmo gizmo{*pipelines.colored_pbr_pipe, arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy};
     editor editor{assets, scene, gizmo, gwindow};
 
     // Main loop

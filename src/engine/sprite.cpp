@@ -229,7 +229,7 @@ canvas_device_objects::canvas_device_objects(rhi::device & device, shader_compil
     const auto vs = device.create_shader(compiler.compile_file(rhi::shader_stage::vertex, "standard/gui/ui.vert"));
     const auto fs = device.create_shader(compiler.compile_file(rhi::shader_stage::fragment, "standard/gui/ui.frag")); 
     const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
-    pipe = device.create_pipeline({pipe_layout, {ui_vertex_binding}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::none, rhi::compare_op::always, false, {translucent}});    
+    pipe = device.create_pipeline({pipe_layout, {ui_vertex_binding}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::always, false, {translucent}});    
 }
 
 ////////////

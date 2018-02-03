@@ -1,7 +1,9 @@
 #include "gizmo.h"
 #include "pbr.h"
 
-gizmo::gizmo(const rhi::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z) : pipe{&pipe}, arrows{arrow_x, arrow_y, arrow_z}
+gizmo::gizmo(const rhi::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z,
+        const mesh_asset * box_yz, const mesh_asset * box_zx, const mesh_asset * box_xy) :
+    pipe{&pipe}, meshes{arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy}
 {
     
 }
@@ -15,9 +17,12 @@ void gizmo::position_gizmo(gui & g, int id, const rect<int> & viewport, const ca
     mouseover_mode = gizmo_mode::none;
     if(g.is_cursor_over(viewport))
     {
-        if(auto hit = arrows[0]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_x; best_t = hit->t; }
-        if(auto hit = arrows[1]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_y; best_t = hit->t; }
-        if(auto hit = arrows[2]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_z; best_t = hit->t; }
+        if(auto hit = meshes[0]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_x; best_t = hit->t; }
+        if(auto hit = meshes[1]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_y; best_t = hit->t; }
+        if(auto hit = meshes[2]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_z; best_t = hit->t; }
+        if(auto hit = meshes[3]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_yz; best_t = hit->t; }
+        if(auto hit = meshes[4]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_zx; best_t = hit->t; }
+        if(auto hit = meshes[5]->raycast(ray); hit && hit->t < best_t) { mouseover_mode = gizmo_mode::translate_xy; best_t = hit->t; }
     }
 
     // On click, set the gizmo mode based on which component the user clicked on
@@ -86,18 +91,21 @@ void gizmo::draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool,
     object_set.write(0, pbr::object_uniforms{translation_matrix(position)});
     object_set.bind(cmd);
 
-    float3 colors[] {{1,0,0},{0,1,0},{0,0,1}};
+    float3 colors[] {{1,0,0},{0,1,0},{0,0,1},{0,1,1},{1,0,1},{1,1,0}};
     switch(mode != gizmo_mode::none ? mode : mouseover_mode)
     {
     case gizmo_mode::translate_x: colors[0] = {1.0f, 0.5f, 0.5f}; break;
     case gizmo_mode::translate_y: colors[1] = {0.5f, 1.0f, 0.5f}; break;
     case gizmo_mode::translate_z: colors[2] = {0.5f, 0.5f, 1.0f}; break;
+    case gizmo_mode::translate_yz: colors[3] = {0.5f, 1.0f, 1.0f}; break;
+    case gizmo_mode::translate_zx: colors[4] = {1.0f, 0.5f, 1.0f}; break;
+    case gizmo_mode::translate_xy: colors[5] = {1.0f, 1.0f, 0.5f}; break;
     }
-    for(int i=0; i<3; ++i)
+    for(int i=0; i<6; ++i)
     {
         auto material_set = pool.alloc_descriptor_set(*pipe, pbr::material_set_index);
         material_set.write(0, pbr::material_uniforms{colors[i],0.8f,0.0f});        
         material_set.bind(cmd); 
-        arrows[i]->gmesh.draw(cmd);
+        meshes[i]->gmesh.draw(cmd);
     }
 }
