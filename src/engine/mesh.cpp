@@ -107,6 +107,7 @@ mesh make_lathed_mesh(const float3 & axis, const float3 & arm1, const float3 & a
         for(auto & p : points) mesh.vertices.push_back({mul(mat,p), {1,1,1}});
         for(size_t j = 1; j < points.size(); ++j)
         {
+            if(points[j-1] == points[j]) continue;
             const int ii = (i+1)%slices;
             const int i0 = i*points.size() + (j-1);
             const int i1 = ii*points.size() + (j-1);

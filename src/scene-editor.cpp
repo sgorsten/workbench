@@ -359,25 +359,15 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
 
     // Pass 0 writes stencil value of '1' everywhere that the gizmo is occluded
     p.gizmo_passes[0] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, false}, stencil_write_on_depth_fail, {no_color}});
-
     // Pass 1 renders the unoccluded fragments of the gizmo and resets the stencil to '0' at those fragments
     p.gizmo_passes[1] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, opaque_depth, stencil_write_on_depth_pass, {opaque}});
-
     // Pass 2 writes into the depth buffer everywhere the stencil is '1'
     p.gizmo_passes[2] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::always, true}, stencil_test_equal_to_one, {no_color}});
-
     // Pass 3 ensures that the depth buffer contains the front facing fragment everywhere the stencil is '1'
     p.gizmo_passes[3] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, true}, stencil_test_equal_to_one, {no_color}});
-    
     // Pass 4 renders the front faces of the occluded parts of the gizmo
     p.gizmo_passes[4] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::equal, false}, stencil_test_equal_to_one, {translucent}});
-
-    //p.gizmo_passes[3] = p.colored_pbr_pipe;
-    
-    //p.gizmo_passes[1] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::greater, true}, stencil_test_equal_to_one, {no_color}});
-    //p.gizmo_passes[2] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, true}, stencil_test_equal_to_one, {no_color}});
-    //p.gizmo_passes[3] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::equal, false}, stencil_test_equal_to_one, {opaque}});
-     return p;
+    return p;
 };
 
 int main(int argc, const char * argv[]) try
@@ -397,7 +387,7 @@ int main(int argc, const char * argv[]) try
     auto standard_sh = pbr::shaders::compile(compiler);
     auto env_spheremap_img = loader.load_image("monument-valley.hdr", true);
 
-    const float2 arrow_points[] {{0, 0.05f}, {1, 0.05f}, {1, 0.10f}, {1.1f, 0.05f}, {1.15f, 0.025f}, {1.2f, 0}};
+    const float2 arrow_points[] {{-0.05f, 0}, {0, 0.05f}, {1, 0.05f}, {1, 0.05f}, {1, 0.10f}, {1, 0.10f}, {1.1f, 0.05f}, {1.15f, 0.025f}, {1.2f, 0}};
     auto arrow_x = new mesh_asset{"arrow_x", make_lathed_mesh({1,0,0}, {0,1,0}, {0,0,1}, 12, arrow_points)};
     auto arrow_y = new mesh_asset{"arrow_y", make_lathed_mesh({0,1,0}, {0,0,1}, {1,0,0}, 12, arrow_points)};
     auto arrow_z = new mesh_asset{"arrow_z", make_lathed_mesh({0,0,1}, {1,0,0}, {0,1,0}, 12, arrow_points)};

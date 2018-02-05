@@ -106,7 +106,7 @@ void gizmo::draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool,
         pool.alloc_descriptor_set(*passes[0], pbr::material_set_index),
         pool.alloc_descriptor_set(*passes[0], pbr::material_set_index)
     };
-    for(int i=0; i<6; ++i) material_sets[i].write(0, pbr::material_uniforms{colors[i],0.8f,0.0f,0.35f});   
+    for(int i=0; i<6; ++i) material_sets[i].write(0, pbr::material_uniforms{colors[i]*0.8f,0.8f,0.0f,0.35f});   
 
     int refs[] {1,0,1,1,1};
     //cmd.clear_depth(1.0);
