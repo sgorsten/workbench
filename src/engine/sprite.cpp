@@ -222,14 +222,22 @@ canvas_device_objects::canvas_device_objects(rhi::device & device, shader_compil
     per_window_layout = device.create_descriptor_set_layout({{0, rhi::descriptor_type::uniform_buffer, 1}});
     per_texture_layout = device.create_descriptor_set_layout({{0, rhi::descriptor_type::combined_image_sampler, 1}});
     pipe_layout = device.create_pipeline_layout({per_window_layout, per_texture_layout});
-    const auto ui_vertex_binding = gfx::vertex_binder<ui_vertex>(0)
-        .attribute(0, &ui_vertex::position)
-        .attribute(1, &ui_vertex::texcoord)
-        .attribute(2, &ui_vertex::color);
     const auto vs = device.create_shader(compiler.compile_file(rhi::shader_stage::vertex, "standard/gui/ui.vert"));
     const auto fs = device.create_shader(compiler.compile_file(rhi::shader_stage::fragment, "standard/gui/ui.frag")); 
-    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
-    pipe = device.create_pipeline({pipe_layout, {ui_vertex_binding}, {vs,fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::always, false, {translucent}});    
+    const rhi::blend_state translucent {true, true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
+
+    rhi::pipeline_desc desc {};
+    desc.layout = pipe_layout;
+    desc.input = {gfx::vertex_binder<ui_vertex>(0)
+        .attribute(0, &ui_vertex::position)
+        .attribute(1, &ui_vertex::texcoord)
+        .attribute(2, &ui_vertex::color)};
+    desc.stages = {vs, fs};
+    desc.topology = rhi::primitive_topology::triangles;
+    desc.front_face = rhi::front_face::counter_clockwise;
+    desc.cull_mode = rhi::cull_mode::back;
+    desc.blend = {translucent};
+    pipe = device.create_pipeline(desc);
 }
 
 ////////////

@@ -26,6 +26,10 @@ namespace rhi
         #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
     }}
+    GLenum convert_gl(stencil_op op) { switch(op) { default: fail_fast();
+        #define RHI_STENCIL_OP(CASE, VK, DX, GL) case CASE: return GL;
+        #include "rhi-tables.inl"
+    }}
     GLenum convert_gl(blend_op op) { switch(op) { default: fail_fast();
         #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return GL;
         #include "rhi-tables.inl"
@@ -144,7 +148,8 @@ namespace rhi
 
     struct gl_pipeline : base_pipeline
     {
-        struct gl_blend { GLenum color_op, alpha_op, src_color, dst_color, src_alpha, dst_alpha; };
+        struct gl_stencil { GLenum func=GL_ALWAYS, sfail=GL_KEEP, dpfail=GL_KEEP, dppass=GL_KEEP; };
+        struct gl_blend { GLboolean red_mask, green_mask, blue_mask, alpha_mask; GLenum color_op, alpha_op, src_color, dst_color, src_alpha, dst_alpha; };
         ptr<gl_device> device;
         GLuint program_object = 0;
         std::vector<rhi::vertex_binding_desc> input;
@@ -153,10 +158,18 @@ namespace rhi
         std::vector<GLenum> enable, disable;
         GLenum primitive_mode, front_face, cull_face, depth_func;
         GLboolean depth_mask;
+        gl_stencil stencil_front, stencil_back;
+        GLuint stencil_read_mask=0xFFFFFFFF, stencil_write_mask=0xFFFFFFFF;
         std::vector<gl_blend> blend;
 
         gl_pipeline(gl_device * device, const pipeline_desc & desc);
         ~gl_pipeline();
+
+        void set_stencil_ref(uint8_t ref) const
+        {
+            glStencilFuncSeparate(GL_FRONT, stencil_front.func, ref, stencil_read_mask);
+            glStencilFuncSeparate(GL_BACK, stencil_back.func, ref, stencil_read_mask);
+        }
     };
 }
 
@@ -262,6 +275,8 @@ uint64_t gl_device::submit(command_buffer & cmd)
     const gl_pipeline * current_pipeline = nullptr;
     const char * base_indices_pointer = 0;
     int framebuffer_height = 0;
+    uint8_t stencil_ref = 0;
+
     glfwMakeContextCurrent(context);
     static_cast<const emulated_command_buffer &>(cmd).execute(overload(
         [](const generate_mipmaps_command & c)
@@ -309,6 +324,17 @@ uint64_t gl_device::submit(command_buffer & cmd)
             glClear(GL_DEPTH_BUFFER_BIT);
             glDepthMask(prev_mask);
         },
+        [](const clear_stencil_command & c)
+        {
+            GLint prev_front, prev_back;
+            glGetIntegerv(GL_STENCIL_WRITEMASK, &prev_front);
+            glGetIntegerv(GL_STENCIL_BACK_WRITEMASK, &prev_back);
+            glStencilMask(0xFF);
+            glClearStencil(c.stencil);
+            glClear(GL_STENCIL_BUFFER_BIT);
+            glStencilMaskSeparate(GL_FRONT, prev_front);
+            glStencilMaskSeparate(GL_BACK, prev_back);
+        },
         [&](const set_viewport_rect_command & c)
         {
             glViewport(c.x0, framebuffer_height-c.y1, c.x1-c.x0, c.y1-c.y0);
@@ -316,6 +342,11 @@ uint64_t gl_device::submit(command_buffer & cmd)
         [&](const set_scissor_rect_command & c)
         {
             glScissor(c.x0, framebuffer_height-c.y1, c.x1-c.x0, c.y1-c.y0);
+        },
+        [&](const set_stencil_ref_command & c)
+        {
+            stencil_ref = c.ref;
+            if(current_pipeline) current_pipeline->set_stencil_ref(c.ref);
         },
         [&](const bind_pipeline_command & c)
         {
@@ -330,12 +361,16 @@ uint64_t gl_device::submit(command_buffer & cmd)
             glCullFace(pipe.cull_face);
             glDepthFunc(pipe.depth_func);
             glDepthMask(pipe.depth_mask);
+            pipe.set_stencil_ref(stencil_ref);
+            glStencilOpSeparate(GL_FRONT, pipe.stencil_front.sfail, pipe.stencil_front.dpfail, pipe.stencil_front.dppass);
+            glStencilOpSeparate(GL_BACK, pipe.stencil_back.sfail, pipe.stencil_back.dpfail, pipe.stencil_back.dppass);
+            glStencilMask(pipe.stencil_write_mask);
             for(size_t i=0; i<pipe.blend.size(); ++i)
             {
+                glColorMaski(exactly(i), pipe.blend[i].red_mask, pipe.blend[i].green_mask, pipe.blend[i].blue_mask, pipe.blend[i].alpha_mask);
                 glBlendEquationSeparatei(exactly(i), pipe.blend[i].color_op, pipe.blend[i].alpha_op);
                 glBlendFuncSeparatei(exactly(i), pipe.blend[i].src_color, pipe.blend[i].dst_color, pipe.blend[i].src_alpha, pipe.blend[i].dst_alpha);
             }
-
             current_pipeline = &pipe;
         },
         [](const bind_descriptor_set_command & c)
@@ -603,29 +638,54 @@ gl_pipeline::gl_pipeline(gl_device * device, const pipeline_desc & desc) : base_
     default: fail_fast();
     }
 
-    // Depth stencil state
-    if(desc.depth_test)
+    // Depth state
+    if(desc.depth)
     {
         enable.push_back(GL_DEPTH_TEST);
-        depth_func = GL_NEVER + static_cast<GLenum>(*desc.depth_test);
+        depth_func = convert_gl(desc.depth->test);
+        depth_mask = desc.depth->write_mask ? GL_TRUE : GL_FALSE;
     }
     else
     {
         disable.push_back(GL_DEPTH_TEST);
         depth_func = GL_ALWAYS;
+        depth_mask = GL_FALSE;
     }
-    depth_mask = desc.depth_write ? GL_TRUE : GL_FALSE;
+
+    // Stencil state
+    if(desc.stencil)
+    {
+        enable.push_back(GL_STENCIL_TEST);
+        stencil_front.func = convert_gl(desc.stencil->front.test);
+        stencil_front.sfail = convert_gl(desc.stencil->front.stencil_fail_op);
+        stencil_front.dpfail = convert_gl(desc.stencil->front.stencil_pass_depth_fail_op);
+        stencil_front.dppass = convert_gl(desc.stencil->front.stencil_pass_depth_pass_op);
+        stencil_back.func = convert_gl(desc.stencil->back.test);
+        stencil_back.sfail = convert_gl(desc.stencil->back.stencil_fail_op);
+        stencil_back.dpfail = convert_gl(desc.stencil->back.stencil_pass_depth_fail_op);
+        stencil_back.dppass = convert_gl(desc.stencil->back.stencil_pass_depth_pass_op);
+        stencil_read_mask = desc.stencil->read_mask;
+        stencil_write_mask = desc.stencil->write_mask;
+    }
+    else
+    {
+        disable.push_back(GL_STENCIL_TEST);
+    }
 
     // Blending state
     bool enable_blend = false;
     for(auto & b : desc.blend)
     {
+        GLboolean mr = b.write_mask ? GL_TRUE : GL_FALSE;
+        GLboolean mg = b.write_mask ? GL_TRUE : GL_FALSE;
+        GLboolean mb = b.write_mask ? GL_TRUE : GL_FALSE;
+        GLboolean ma = b.write_mask ? GL_TRUE : GL_FALSE;
         if(b.enable)
         {
             enable_blend = true;
-            blend.push_back({convert_gl(b.color.op), convert_gl(b.alpha.op), convert_gl(b.color.source_factor), convert_gl(b.color.dest_factor), convert_gl(b.alpha.source_factor), convert_gl(b.alpha.dest_factor)});
+            blend.push_back({mr, mg, mb, ma, convert_gl(b.color.op), convert_gl(b.alpha.op), convert_gl(b.color.source_factor), convert_gl(b.color.dest_factor), convert_gl(b.alpha.source_factor), convert_gl(b.alpha.dest_factor)});
         }
-        else blend.push_back({GL_FUNC_ADD, GL_FUNC_ADD, GL_ONE, GL_ZERO, GL_ONE, GL_ZERO});
+        else blend.push_back({mr, mg, mb, ma, GL_FUNC_ADD, GL_FUNC_ADD, GL_ONE, GL_ZERO, GL_ONE, GL_ZERO});
     }
     if(enable_blend) enable.push_back(GL_BLEND);
     else disable.push_back(GL_BLEND);

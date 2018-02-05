@@ -82,11 +82,11 @@ pbr::device_objects::device_objects(rhi::ptr<rhi::device> dev, const shaders & s
     
     const auto image_vertex_binding = gfx::vertex_binder<render_image_vertex>(0).attribute(0, &render_image_vertex::position).attribute(1, &render_image_vertex::texcoord);
     const auto cubemap_vertex_binding = gfx::vertex_binder<render_cubemap_vertex>(0).attribute(0, &render_cubemap_vertex::position).attribute(1, &render_cubemap_vertex::direction);
-    const rhi::blend_state opaque {false};
-    auto compute_brdf_integral_image_pipeline = dev->create_pipeline({empty_pipeline_layout, {image_vertex_binding}, {render_image_vertex_shader, compute_brdf_integral_image_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false, {opaque}});
-    copy_cubemap_from_spheremap_pipeline = dev->create_pipeline({op_pipeline_layout, {cubemap_vertex_binding}, {render_cubemap_vertex_shader, copy_cubemap_from_spheremap_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false, {opaque}});
-    compute_irradiance_cubemap_pipeline = dev->create_pipeline({op_pipeline_layout, {cubemap_vertex_binding}, {render_cubemap_vertex_shader, compute_irradiance_cubemap_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false, {opaque}});
-    compute_reflectance_cubemap_pipeline = dev->create_pipeline({op_pipeline_layout, {cubemap_vertex_binding}, {render_cubemap_vertex_shader, compute_reflectance_cubemap_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, false, {opaque}});
+    const rhi::blend_state opaque {true, false};
+    auto compute_brdf_integral_image_pipeline = dev->create_pipeline({empty_pipeline_layout, {image_vertex_binding}, {render_image_vertex_shader, compute_brdf_integral_image_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, std::nullopt, {opaque}});
+    copy_cubemap_from_spheremap_pipeline = dev->create_pipeline({op_pipeline_layout, {cubemap_vertex_binding}, {render_cubemap_vertex_shader, copy_cubemap_from_spheremap_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, std::nullopt, {opaque}});
+    compute_irradiance_cubemap_pipeline = dev->create_pipeline({op_pipeline_layout, {cubemap_vertex_binding}, {render_cubemap_vertex_shader, compute_irradiance_cubemap_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, std::nullopt, {opaque}});
+    compute_reflectance_cubemap_pipeline = dev->create_pipeline({op_pipeline_layout, {cubemap_vertex_binding}, {render_cubemap_vertex_shader, compute_reflectance_cubemap_fragment_shader}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::none, std::nullopt, std::nullopt, {opaque}});
 
     brdf_integral_image = dev->create_image({rhi::image_shape::_2d, {512,512,1}, 1, rhi::image_format::rg_float16, rhi::sampled_image_bit|rhi::color_attachment_bit}, {});
     render_to_image(*brdf_integral_image, 0, {512,512}, false, [&](rhi::command_buffer & cmd) { cmd.bind_pipeline(*compute_brdf_integral_image_pipeline); });

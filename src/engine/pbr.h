@@ -83,7 +83,7 @@ namespace pbr
     struct material_uniforms
     {
         alignas(16) float3 albedo_tint;
-        alignas(4) float roughness, metalness;
+        alignas(4) float roughness, metalness, opacity;
     };
 
     struct object_uniforms

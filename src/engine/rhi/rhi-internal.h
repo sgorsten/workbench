@@ -5,7 +5,7 @@
 namespace rhi
 {
     // Used for objects whose ownership is shared by their references
-    template<class T> struct delete_when_unreferenced : T
+    template<class T> struct delete_when_unreferenced final : T
     {
         mutable std::atomic_uint32_t ref_count {0};
         void add_ref() const final { ++ref_count; }
@@ -14,7 +14,7 @@ namespace rhi
     };
 
     // Used for objects which are reference counted but whose lifetime is controlled by another object
-    template<class T> struct counted : T
+    template<class T> struct counted final : T
     {
         mutable std::atomic_uint32_t ref_count {0};
         void add_ref() const final { ++ref_count; }
@@ -130,8 +130,10 @@ namespace rhi
     struct generate_mipmaps_command { ptr<image> im; };
     struct begin_render_pass_command { render_pass_desc pass; ptr<framebuffer> framebuffer; };
     struct clear_depth_command { float depth; };
+    struct clear_stencil_command { uint8_t stencil; };
     struct set_viewport_rect_command { int x0, y0, x1, y1; };
     struct set_scissor_rect_command { int x0, y0, x1, y1; };    
+    struct set_stencil_ref_command { uint8_t ref; };
     struct bind_pipeline_command { ptr<const pipeline> pipe; };
     struct bind_descriptor_set_command { ptr<const pipeline_layout> layout; int set_index; ptr<const descriptor_set> set; };
     struct bind_vertex_buffer_command { int index; buffer_range range; };
@@ -142,15 +144,18 @@ namespace rhi
 
     struct emulated_command_buffer : command_buffer
     { 
-        using command = std::variant<generate_mipmaps_command, begin_render_pass_command, clear_depth_command, set_viewport_rect_command, set_scissor_rect_command, 
+        using command = std::variant<generate_mipmaps_command, begin_render_pass_command, clear_depth_command, clear_stencil_command,
+            set_viewport_rect_command, set_scissor_rect_command, set_stencil_ref_command,
             bind_pipeline_command, bind_descriptor_set_command, bind_vertex_buffer_command, bind_index_buffer_command, draw_command, draw_indexed_command, end_render_pass_command>;
         std::vector<command> commands; 
     
         void generate_mipmaps(image & image) final { commands.push_back(generate_mipmaps_command{&image}); }
         void begin_render_pass(const render_pass_desc & pass, framebuffer & framebuffer) final { commands.push_back(begin_render_pass_command{pass, &framebuffer}); }
-        void clear_depth(float depth) { commands.push_back(clear_depth_command{depth}); }
+        void clear_depth(float depth) final { commands.push_back(clear_depth_command{depth}); }
+        void clear_stencil(uint8_t stencil) final { commands.push_back(clear_stencil_command{stencil}); }
         void set_viewport_rect(int x0, int y0, int x1, int y1) final { commands.push_back(set_viewport_rect_command{x0, y0, x1, y1}); }
         void set_scissor_rect(int x0, int y0, int x1, int y1) final { commands.push_back(set_scissor_rect_command{x0, y0, x1, y1}); }
+        void set_stencil_ref(uint8_t ref) final { commands.push_back(set_stencil_ref_command{ref}); }
         void bind_pipeline(const pipeline & pipe) final { commands.push_back(bind_pipeline_command{&pipe}); }
         void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) final { commands.push_back(bind_descriptor_set_command{&layout, set_index, &set}); }
         void bind_vertex_buffer(int index, buffer_range range) final { commands.push_back(bind_vertex_buffer_command{index, range}); }

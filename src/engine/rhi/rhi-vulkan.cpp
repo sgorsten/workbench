@@ -38,6 +38,10 @@ namespace rhi
         #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return VK;
         #include "rhi-tables.inl"
     }}
+    auto convert_vk(stencil_op op) { switch(op) { default: fail_fast();
+        #define RHI_STENCIL_OP(CASE, VK, DX, GL) case CASE: return VK;
+        #include "rhi-tables.inl"
+    }}
     auto convert_vk(blend_op op) { switch(op) { default: fail_fast();
         #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return VK;
         #include "rhi-tables.inl"
@@ -307,8 +311,10 @@ namespace rhi
         void generate_mipmaps(image & image) final;
         void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) final;
         void clear_depth(float depth) final;
+        void clear_stencil(uint8_t stencil) final;
         void set_viewport_rect(int x0, int y0, int x1, int y1) final;
         void set_scissor_rect(int x0, int y0, int x1, int y1) final;
+        void set_stencil_ref(uint8_t stencil) final;
         void bind_pipeline(const pipeline & pipe) final;
         void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) final;
         void bind_vertex_buffer(int index, buffer_range range) final;
@@ -1026,11 +1032,11 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass) const
     const VkPipelineMultisampleStateCreateInfo multisample_state {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, nullptr, 0, VK_SAMPLE_COUNT_1_BIT};
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil_state {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    depth_stencil_state.depthWriteEnable = desc.depth_write ? VK_TRUE : VK_FALSE;
-    if(desc.depth_test)
+    if(desc.depth)
     {
         depth_stencil_state.depthTestEnable = VK_TRUE;
-        depth_stencil_state.depthCompareOp = static_cast<VkCompareOp>(*desc.depth_test);
+        depth_stencil_state.depthCompareOp = convert_vk(desc.depth->test);
+        depth_stencil_state.depthWriteEnable = desc.depth->write_mask ? VK_TRUE : VK_FALSE;
     }
 
     std::vector<VkPipelineColorBlendAttachmentState> blend_attachments;
@@ -1228,6 +1234,14 @@ void vk_command_buffer::clear_depth(float depth)
 {
     VkClearAttachment clear {VK_IMAGE_ASPECT_DEPTH_BIT};
     clear.clearValue.depthStencil.depth = depth;
+    const VkClearRect rect {{{0,0}, {exactly(current_framebuffer->dims.x),exactly(current_framebuffer->dims.y)}}, 0, 1};
+    vkCmdClearAttachments(cmd, 1, &clear, 1, &rect);
+}
+
+void vk_command_buffer::clear_stencil(uint8_t stencil)
+{
+    VkClearAttachment clear {VK_IMAGE_ASPECT_STENCIL_BIT};
+    clear.clearValue.depthStencil.stencil = stencil;
     const VkClearRect rect {{{0,0}, {current_framebuffer->dims.x,current_framebuffer->dims.y}}, 0, 1};
     vkCmdClearAttachments(cmd, 1, &clear, 1, &rect);
 }
@@ -1242,6 +1256,11 @@ void vk_command_buffer::set_scissor_rect(int x0, int y0, int x1, int y1)
 {
     const VkRect2D scissor {{exactly(x0), exactly(y0)}, {exactly(x1-x0), exactly(y1-y0)}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
+}
+
+void vk_command_buffer::set_stencil_ref(uint8_t stencil)
+{
+    vkCmdSetStencilReference(cmd, VK_STENCIL_FRONT_AND_BACK, stencil);
 }
 
 void vk_command_buffer::bind_pipeline(const pipeline & pipe)

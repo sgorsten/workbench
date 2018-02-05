@@ -1,9 +1,9 @@
 #include "gizmo.h"
 #include "pbr.h"
 
-gizmo::gizmo(const rhi::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z,
+gizmo::gizmo(const std::array<rhi::ptr<const rhi::pipeline>,5> & passes, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z,
         const mesh_asset * box_yz, const mesh_asset * box_zx, const mesh_asset * box_xy) :
-    pipe{&pipe}, meshes{arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy}
+    passes{passes}, meshes{arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy}
 {
     
 }
@@ -84,13 +84,7 @@ void gizmo::plane_translation_dragger(gui & g, const rect<int> & viewport, const
 
 void gizmo::draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool, const float3 & position) const
 {
-    cmd.clear_depth(1.0);
-    cmd.bind_pipeline(*pipe);
-
-    auto object_set = pool.alloc_descriptor_set(*pipe, pbr::object_set_index);
-    object_set.write(0, pbr::object_uniforms{translation_matrix(position)});
-    object_set.bind(cmd);
-
+    // Determine gizmo colors based on mouseover status
     float3 colors[] {{1,0,0},{0,1,0},{0,0,1},{0,1,1},{1,0,1},{1,1,0}};
     switch(mode != gizmo_mode::none ? mode : mouseover_mode)
     {
@@ -101,11 +95,30 @@ void gizmo::draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool,
     case gizmo_mode::translate_zx: colors[4] = {1.0f, 0.5f, 1.0f}; break;
     case gizmo_mode::translate_xy: colors[5] = {1.0f, 1.0f, 0.5f}; break;
     }
-    for(int i=0; i<6; ++i)
+
+    auto object_set = pool.alloc_descriptor_set(*passes[0], pbr::object_set_index);
+    object_set.write(0, pbr::object_uniforms{translation_matrix(position)});
+    gfx::descriptor_set material_sets[6] {
+        pool.alloc_descriptor_set(*passes[0], pbr::material_set_index),
+        pool.alloc_descriptor_set(*passes[0], pbr::material_set_index),
+        pool.alloc_descriptor_set(*passes[0], pbr::material_set_index),
+        pool.alloc_descriptor_set(*passes[0], pbr::material_set_index),
+        pool.alloc_descriptor_set(*passes[0], pbr::material_set_index),
+        pool.alloc_descriptor_set(*passes[0], pbr::material_set_index)
+    };
+    for(int i=0; i<6; ++i) material_sets[i].write(0, pbr::material_uniforms{colors[i],0.8f,0.0f,0.35f});   
+
+    int refs[] {1,0,1,1,1};
+    //cmd.clear_depth(1.0);
+    object_set.bind(cmd);
+    for(size_t j=0; j<5; ++j)
     {
-        auto material_set = pool.alloc_descriptor_set(*pipe, pbr::material_set_index);
-        material_set.write(0, pbr::material_uniforms{colors[i],0.8f,0.0f});        
-        material_set.bind(cmd); 
-        meshes[i]->gmesh.draw(cmd);
+        cmd.set_stencil_ref(refs[j]);
+        cmd.bind_pipeline(*passes[j]);
+        for(int i=0; i<6; ++i)
+        {
+            material_sets[i].bind(cmd); 
+            meshes[i]->gmesh.draw(cmd);
+        }
     }
 }

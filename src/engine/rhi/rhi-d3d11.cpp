@@ -30,6 +30,10 @@ namespace rhi
         #define RHI_COMPARE_OP(CASE, VK, DX, GL) case CASE: return DX;
         #include "rhi-tables.inl"
     }}
+    auto convert_dx(stencil_op op) { switch(op) { default: fail_fast();
+        #define RHI_STENCIL_OP(CASE, VK, DX, GL) case CASE: return DX;
+        #include "rhi-tables.inl"
+    }}
     auto convert_dx(blend_op op) { switch(op) { default: fail_fast();
         #define RHI_BLEND_OP(CASE, VK, DX, GL) case CASE: return DX;
         #include "rhi-tables.inl"
@@ -222,9 +226,10 @@ uint64_t d3d_device::submit(command_buffer & cmd)
 {
     d3d_framebuffer * current_framebuffer = 0;
     const d3d_pipeline * current_pipeline = 0;
+    uint8_t stencil_ref = 0;
     ctx->ClearState();
     static_cast<const emulated_command_buffer &>(cmd).execute(overload(
-        [this](const generate_mipmaps_command & c)
+        [&](const generate_mipmaps_command & c)
         {
             ctx->GenerateMips(static_cast<d3d_image &>(*c.im).shader_resource_view);
         },
@@ -264,6 +269,10 @@ uint64_t d3d_device::submit(command_buffer & cmd)
         {
             ctx->ClearDepthStencilView(current_framebuffer->depth_stencil_view, D3D11_CLEAR_DEPTH, c.depth, 0);
         },
+        [&](const clear_stencil_command & c)
+        {
+            ctx->ClearDepthStencilView(current_framebuffer->depth_stencil_view, D3D11_CLEAR_STENCIL, 0, c.stencil);
+        },
         [&](const set_viewport_rect_command & c)
         {
             const D3D11_VIEWPORT viewport {exactly(c.x0), exactly(c.y0), exactly(c.x1-c.x0), exactly(c.y1-c.y0), 0, 1};
@@ -274,7 +283,12 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             const D3D11_RECT scissor {c.x0, c.y0, c.x1, c.y1};
             ctx->RSSetScissorRects(1, &scissor);
         },
-        [this,&current_pipeline](const bind_pipeline_command & c)
+        [&](const set_stencil_ref_command & c)
+        {
+            stencil_ref = c.ref;
+            if(current_pipeline) ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, stencil_ref);
+        },
+        [&](const bind_pipeline_command & c)
         {
             const float blend_factor[] {0,0,0,0};
             current_pipeline = &static_cast<const d3d_pipeline &>(*c.pipe);
@@ -283,10 +297,10 @@ uint64_t d3d_device::submit(command_buffer & cmd)
             ctx->VSSetShader(current_pipeline->vs, nullptr, 0);
             ctx->RSSetState(current_pipeline->rasterizer_state);
             ctx->PSSetShader(current_pipeline->ps, nullptr, 0);      
-            ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, 0);
+            ctx->OMSetDepthStencilState(current_pipeline->depth_stencil_state, stencil_ref);
             ctx->OMSetBlendState(current_pipeline->blend_state, blend_factor, 0xF);
         },
-        [this](const bind_descriptor_set_command & c)
+        [&](const bind_descriptor_set_command & c)
         {
             bind_descriptor_set(*c.layout, c.set_index, *c.set, [this](size_t index, buffer & buffer, size_t offset, size_t size)
             { 
@@ -304,7 +318,7 @@ uint64_t d3d_device::submit(command_buffer & cmd)
                 ctx->PSSetShaderResources(exactly(index), 1, &shader_resource_view);
             });
         },
-        [this,&current_pipeline](const bind_vertex_buffer_command & c)
+        [&](const bind_vertex_buffer_command & c)
         {
             for(auto & buf : current_pipeline->input)
             {
@@ -316,19 +330,19 @@ uint64_t d3d_device::submit(command_buffer & cmd)
                 }
             }      
         },
-        [this](const bind_index_buffer_command & c) 
+        [&](const bind_index_buffer_command & c) 
         {
             ctx->IASetIndexBuffer(static_cast<d3d_buffer &>(c.range.buffer).buffer_object, DXGI_FORMAT_R32_UINT, exactly(c.range.offset)); 
         },
-        [this](const draw_command & c)
+        [&](const draw_command & c)
         { 
             ctx->Draw(c.vertex_count, c.first_vertex); 
         },
-        [this](const draw_indexed_command & c)
+        [&](const draw_indexed_command & c)
         { 
             ctx->DrawIndexed(c.index_count, c.first_index, 0); 
         },
-        [this](const end_render_pass_command &) {}
+        [&](const end_render_pass_command &) {}
     ));
     if(fence) check("ID3D11DeviceContext4::Signal", ctx->Signal(fence, ++submitted_index));
     return submitted_index;
@@ -549,12 +563,12 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
     check("ID3D11Device::CreateRasterizerState", device.CreateRasterizerState(&rasterizer_desc, rasterizer_state.init()));
 
     D3D11_DEPTH_STENCIL_DESC depth_stencil_desc {};
-    if(desc.depth_test)
+    if(desc.depth)
     {
         depth_stencil_desc.DepthEnable = TRUE;
-        depth_stencil_desc.DepthFunc = static_cast<D3D11_COMPARISON_FUNC>(static_cast<int>(*desc.depth_test)+1);
+        depth_stencil_desc.DepthFunc = convert_dx(desc.depth->test);
+        depth_stencil_desc.DepthWriteMask = desc.depth->write_mask ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
     }
-    depth_stencil_desc.DepthWriteMask = desc.depth_write ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
     check("ID3D11Device::CreateDepthStencilState", device.CreateDepthStencilState(&depth_stencil_desc, depth_stencil_state.init()));
 
     D3D11_BLEND_DESC blend_desc {};

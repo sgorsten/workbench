@@ -10,7 +10,7 @@ enum class gizmo_mode { none, translate_x, translate_y, translate_z, translate_y
 struct gizmo
 {
     // Rendering state
-    rhi::ptr<const rhi::pipeline> pipe;
+    std::array<rhi::ptr<const rhi::pipeline>,5> passes;
     const mesh_asset * meshes[6];
     gizmo_mode mode, mouseover_mode;
     float3 click_offset, original_position;
@@ -18,7 +18,7 @@ struct gizmo
     void plane_translation_dragger(gui & g, const rect<int> & viewport, const camera & cam, const float3 & plane_normal, float3 & point) const;
     void axis_translation_dragger(gui & g, const rect<int> & viewport, const camera & cam, const float3 & axis, float3 & point) const;
 public:
-    gizmo(const rhi::pipeline & pipe, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z,
+    gizmo(const std::array<rhi::ptr<const rhi::pipeline>,5> & passes, const mesh_asset * arrow_x, const mesh_asset * arrow_y, const mesh_asset * arrow_z,
         const mesh_asset * box_yz, const mesh_asset * box_zx, const mesh_asset * box_xy);
 
     void draw(rhi::command_buffer & cmd, gfx::transient_resource_pool & pool, const float3 & position) const;

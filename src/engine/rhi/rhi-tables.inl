@@ -43,7 +43,7 @@ RHI_CULL_MODE(rhi::cull_mode::front, VK_CULL_MODE_FRONT_BIT, D3D11_CULL_FRONT, t
 #undef RHI_CULL_MODE
 #endif
 
-// #define RHI_BLEND_OP(CASE, VK, DX, GL)
+// #define RHI_COMPARE_OP(CASE, VK, DX, GL)
 #ifdef RHI_COMPARE_OP
 RHI_COMPARE_OP(rhi::compare_op::never,            VK_COMPARE_OP_NEVER,            D3D11_COMPARISON_NEVER,         GL_NEVER)
 RHI_COMPARE_OP(rhi::compare_op::less,             VK_COMPARE_OP_LESS,             D3D11_COMPARISON_LESS,          GL_LESS)
@@ -54,6 +54,19 @@ RHI_COMPARE_OP(rhi::compare_op::not_equal,        VK_COMPARE_OP_NOT_EQUAL,      
 RHI_COMPARE_OP(rhi::compare_op::greater_or_equal, VK_COMPARE_OP_GREATER_OR_EQUAL, D3D11_COMPARISON_GREATER_EQUAL, GL_GEQUAL)
 RHI_COMPARE_OP(rhi::compare_op::always,           VK_COMPARE_OP_ALWAYS,           D3D11_COMPARISON_ALWAYS,        GL_ALWAYS)
 #undef RHI_COMPARE_OP
+#endif
+
+// #define RHI_STENCIL_OP(CASE, VK, DX, GL)
+#ifdef RHI_STENCIL_OP
+RHI_STENCIL_OP(rhi::stencil_op::keep,                VK_STENCIL_OP_KEEP,                D3D11_STENCIL_OP_KEEP,     GL_KEEP)
+RHI_STENCIL_OP(rhi::stencil_op::zero,                VK_STENCIL_OP_ZERO,                D3D11_STENCIL_OP_ZERO,     GL_ZERO)
+RHI_STENCIL_OP(rhi::stencil_op::replace,             VK_STENCIL_OP_REPLACE,             D3D11_STENCIL_OP_REPLACE,  GL_REPLACE)
+RHI_STENCIL_OP(rhi::stencil_op::invert,              VK_STENCIL_OP_INVERT,              D3D11_STENCIL_OP_INVERT,   GL_INVERT)
+RHI_STENCIL_OP(rhi::stencil_op::increment_and_wrap,  VK_STENCIL_OP_INCREMENT_AND_WRAP,  D3D11_STENCIL_OP_INCR,     GL_INCR_WRAP)
+RHI_STENCIL_OP(rhi::stencil_op::increment_and_clamp, VK_STENCIL_OP_INCREMENT_AND_CLAMP, D3D11_STENCIL_OP_INCR_SAT, GL_INCR)
+RHI_STENCIL_OP(rhi::stencil_op::decrement_and_wrap,  VK_STENCIL_OP_DECREMENT_AND_WRAP,  D3D11_STENCIL_OP_DECR,     GL_DECR_WRAP)
+RHI_STENCIL_OP(rhi::stencil_op::decrement_and_clamp, VK_STENCIL_OP_DECREMENT_AND_CLAMP, D3D11_STENCIL_OP_DECR_SAT, GL_DECR)
+#undef RHI_STENCIL_OP
 #endif
 
 // #define RHI_BLEND_OP(CASE, VK, DX, GL)

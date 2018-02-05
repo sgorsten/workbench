@@ -260,6 +260,8 @@ struct pipelines
     rhi::ptr<const rhi::pipeline> colored_pbr_pipe;
     rhi::ptr<const rhi::pipeline> textured_pbr_pipe;
     rhi::ptr<const rhi::pipeline> bumped_pbr_pipe;
+
+    std::array<rhi::ptr<const rhi::pipeline>,5> gizmo_passes;
 };
 
 pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
@@ -294,7 +296,8 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
     });
 
     // Pipeline layouts
-    auto common_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout});
+    pipelines p;
+    p.common_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout});
     auto skybox_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, skybox_material_layout});
     auto colored_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, colored_pbr_layout, static_object_layout});
     auto textured_pipe_layout = dev.create_pipeline_layout({per_scene_layout, per_view_layout, textured_pbr_layout, static_object_layout});
@@ -322,17 +325,59 @@ pipelines create_pipelines(rhi::device & dev, shader_compiler & compiler)
     auto skybox_vss = dev.create_shader(skybox_vs), skybox_fss = dev.create_shader(skybox_fs);
 
     // Blend states
-    const rhi::blend_state opaque {false};
-    const rhi::blend_state translucent {true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
+    const rhi::blend_state no_color {false, false};
+    const rhi::blend_state opaque {true, false};
+    const rhi::blend_state translucent {true, true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
+
+    rhi::depth_state opaque_depth {rhi::compare_op::less, true};
+    rhi::depth_state depth_test_greater {rhi::compare_op::greater, true};
+
+    rhi::stencil_state stencil_write_on_depth_pass;
+    stencil_write_on_depth_pass.front.test = rhi::compare_op::always;
+    stencil_write_on_depth_pass.front.stencil_fail_op = rhi::stencil_op::keep;
+    stencil_write_on_depth_pass.front.stencil_pass_depth_fail_op = rhi::stencil_op::keep;
+    stencil_write_on_depth_pass.front.stencil_pass_depth_pass_op = rhi::stencil_op::replace;
+
+    rhi::stencil_state stencil_write_on_depth_fail;
+    stencil_write_on_depth_fail.front.test = rhi::compare_op::always;
+    stencil_write_on_depth_fail.front.stencil_fail_op = rhi::stencil_op::keep;
+    stencil_write_on_depth_fail.front.stencil_pass_depth_fail_op = rhi::stencil_op::replace;
+    stencil_write_on_depth_fail.front.stencil_pass_depth_pass_op = rhi::stencil_op::keep;
+
+    rhi::stencil_state stencil_test_equal_to_one;
+    stencil_test_equal_to_one.front.test = rhi::compare_op::equal;
+    stencil_test_equal_to_one.front.stencil_fail_op = rhi::stencil_op::keep;
+    stencil_test_equal_to_one.front.stencil_pass_depth_fail_op = rhi::stencil_op::keep;
+    stencil_test_equal_to_one.front.stencil_pass_depth_pass_op = rhi::stencil_op::keep;
 
     // Pipelines
-    auto light_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
-    auto skybox_pipe = dev.create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::back, rhi::compare_op::always, false, {opaque}});
-    auto colored_pbr_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
-    auto textured_pbr_pipe = dev.create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
-    auto bumped_pbr_pipe = dev.create_pipeline({bumped_pipe_layout, {mesh_vertex_binding}, {vss,bumped_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back , rhi::compare_op::less, true, {opaque}});       
+    p.light_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, opaque_depth, std::nullopt, {opaque}});       
+    p.skybox_pipe = dev.create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vss,skybox_fss}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::back, std::nullopt, std::nullopt, {opaque}});
+    p.colored_pbr_pipe = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, opaque_depth, std::nullopt, {opaque}});       
+    p.textured_pbr_pipe = dev.create_pipeline({textured_pipe_layout, {mesh_vertex_binding}, {vss,textured_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, opaque_depth, std::nullopt, {opaque}});       
+    p.bumped_pbr_pipe = dev.create_pipeline({bumped_pipe_layout, {mesh_vertex_binding}, {vss,bumped_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back , opaque_depth, std::nullopt, {opaque}});       
 
-    return {common_layout, light_pipe, skybox_pipe, colored_pbr_pipe, textured_pbr_pipe, bumped_pbr_pipe};
+    // Pass 0 writes stencil value of '1' everywhere that the gizmo is occluded
+    p.gizmo_passes[0] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, false}, stencil_write_on_depth_fail, {no_color}});
+
+    // Pass 1 renders the unoccluded fragments of the gizmo and resets the stencil to '0' at those fragments
+    p.gizmo_passes[1] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, opaque_depth, stencil_write_on_depth_pass, {opaque}});
+
+    // Pass 2 writes into the depth buffer everywhere the stencil is '1'
+    p.gizmo_passes[2] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::always, true}, stencil_test_equal_to_one, {no_color}});
+
+    // Pass 3 ensures that the depth buffer contains the front facing fragment everywhere the stencil is '1'
+    p.gizmo_passes[3] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, true}, stencil_test_equal_to_one, {no_color}});
+    
+    // Pass 4 renders the front faces of the occluded parts of the gizmo
+    p.gizmo_passes[4] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,colored_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::equal, false}, stencil_test_equal_to_one, {translucent}});
+
+    //p.gizmo_passes[3] = p.colored_pbr_pipe;
+    
+    //p.gizmo_passes[1] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::greater, true}, stencil_test_equal_to_one, {no_color}});
+    //p.gizmo_passes[2] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, true}, stencil_test_equal_to_one, {no_color}});
+    //p.gizmo_passes[3] = dev.create_pipeline({colored_pipe_layout, {mesh_vertex_binding}, {vss,unlit_fss}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::equal, false}, stencil_test_equal_to_one, {opaque}});
+     return p;
 };
 
 int main(int argc, const char * argv[]) try
@@ -433,7 +478,7 @@ int main(int argc, const char * argv[]) try
     gwindow->on_key = [w=gwindow->get_glfw_window(), &gs](int key, int scancode, int action, int mods) { gs.on_key(w, key, action, mods); };
     gwindow->on_char = [w=gwindow->get_glfw_window(), &gs](uint32_t ch, int mods) { gs.on_char(w, ch); };
 
-    gizmo gizmo{*pipelines.colored_pbr_pipe, arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy};
+    gizmo gizmo{pipelines.gizmo_passes, arrow_x, arrow_y, arrow_z, box_yz, box_zx, box_xy};
     editor editor{assets, scene, gizmo, gwindow};
 
     // Main loop

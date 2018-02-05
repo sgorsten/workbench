@@ -37,9 +37,10 @@ namespace rhi
     enum class descriptor_type : int;
     enum class attribute_format : int;
     enum class primitive_topology : int;
-    enum class compare_op : int;
     enum class front_face : int;
     enum class cull_mode : int;
+    enum class compare_op : int;
+    enum class stencil_op : int;
     enum class blend_op : int;
     enum class blend_factor : int;
 
@@ -109,7 +110,25 @@ namespace rhi
     struct vertex_attribute_desc { int index; attribute_format type; int offset; };
     struct vertex_binding_desc { int index, stride; std::vector<vertex_attribute_desc> attributes; }; // TODO: per_vertex/per_instance
     struct blend_equation { blend_factor source_factor; blend_op op; blend_factor dest_factor; };
-    struct blend_state { bool enable; blend_equation color, alpha; };
+    struct blend_state { bool write_mask; bool enable; blend_equation color, alpha; };
+    struct depth_state
+    {
+        compare_op test;
+        bool write_mask;
+    };
+    struct stencil_face
+    {
+        compare_op test {};
+        stencil_op stencil_fail_op {};
+        stencil_op stencil_pass_depth_fail_op {};
+        stencil_op stencil_pass_depth_pass_op {};
+    };
+    struct stencil_state
+    {
+        stencil_face front, back;
+        uint8_t read_mask = 0xFF;
+        uint8_t write_mask = 0xFF;
+    };
     struct pipeline_desc
     {
         ptr<const pipeline_layout> layout;      // descriptors
@@ -118,8 +137,8 @@ namespace rhi
         primitive_topology topology;            // rasterizer state
         front_face front_face;       
         cull_mode cull_mode;
-        std::optional<compare_op> depth_test;   // depth state
-        bool depth_write;
+        std::optional<depth_state> depth;       // If non-null, parameters for depth test, if null, no depth test or writes are performed
+        std::optional<stencil_state> stencil;   // If non-null, parameters for stencil test, if null, no stencil test or writes are performed
         std::vector<blend_state> blend;         // blending state
     };
    
@@ -224,9 +243,10 @@ namespace rhi
         virtual void begin_render_pass(const render_pass_desc & desc, framebuffer & framebuffer) = 0;
         // TODO: virtual void clear_color(int index, clear_color color) = 0;
         virtual void clear_depth(float depth) = 0;
-        // TODO: virtual void clear_stencil(uint8_t stencil) = 0;
+        virtual void clear_stencil(uint8_t stencil) = 0;
         virtual void set_viewport_rect(int x0, int y0, int x1, int y1) = 0;
         virtual void set_scissor_rect(int x0, int y0, int x1, int y1) = 0;
+        virtual void set_stencil_ref(uint8_t ref) = 0;
         virtual void bind_pipeline(const pipeline & pipe) = 0;
         virtual void bind_descriptor_set(const pipeline_layout & layout, int set_index, const descriptor_set & set) = 0;
         virtual void bind_vertex_buffer(int index, buffer_range range) = 0;
@@ -391,5 +411,16 @@ namespace rhi
         one_minus_source_alpha,     // {1-sa, 1-sa, 1-sa, 1-sa}
         dest_alpha,                 // {  da,   da,   da,   da}
         one_minus_dest_alpha,       // {1-da, 1-da, 1-da, 1-da}
+    };
+    enum class stencil_op
+    {
+        keep,               
+        zero,               
+        replace,            
+        invert,              
+        increment_and_wrap, 
+        increment_and_clamp,
+        decrement_and_wrap, 
+        decrement_and_clamp,
     };
 }
