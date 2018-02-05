@@ -27,6 +27,7 @@ namespace rhi
     using buffer_flags = int;
     using image_flags = int;
 
+    enum class client_api : int;
     enum class shader_stage : int;
     enum class layout : int;
     enum class image_format : int;
@@ -136,10 +137,13 @@ namespace rhi
     };
     
     struct device_info { linalg::z_range z_range; bool inverted_framebuffers; };
-    struct backend_info
+    using debug_callback = std::function<void(const char *)>;
+
+    struct client_info
     {
         std::string name;
-        std::function<rhi::ptr<rhi::device>(std::function<void(const char *)> debug_callback)> create_device;
+        client_api api;
+        std::function<rhi::ptr<rhi::device>(debug_callback debug_callback)> create_device;
     };
 
     ////////////////
@@ -252,6 +256,13 @@ namespace rhi
         sampled_image_bit    = 1<<0, // Image can be bound to a sampler
         color_attachment_bit = 1<<1, // Image can be bound to a framebuffer as a color attachment
         depth_attachment_bit = 1<<2, // Image can be bound to a framebuffer as the depth/stencil attachment
+    };
+
+    enum class client_api : int
+    {
+        vulkan, // Vulkan 1.0
+        opengl, // OpenGL 4.5 Core
+        d3d11   // Direct3D 11.1
     };
 
     enum class shader_stage : int

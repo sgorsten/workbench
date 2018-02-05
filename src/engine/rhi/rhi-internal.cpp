@@ -1,9 +1,9 @@
 #include "rhi-internal.h"
 using namespace rhi;
 
-std::vector<backend_info> & rhi::global_backend_list()
+std::vector<client_info> & rhi::global_backend_list()
 {
-    static std::vector<backend_info> backends;
+    static std::vector<client_info> backends;
     return backends;
 }
 

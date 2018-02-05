@@ -334,8 +334,7 @@ int main(int argc, const char * argv[]) try
 
     // Obtain a device and create device objects
     gfx::context context;
-    auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    auto dev = context.get_backends().back().create_device(debug);
+    auto dev = context.create_device({rhi::client_api::opengl}, [](const char * message) { std::cerr << message << std::endl; });
     canvas_device_objects device_objects {*dev, compiler, sheet};
     auto gwindow = std::make_unique<gfx::window>(*dev, int2{1280,720}, to_string("Workbench 2018 - Graph Editor"));
     

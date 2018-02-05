@@ -51,28 +51,33 @@ mesh make_box_mesh(const float3 & a, const float3 & b)
 
 mesh make_sphere_mesh(int slices, int stacks, float radius)
 {
-    const auto make_vertex = [slices, stacks, radius](int i, int j)
-    {
-        const float tau = 6.2831853f, longitude = i*tau/slices, latitude = (j-(stacks*0.5f))*tau/2/stacks;
-        const float3 normal {cos(longitude)*cos(latitude), sin(latitude), sin(longitude)*cos(latitude)}; // Poles at +/-y
-        return mesh_vertex{normal*radius, normal, {(float)i/slices, (float)j/stacks}};
-    };
-
     mesh m;
-    for(int i=0; i<slices; ++i)
+    for(int i=0; i<=slices; ++i)
     {
-        for(int j=0; j<stacks; ++j)
+        for(int j=0; j<=stacks; ++j)
         {
-            int base = exactly(m.vertices.size());
-            m.vertices.push_back(make_vertex(i,j));
-            m.vertices.push_back(make_vertex(i,j+1));
-            m.vertices.push_back(make_vertex(i+1,j+1));
-            m.vertices.push_back(make_vertex(i+1,j));
-            m.triangles.push_back(base+int3(0,1,2));
-            m.triangles.push_back(base+int3(0,2,3));
+            const float tau = 6.2831853f, longitude = (i%slices)*tau/slices, latitude = (j-(stacks*0.5f))*tau/2/stacks;
+            const float3 normal {cos(longitude)*cos(latitude), sin(latitude), sin(longitude)*cos(latitude)}; // Poles at +/-y
+            m.vertices.push_back({normal*radius, normal, {(float)i/slices, (float)j/stacks}});
+
+            if(i>0 && j>0)
+            {
+                int i0 = (i-1)*(stacks+1)+j-1;
+                int i1 = (i-1)*(stacks+1)+j-0;
+                int i2 = (i-0)*(stacks+1)+j-0;
+                int i3 = (i-0)*(stacks+1)+j-1;
+                m.triangles.push_back(int3(i0,i1,i2));
+                m.triangles.push_back(int3(i0,i2,i3));
+            }
         }
     }
     m.compute_tangents();
+    for(int j=0; j<=stacks; ++j)
+    {
+        auto & v0 = m.vertices[j], & v1 = m.vertices[slices*(stacks+1)+j];
+        v0.tangent = v1.tangent = normalize(v0.tangent + v1.tangent);
+        v0.bitangent = v1.bitangent = normalize(v0.bitangent + v1.bitangent);
+    }
     return m;
 }
 

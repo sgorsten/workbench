@@ -15,7 +15,14 @@ GLFWcursor * gfx::get_standard_cursor(cursor_type type)
 
 gfx::context::context() { if(glfwInit() == GLFW_FALSE) throw std::runtime_error("glfwInit() failed"); }
 gfx::context::~context() { glfwTerminate(); }
-const std::vector<rhi::backend_info> & gfx::context::get_backends() { return rhi::global_backend_list(); }
+const std::vector<rhi::client_info> & gfx::context::get_clients() { return rhi::global_backend_list(); }
+rhi::ptr<rhi::device> gfx::context::create_device(array_view<rhi::client_api> api_preference, rhi::debug_callback debug_callback)
+{
+    auto & clients = get_clients();
+    if(clients.empty()) throw std::runtime_error("No client APIs available for RHI");
+    for(auto pref : api_preference) for(auto & client : clients) if(client.api == pref) return client.create_device(debug_callback);
+    clients.front().create_device(debug_callback);
+}
 void gfx::context::poll_events() { glfwPollEvents(); }
 
 ////////////

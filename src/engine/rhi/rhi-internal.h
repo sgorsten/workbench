@@ -43,9 +43,9 @@ namespace rhi
         const pipeline_layout & get_layout() const final { return *layout; }
     };
 
-    std::vector<backend_info> & global_backend_list();
-    template<class Device> void register_backend(const char * name) { global_backend_list().push_back({name, [](std::function<void(const char *)> debug_callback) { return ptr<device>(new delete_when_unreferenced<Device>{debug_callback}); }}); }
-    template<class Device> struct autoregister_backend { autoregister_backend(const char * name) { register_backend<Device>(name); } };
+    std::vector<client_info> & global_backend_list();
+    template<class Device> void register_backend(const char * name, client_api api) { global_backend_list().push_back({name, api, [](std::function<void(const char *)> debug_callback) { return ptr<device>(new delete_when_unreferenced<Device>{debug_callback}); }}); }
+    template<class Device> struct autoregister_backend { autoregister_backend(const char * name, client_api api) { register_backend<Device>(name, api); } };
 
     enum attachment_type { color, depth_stencil };
     attachment_type get_attachment_type(image_format format);

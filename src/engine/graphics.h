@@ -14,7 +14,8 @@ namespace gfx
         context();
         ~context();
 
-        const std::vector<rhi::backend_info> & get_backends();
+        const std::vector<rhi::client_info> & get_clients();
+        rhi::ptr<rhi::device> create_device(array_view<rhi::client_api> api_preference, rhi::debug_callback debug_callback);
         void poll_events();
     };
 

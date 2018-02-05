@@ -32,8 +32,7 @@ int main(int argc, const char * argv[]) try
     
     // Create a session for each device
     gfx::context context;
-    auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    auto dev = context.get_backends().back().create_device(debug);
+    auto dev = context.create_device({rhi::client_api::opengl}, [](const char * message) { std::cerr << message << std::endl; });
 
     pbr::device_objects standard = {dev, standard_sh};
     gfx::simple_mesh ground = {*dev, ground_mesh.vertices, ground_mesh.triangles};

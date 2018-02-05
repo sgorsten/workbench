@@ -51,13 +51,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ui", "ui", "{C5F5A7E6-A5AE-
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "pbr", "pbr", "{8D6A81A5-D3BF-4CB4-BEF7-648EB9E61A0C}"
 	ProjectSection(SolutionItems) = preProject
-		assets\standard\compute-brdf-integral-image.frag = assets\standard\compute-brdf-integral-image.frag
-		assets\standard\compute-irradiance-cubemap.frag = assets\standard\compute-irradiance-cubemap.frag
-		assets\standard\compute-reflectance-cubemap.frag = assets\standard\compute-reflectance-cubemap.frag
-		assets\standard\copy-cubemap-from-spheremap.frag = assets\standard\copy-cubemap-from-spheremap.frag
-		assets\standard\preamble.glsl = assets\standard\preamble.glsl
-		assets\standard\render-cubemap.vert = assets\standard\render-cubemap.vert
-		assets\standard\render-image.vert = assets\standard\render-image.vert
+		assets\standard\pbr\compute-brdf-integral-image.frag = assets\standard\pbr\compute-brdf-integral-image.frag
+		assets\standard\pbr\compute-irradiance-cubemap.frag = assets\standard\pbr\compute-irradiance-cubemap.frag
+		assets\standard\pbr\compute-reflectance-cubemap.frag = assets\standard\pbr\compute-reflectance-cubemap.frag
+		assets\standard\pbr\copy-cubemap-from-spheremap.frag = assets\standard\pbr\copy-cubemap-from-spheremap.frag
+		assets\standard\pbr\preamble.glsl = assets\standard\pbr\preamble.glsl
+		assets\standard\pbr\render-cubemap.vert = assets\standard\pbr\render-cubemap.vert
+		assets\standard\pbr\render-image.vert = assets\standard\pbr\render-image.vert
 	EndProjectSection
 EndProject
 Global

@@ -154,7 +154,7 @@ namespace rhi
         void wait_until_complete(uint64_t submit_id) final;
     };
 
-    autoregister_backend<vk_device> autoregister_vk_backend {"Vulkan 1.0"};
+    autoregister_backend<vk_device> autoregister_vk_backend {"Vulkan 1.0", client_api::vulkan};
     
     struct vk_buffer : buffer
     {

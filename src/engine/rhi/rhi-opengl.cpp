@@ -80,7 +80,7 @@ namespace rhi
         void wait_until_complete(uint64_t submit_id) final;
     };
 
-    autoregister_backend<gl_device> autoregister_gl_backend {"OpenGL 4.5 Core"};
+    autoregister_backend<gl_device> autoregister_gl_backend {"OpenGL 4.5 Core", client_api::opengl};
 
     struct gl_buffer : buffer
     {

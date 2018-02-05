@@ -393,8 +393,7 @@ int main(int argc, const char * argv[]) try
     
     // Create our device and load our device objects
     gfx::context context;
-    auto debug = [](const char * message) { std::cerr << message << std::endl; };
-    auto dev = context.get_backends().back().create_device(debug);
+    auto dev = context.create_device({rhi::client_api::opengl}, [](const char * message) { std::cerr << message << std::endl; });
 
     pbr::device_objects pbr_objects = {dev, standard_sh};
     canvas_device_objects canvas_objects {*dev, compiler, sheet};

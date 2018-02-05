@@ -133,7 +133,7 @@ namespace rhi
         void wait_until_complete(uint64_t submit_id) final;
     };
 
-    autoregister_backend<d3d_device> autoregister_d3d_backend {"Direct3D 11.1"};
+    autoregister_backend<d3d_device> autoregister_d3d_backend {"Direct3D 11.1", client_api::d3d11};
 
     struct d3d_buffer : buffer
     {
