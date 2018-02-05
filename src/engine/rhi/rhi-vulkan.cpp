@@ -1038,12 +1038,31 @@ VkPipeline vk_pipeline::get_pipeline(VkRenderPass render_pass) const
         depth_stencil_state.depthCompareOp = convert_vk(desc.depth->test);
         depth_stencil_state.depthWriteEnable = desc.depth->write_mask ? VK_TRUE : VK_FALSE;
     }
+    if(desc.stencil)
+    {
+        depth_stencil_state.stencilTestEnable = VK_TRUE;
+        depth_stencil_state.front.compareOp = convert_vk(desc.stencil->front.test);
+        depth_stencil_state.front.failOp = convert_vk(desc.stencil->front.stencil_fail_op);
+        depth_stencil_state.front.depthFailOp = convert_vk(desc.stencil->front.stencil_pass_depth_fail_op);
+        depth_stencil_state.front.passOp = convert_vk(desc.stencil->front.stencil_pass_depth_pass_op);
+        depth_stencil_state.front.compareMask = desc.stencil->read_mask;
+        depth_stencil_state.front.writeMask = desc.stencil->write_mask;
+        depth_stencil_state.back.compareOp = convert_vk(desc.stencil->back.test);
+        depth_stencil_state.back.failOp = convert_vk(desc.stencil->back.stencil_fail_op);
+        depth_stencil_state.back.depthFailOp = convert_vk(desc.stencil->back.stencil_pass_depth_fail_op);
+        depth_stencil_state.back.passOp = convert_vk(desc.stencil->back.stencil_pass_depth_pass_op);
+        depth_stencil_state.back.compareMask = desc.stencil->read_mask;
+        depth_stencil_state.back.writeMask = desc.stencil->write_mask;
+    }
 
     std::vector<VkPipelineColorBlendAttachmentState> blend_attachments;
-    for(auto & b : desc.blend) blend_attachments.push_back({b.enable, convert_vk(b.color.source_factor), convert_vk(b.color.dest_factor), convert_vk(b.color.op), convert_vk(b.alpha.source_factor), convert_vk(b.alpha.dest_factor), convert_vk(b.alpha.op), 0xF});
+    for(auto & b : desc.blend) 
+    {
+        blend_attachments.push_back({b.enable, convert_vk(b.color.source_factor), convert_vk(b.color.dest_factor), convert_vk(b.color.op), convert_vk(b.alpha.source_factor), convert_vk(b.alpha.dest_factor), convert_vk(b.alpha.op), exactly(b.write_mask ? 0xF : 0)});
+    }
     const VkPipelineColorBlendStateCreateInfo color_blend_state {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, nullptr, 0, VK_FALSE, VK_LOGIC_OP_COPY, exactly(countof(blend_attachments)), blend_attachments.data(), {0,0,0,0}};
 
-    const VkDynamicState dynamic_states[] {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    const VkDynamicState dynamic_states[] {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_STENCIL_REFERENCE};
     const VkPipelineDynamicStateCreateInfo dynamic_state {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, nullptr, 0, exactly(countof(dynamic_states)), dynamic_states};
 
     const VkGraphicsPipelineCreateInfo pipelineInfo {
@@ -1228,6 +1247,7 @@ void vk_command_buffer::begin_render_pass(const render_pass_desc & pass_desc, fr
 
     set_viewport_rect(0, 0, fb.dims.x, fb.dims.y);
     set_scissor_rect(0, 0, fb.dims.x, fb.dims.y);
+    set_stencil_ref(0);
 }
 
 void vk_command_buffer::clear_depth(float depth)
