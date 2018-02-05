@@ -569,6 +569,20 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
         depth_stencil_desc.DepthFunc = convert_dx(desc.depth->test);
         depth_stencil_desc.DepthWriteMask = desc.depth->write_mask ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
     }
+    if(desc.stencil)
+    {
+        depth_stencil_desc.StencilEnable = TRUE;
+        depth_stencil_desc.StencilReadMask = desc.stencil->read_mask;
+        depth_stencil_desc.StencilWriteMask = desc.stencil->write_mask;
+        depth_stencil_desc.FrontFace.StencilFunc = convert_dx(desc.stencil->front.test);
+        depth_stencil_desc.FrontFace.StencilFailOp = convert_dx(desc.stencil->front.stencil_fail_op);
+        depth_stencil_desc.FrontFace.StencilDepthFailOp = convert_dx(desc.stencil->front.stencil_pass_depth_fail_op);
+        depth_stencil_desc.FrontFace.StencilPassOp = convert_dx(desc.stencil->front.stencil_pass_depth_pass_op);
+        depth_stencil_desc.BackFace.StencilFunc = convert_dx(desc.stencil->back.test);
+        depth_stencil_desc.BackFace.StencilFailOp = convert_dx(desc.stencil->back.stencil_fail_op);
+        depth_stencil_desc.BackFace.StencilDepthFailOp = convert_dx(desc.stencil->back.stencil_pass_depth_fail_op);
+        depth_stencil_desc.BackFace.StencilPassOp = convert_dx(desc.stencil->back.stencil_pass_depth_pass_op);
+    }
     check("ID3D11Device::CreateDepthStencilState", device.CreateDepthStencilState(&depth_stencil_desc, depth_stencil_state.init()));
 
     D3D11_BLEND_DESC blend_desc {};
@@ -577,7 +591,7 @@ d3d_pipeline::d3d_pipeline(ID3D11Device & device, const pipeline_desc & desc) : 
     for(size_t i=0; i<desc.blend.size(); ++i)
     {
         auto & b = desc.blend[i];
-        blend_desc.RenderTarget[i] = {b.enable, convert_dx(b.color.source_factor), convert_dx(b.color.dest_factor), convert_dx(b.color.op), convert_dx(b.alpha.source_factor), convert_dx(b.alpha.dest_factor), convert_dx(b.alpha.op), 0xF};
+        blend_desc.RenderTarget[i] = {b.enable, convert_dx(b.color.source_factor), convert_dx(b.color.dest_factor), convert_dx(b.color.op), convert_dx(b.alpha.source_factor), convert_dx(b.alpha.dest_factor), convert_dx(b.alpha.op), exactly(b.write_mask ? D3D11_COLOR_WRITE_ENABLE_ALL : 0)};
     }
     check("ID3D11Device::CreateBlendState", device.CreateBlendState(&blend_desc, blend_state.init()));
 }
