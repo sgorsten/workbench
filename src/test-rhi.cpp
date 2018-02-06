@@ -127,9 +127,9 @@ public:
         const rhi::blend_state translucent {true, true, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}, {rhi::blend_factor::source_alpha, rhi::blend_op::add, rhi::blend_factor::one_minus_source_alpha}};
 
         // Pipelines
-        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
-        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::compare_op::less, true, {opaque}});       
-        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::back, rhi::compare_op::always, false, {opaque}});
+        light_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,unlit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, true}, std::nullopt, {opaque}});       
+        solid_pipe = dev->create_pipeline({object_layout, {mesh_vertex_binding}, {vs,lit_fs}, rhi::primitive_topology::triangles, rhi::front_face::counter_clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::less, true}, std::nullopt, {opaque}});       
+        skybox_pipe = dev->create_pipeline({skybox_layout, {mesh_vertex_binding}, {skybox_vs,skybox_fs}, rhi::primitive_topology::triangles, rhi::front_face::clockwise, rhi::cull_mode::back, rhi::depth_state{rhi::compare_op::always, false}, std::nullopt, {opaque}});
 
         // Do some initial work
         pools[pool_index].begin_frame(*dev);
@@ -286,7 +286,7 @@ int main(int argc, const char * argv[]) try
     auto debug = [](const char * message) { std::cerr << message << std::endl; };
     int2 pos{100,100};
     std::vector<std::unique_ptr<device_session>> sessions;
-    for(auto & backend : context.get_backends())
+    for(auto & backend : context.get_clients())
     {
         std::cout << "Initializing " << backend.name << " backend:\n";
         sessions.push_back(std::make_unique<device_session>(assets, backend.name, backend.create_device(debug), pos));
