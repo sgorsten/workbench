@@ -319,8 +319,8 @@ int main(int argc, const char * argv[]) try
     
     sprite_sheet sheet;
     canvas_sprites sprites{sheet};
-    font_face face{sheet, loader.load_binary_file("arialbd.ttf"), 14, 0x20, 0x7E};
-    font_face icons{sheet, loader.load_binary_file("fontawesome-webfont.ttf"), 14, 0xf000, 0xf295};
+    font_face face{sheet, loader.load_pcf_font("proggy-clean.pcf", true)};
+    font_face icons{sheet, loader.load_ttf_font("fontawesome-webfont.ttf", 14, 0xf000, 0xf295)};
     sheet.prepare_sheet();
 
     // Set up graph state

@@ -21,7 +21,7 @@ struct common_assets
 
     common_assets(loader & loader) : game_coords {coord_axis::right, coord_axis::forward, coord_axis::up}, 
         compiler{loader}, standard{pbr::shaders::compile(compiler)},
-        sprites{sheet}, face{sheet, loader.load_binary_file("arial.ttf"), 20, 0x20, 0x7E}
+        sprites{sheet}, face{sheet, loader.load_ttf_font("arial.ttf", 20, 0x20, 0x7E)}
     {
         vs = compiler.compile_file(rhi::shader_stage::vertex, "static-mesh.vert");
         lit_fs = compiler.compile_file(rhi::shader_stage::fragment, "textured-pbr.frag");

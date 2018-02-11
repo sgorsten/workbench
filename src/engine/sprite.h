@@ -1,5 +1,6 @@
 #pragma once
 #include "load.h"
+#include "font.h"
 #include "grid.h"
 #include "graphics.h"
 #include <map>
@@ -42,8 +43,7 @@ struct font_face
     std::map<int, glyph_info> glyphs;
     int line_height, baseline;
 
-    font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_data, float pixel_height, uint32_t min_codepoint, uint32_t max_codepoint);
-    font_face(sprite_sheet & sheet, file pcf_file);
+    font_face(sprite_sheet & sheet, pcf_font_info info);
     int get_text_width(std::string_view text) const;
     int get_cursor_pos(std::string_view text, int x) const;
 };

@@ -1,5 +1,6 @@
 #pragma once
 #include "rhi.h" // For rhi::image_format
+#include "font.h"
 
 enum class file_mode { binary, text };
 class file
@@ -47,6 +48,8 @@ public:
     std::vector<char> load_text_file(std::string_view filename) const;
 
     image load_image(std::string_view filename, bool linear);
+    pcf_font_info load_ttf_font(std::string_view filename, float pixel_height, uint32_t min_codepoint, uint32_t max_codepoint);
+    pcf_font_info load_pcf_font(std::string_view filename, bool condense);
 };
 
 std::string get_program_binary_path();

@@ -205,6 +205,7 @@
     <ClInclude Include="..\..\src\engine\asset.h" />
     <ClInclude Include="..\..\src\engine\camera.h" />
     <ClInclude Include="..\..\src\engine\core.h" />
+    <ClInclude Include="..\..\src\engine\font.h" />
     <ClInclude Include="..\..\src\engine\geometry.h" />
     <ClInclude Include="..\..\src\engine\gizmo.h" />
     <ClInclude Include="..\..\src\engine\graphics.h" />
