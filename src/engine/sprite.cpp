@@ -476,10 +476,9 @@ template<class T> T read_be(FILE * f) { std::byte buffer[sizeof(T)]; fread(buffe
 
 struct pcf_glyph_info
 {
-    int width, height;
-    int offset_x, offset_y;
-    int advance_x;
-    std::vector<uint8_t> bitmap;
+    grid<uint8_t> bitmap;
+    int2 offset;
+    int advance;
 };
 
 struct pcf_font_info
@@ -529,12 +528,9 @@ font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
             const int character_descent = format & 0x100 ? read_uint8() - 0x80 : read_int16();
             const unsigned character_attributes = format & 0x100 ? 0 : read_uint16();
             pcf_glyph_info info;
-            info.width = right_side_bearing - left_side_bearing;
-            info.height = character_ascent + character_descent;
-            info.offset_x = left_side_bearing;
-            info.offset_y = -character_ascent;
-            info.advance_x = character_width;
-            info.bitmap.resize(info.width * info.height);
+            info.bitmap.resize({right_side_bearing - left_side_bearing, character_ascent + character_descent}, 0);
+            info.offset = {left_side_bearing, -character_ascent};
+            info.advance = character_width;
             return info;
         };
         auto read_accelerators = [=]
@@ -582,16 +578,16 @@ font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
 
                 for(size_t i=0; i<glyphs.size(); ++i)
                 {    
-                    const int row_width = (glyphs[i].width+row_alignment*8-1)/8/row_alignment*row_alignment;
-                    for(int y=0; y<glyphs[i].height; ++y)
+                    const int row_width = (glyphs[i].bitmap.width()+row_alignment*8-1)/8/row_alignment*row_alignment;
+                    for(int y=0; y<glyphs[i].bitmap.height(); ++y)
                     {
                         auto * p = bitmap_data.data() + bitmap_offsets[i] + row_width*y;
-                        for(int x=0; x<glyphs[i].width;)
+                        for(int x=0; x<glyphs[i].bitmap.width();)
                         {
                             uint32_t bits = bitmap_big_endian_bytes ? decode_be(scan_unit_size, p) : decode_le(scan_unit_size, p);
-                            for(int j=0; j<scan_unit_size*8 && x<glyphs[i].width; ++j, ++x)
+                            for(int j=0; j<scan_unit_size*8 && x<glyphs[i].bitmap.width(); ++j, ++x)
                             {
-                                if(bits & 1<<(bitmap_big_endian_bits ? scan_unit_size*8-1-j : j)) glyphs[i].bitmap[y*glyphs[i].width+x] = 0xFF;
+                                if(bits & 1<<(bitmap_big_endian_bits ? scan_unit_size*8-1-j : j)) glyphs[i].bitmap[{x,y}] = 0xFF;
                             }
                             p += scan_unit_size;
                         }
@@ -604,8 +600,8 @@ font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
             for(auto & g : glyphs)
             {
                 auto ink = read_metrics();
-                const int skip_x = ink.offset_x - g.offset_x, skip_y = ink.offset_y - g.offset_y;
-                for(int y=0; y<ink.height; ++y) std::copy_n(g.bitmap.data() + (skip_y+y)*g.width + skip_x, ink.width, ink.bitmap.data() + y*ink.width);
+                const int2 skip = ink.offset - g.offset;
+                ink.bitmap.blit({0,0}, g.bitmap.subrect({skip, skip+ink.bitmap.dims()}));
                 g = std::move(ink);
             }
             break;
@@ -631,29 +627,21 @@ font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
             break;
         }
     }
-    int space_advance = glyphs[glyph_indices[' ']].advance_x;
+    int space_advance = glyphs[glyph_indices[' ']].advance;
     for(auto & g : glyphs) 
     {
-        g.offset_x = 0;
-        g.offset_y += font.baseline;
-        g.advance_x = g.width+1;
+        g.offset.x = 0;
+        g.offset.y += font.baseline;
+        g.advance = g.bitmap.width()+1;
     }
-    glyphs[glyph_indices[' ']].advance_x = space_advance-1;
+    glyphs[glyph_indices[' ']].advance = space_advance-1;
 
     for(auto & gi : glyph_indices)
     {
         const auto & g = glyphs[gi.second];
-        grid<uint8_t> img(int2(g.width, g.height));
-        for(int y=0; y<g.height; ++y)
-        {
-            for(int x=0; x<g.width; ++x)
-            {
-                img[{x,y}] = g.bitmap[y*g.width+x];
-            }
-        }
-        this->glyphs[gi.first].sprite_index = sheet.add_sprite(img, 0);
-        this->glyphs[gi.first].offset = int2{g.offset_x, g.offset_y};
-        this->glyphs[gi.first].advance = g.advance_x;
+        this->glyphs[gi.first].sprite_index = sheet.add_sprite(g.bitmap, 0);
+        this->glyphs[gi.first].offset = g.offset;
+        this->glyphs[gi.first].advance = g.advance;
     }
     this->baseline = font.baseline;
     this->line_height = font.line_height;
