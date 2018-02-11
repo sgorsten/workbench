@@ -71,9 +71,9 @@ template<class T> class grid
 public:
     grid() = default;
     explicit grid(int2 dims) : grid_data{new T[product(dims)]}, grid_dims{dims} {}
-    grid(int2 dims, const T & value) : grid_data{new T[product(dims)]}, grid_dims{dims} { std::fill_n(grid_data.get(), product(dims), value); }
+    grid(int2 dims, const T & value) : grid_data{new T[product(dims)]}, grid_dims{dims} { std::fill_n(grid_data.get(), product(grid_dims), value); }
     grid(grid && r) noexcept : grid_data{move(r.grid_data)}, grid_dims{r.grid_dims} { r.clear(); }
-    grid(const grid & r) : grid_data{new T[product(r.dims)]}, grid_dims{r.dims} { std::copy_n(r.grid_data.get(), product(dims), grid_data.get()); }
+    grid(const grid & r) : grid_data{new T[product(r.grid_dims)]}, grid_dims{r.grid_dims} { std::copy_n(r.grid_data.get(), product(grid_dims), grid_data.get()); }
 
     // Observers
     bool empty() const noexcept { return grid_dims.x == 0 || grid_dims.y == 0; }

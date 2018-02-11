@@ -469,6 +469,196 @@ font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_d
     }
 }
 
+static uint32_t decode_le(size_t size, const std::byte * data) { uint32_t value = 0; for(size_t i=0; i<size; ++i) value |= static_cast<uint8_t>(data[i]) << i*8; return value; }
+static uint32_t decode_be(size_t size, const std::byte * data) { uint32_t value = 0; for(size_t i=0; i<size; ++i) value |= static_cast<uint8_t>(data[i]) << (size-1-i)*8; return value; }
+template<class T> T read_le(FILE * f) { std::byte buffer[sizeof(T)]; fread(buffer, 1, sizeof(T), f); return static_cast<T>(decode_le(sizeof(T), buffer)); }
+template<class T> T read_be(FILE * f) { std::byte buffer[sizeof(T)]; fread(buffer, 1, sizeof(T), f); return static_cast<T>(decode_be(sizeof(T), buffer)); }
+
+struct pcf_glyph_info
+{
+    int width, height;
+    int offset_x, offset_y;
+    int advance_x;
+    std::vector<uint8_t> bitmap;
+};
+
+struct pcf_font_info
+{
+    int baseline, line_height;
+};
+
+font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
+{
+    FILE * f = fopen(pcf_path, "rb");
+
+    if(read_le<uint32_t>(f) != 0x70636601) throw std::runtime_error("not pcf");
+
+    // Load table of contents, and sort in ascending order of type. This will ensure metrics always precedes bitmaps.
+    struct toc_entry { int32_t type, format, size, offset; };
+    std::vector<toc_entry> table_of_contents(read_le<int32_t>(f));
+    for(auto & entry : table_of_contents)
+    {
+        entry.type = read_le<int32_t>(f);
+        entry.format = read_le<int32_t>(f);
+        entry.size = read_le<int32_t>(f);
+        entry.offset = read_le<int32_t>(f);
+    }
+    std::sort(begin(table_of_contents), end(table_of_contents), [](const toc_entry & a, const toc_entry & b) { return a.type < b.type; });
+
+    pcf_font_info font;
+    std::vector<pcf_glyph_info> glyphs;
+    std::unordered_map<int, int> glyph_indices;
+    for(auto & entry : table_of_contents)
+    {
+        fseek(f, entry.offset, SEEK_SET);
+        int32_t format = read_le<int32_t>(f);
+        if(format != entry.format) throw std::runtime_error("malformed pcf - mismatched table format");
+
+        auto read_uint32 = [=] { return format & 4 ? read_be<uint32_t>(f) : read_le<uint32_t>(f); };
+        auto read_uint16 = [=] { return format & 4 ? read_be<uint16_t>(f) : read_le<uint16_t>(f); };
+        auto read_uint8 = [=] { return format & 4 ? read_be<uint8_t>(f) : read_le<uint8_t>(f); };
+        auto read_int32 = [=] { return format & 4 ? read_be<int32_t>(f) : read_le<int32_t>(f); };
+        auto read_int16 = [=] { return format & 4 ? read_be<int16_t>(f) : read_le<int16_t>(f); };
+        auto read_int8 = [=] { return format & 4 ? read_be<int8_t>(f) : read_le<int8_t>(f); };
+        auto read_metrics = [=]
+        {
+            const int left_side_bearing = format & 0x100 ? read_uint8() - 0x80 : read_int16();
+            const int right_side_bearing = format & 0x100 ? read_uint8() - 0x80 : read_int16();
+            const int character_width = format & 0x100 ? read_uint8() - 0x80 : read_int16();
+            const int character_ascent = format & 0x100 ? read_uint8() - 0x80 : read_int16();
+            const int character_descent = format & 0x100 ? read_uint8() - 0x80 : read_int16();
+            const unsigned character_attributes = format & 0x100 ? 0 : read_uint16();
+            pcf_glyph_info info;
+            info.width = right_side_bearing - left_side_bearing;
+            info.height = character_ascent + character_descent;
+            info.offset_x = left_side_bearing;
+            info.offset_y = -character_ascent;
+            info.advance_x = character_width;
+            info.bitmap.resize(info.width * info.height);
+            return info;
+        };
+        auto read_accelerators = [=]
+        {
+            const uint8_t no_overlap = read_uint8();
+            const uint8_t constant_metrics = read_uint8();
+            const uint8_t terminal_font = read_uint8();
+            const uint8_t constant_width = read_uint8();
+            const uint8_t ink_inside = read_uint8();
+            const uint8_t ink_metrics = read_uint8();
+            const uint8_t draw_direction = read_uint8();
+            const uint8_t padding = read_uint8();
+            const int font_ascent = read_int32();
+            const int font_descent = read_int32();
+            const int max_overlap = read_int32();
+            const auto min_bounds = read_metrics();
+            const auto max_bounds = read_metrics();
+            const auto ink_min_bounds = format & 0x100 ? read_metrics() : min_bounds;
+            const auto ink_max_bounds = format & 0x100 ? read_metrics() : max_bounds;
+            return pcf_font_info{font_ascent, font_ascent + font_descent};
+        };
+
+        switch(entry.type)
+        {
+        case 1<<0: break; // properties
+        case 1<<1: // accelerators
+            font = read_accelerators();
+            break;
+        case 1<<2: // metrics
+            glyphs.resize(entry.format & 0x100 ? read_int16() : read_int32());
+            for(auto & g : glyphs) g = read_metrics();
+            break;
+        case 1<<3: // bitmaps
+            {
+                const int row_alignment = 1 << (entry.format & 3);
+                const bool bitmap_big_endian_bytes = (entry.format & 4) != 0;
+                const bool bitmap_big_endian_bits = (entry.format & 8) != 0;
+                const int scan_unit_size = 1 << (entry.format>>4 & 3);
+
+                std::vector<int> bitmap_offsets(read_int32());
+                for(auto & offset : bitmap_offsets) offset = read_int32();
+                const int32_t bitmap_sizes[4] {read_int32(), read_int32(), read_int32(), read_int32()};
+                std::vector<std::byte> bitmap_data(bitmap_sizes[entry.format & 3]);
+                fread(bitmap_data.data(), 1, bitmap_data.size(), f);
+
+                for(size_t i=0; i<glyphs.size(); ++i)
+                {    
+                    const int row_width = (glyphs[i].width+row_alignment*8-1)/8/row_alignment*row_alignment;
+                    for(int y=0; y<glyphs[i].height; ++y)
+                    {
+                        auto * p = bitmap_data.data() + bitmap_offsets[i] + row_width*y;
+                        for(int x=0; x<glyphs[i].width;)
+                        {
+                            uint32_t bits = bitmap_big_endian_bytes ? decode_be(scan_unit_size, p) : decode_le(scan_unit_size, p);
+                            for(int j=0; j<scan_unit_size*8 && x<glyphs[i].width; ++j, ++x)
+                            {
+                                if(bits & 1<<(bitmap_big_endian_bits ? scan_unit_size*8-1-j : j)) glyphs[i].bitmap[y*glyphs[i].width+x] = 0xFF;
+                            }
+                            p += scan_unit_size;
+                        }
+                    }            
+                }
+            } 
+            break;
+        case 1<<4: // ink metrics
+            glyphs.resize(entry.format & 0x100 ? read_int16() : read_int32());
+            for(auto & g : glyphs)
+            {
+                auto ink = read_metrics();
+                const int skip_x = ink.offset_x - g.offset_x, skip_y = ink.offset_y - g.offset_y;
+                for(int y=0; y<ink.height; ++y) std::copy_n(g.bitmap.data() + (skip_y+y)*g.width + skip_x, ink.width, ink.bitmap.data() + y*ink.width);
+                g = std::move(ink);
+            }
+            break;
+        case 1<<5: // bdf encodings
+            {
+                const int min_byte2 = read_int16(), max_byte2 = read_int16();
+                const int min_byte1 = read_int16(), max_byte1 = read_int16();
+                const int default_character = read_int16();
+                for(int byte1 = min_byte1; byte1 <= max_byte1; ++byte1)
+                {
+                    for(int byte2 = min_byte2; byte2 <= max_byte2; ++byte2)
+                    {
+                        const int glyph_index = read_uint16();
+                        if(glyph_index != 0xFFFF) glyph_indices[byte1 << 8 | byte2] = glyph_index;
+                    }
+                }
+            } 
+            break;
+        case 1<<6: break; // swidths
+        case 1<<7: break; // glyph_names
+        case 1<<8: // bdf_accelerators
+            font = read_accelerators();
+            break;
+        }
+    }
+    int space_advance = glyphs[glyph_indices[' ']].advance_x;
+    for(auto & g : glyphs) 
+    {
+        g.offset_x = 0;
+        g.offset_y += font.baseline;
+        g.advance_x = g.width+1;
+    }
+    glyphs[glyph_indices[' ']].advance_x = space_advance-1;
+
+    for(auto & gi : glyph_indices)
+    {
+        const auto & g = glyphs[gi.second];
+        grid<uint8_t> img(int2(g.width, g.height));
+        for(int y=0; y<g.height; ++y)
+        {
+            for(int x=0; x<g.width; ++x)
+            {
+                img[{x,y}] = g.bitmap[y*g.width+x];
+            }
+        }
+        this->glyphs[gi.first].sprite_index = sheet.add_sprite(img, 0);
+        this->glyphs[gi.first].offset = int2{g.offset_x, g.offset_y};
+        this->glyphs[gi.first].advance = g.advance_x;
+    }
+    this->baseline = font.baseline;
+    this->line_height = font.line_height;
+}
+
 int font_face::get_text_width(std::string_view text) const
 {         
     int width = 0;
