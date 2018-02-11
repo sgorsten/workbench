@@ -14,6 +14,7 @@ file::~file() { if(f) fclose(f); }
 file::operator bool () const { return f != nullptr; }
 bool file::eof() const { return f ? feof(f) : 1; }
 size_t file::read(void * buffer, size_t size) { return f ? fread(buffer, 1, size, f) : 0; }
+void file::seek_set(int64_t position)  { if(f) fseek(f, exactly(position), SEEK_SET); }
 void file::seek(int64_t offset) { if(f) fseek(f, exactly(offset), SEEK_CUR); }
 
 file loader::open_file(std::string_view filename, file_mode mode) const

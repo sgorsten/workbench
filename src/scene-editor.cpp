@@ -379,7 +379,7 @@ int main(int argc, const char * argv[]) try
     
     sprite_sheet sheet;
     canvas_sprites sprites{sheet};
-    font_face face{sheet, (get_program_binary_path() + "../../assets/proggy-clean.pcf").c_str()}; //loader.load_binary_file("arialbd.ttf"), 14, 0x20, 0x7E};
+    font_face face{sheet, loader.open_file("proggy-clean.pcf", file_mode::binary)};
     font_face icons{sheet, loader.load_binary_file("fontawesome-webfont.ttf"), 14, 0xf000, 0xf295};
     sheet.prepare_sheet();
 

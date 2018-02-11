@@ -20,6 +20,7 @@ public:
     size_t get_length() const { return length; }
     bool eof() const;
     size_t read(void * buffer, size_t size);
+    void seek_set(int64_t position);
     void seek(int64_t offset);
 };
 

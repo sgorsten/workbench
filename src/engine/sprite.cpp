@@ -471,8 +471,8 @@ font_face::font_face(sprite_sheet & sheet, const std::vector<std::byte> & font_d
 
 static uint32_t decode_le(size_t size, const std::byte * data) { uint32_t value = 0; for(size_t i=0; i<size; ++i) value |= static_cast<uint8_t>(data[i]) << i*8; return value; }
 static uint32_t decode_be(size_t size, const std::byte * data) { uint32_t value = 0; for(size_t i=0; i<size; ++i) value |= static_cast<uint8_t>(data[i]) << (size-1-i)*8; return value; }
-template<class T> T read_le(FILE * f) { std::byte buffer[sizeof(T)]; fread(buffer, 1, sizeof(T), f); return static_cast<T>(decode_le(sizeof(T), buffer)); }
-template<class T> T read_be(FILE * f) { std::byte buffer[sizeof(T)]; fread(buffer, 1, sizeof(T), f); return static_cast<T>(decode_be(sizeof(T), buffer)); }
+template<class T> T read_le(file & f) { std::byte buffer[sizeof(T)]; f.read(buffer, sizeof(T)); return static_cast<T>(decode_le(sizeof(T), buffer)); }
+template<class T> T read_be(file & f) { std::byte buffer[sizeof(T)]; f.read(buffer, sizeof(T)); return static_cast<T>(decode_be(sizeof(T), buffer)); }
 
 struct pcf_glyph_info
 {
@@ -486,21 +486,19 @@ struct pcf_font_info
     int baseline, line_height;
 };
 
-font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
+font_face::font_face(sprite_sheet & sheet, file pcf_file) : sheet{sheet}
 {
-    FILE * f = fopen(pcf_path, "rb");
-
-    if(read_le<uint32_t>(f) != 0x70636601) throw std::runtime_error("not pcf");
+    if(read_le<uint32_t>(pcf_file) != 0x70636601) throw std::runtime_error("not pcf");
 
     // Load table of contents, and sort in ascending order of type. This will ensure metrics always precedes bitmaps.
     struct toc_entry { int32_t type, format, size, offset; };
-    std::vector<toc_entry> table_of_contents(read_le<int32_t>(f));
+    std::vector<toc_entry> table_of_contents(read_le<int32_t>(pcf_file));
     for(auto & entry : table_of_contents)
     {
-        entry.type = read_le<int32_t>(f);
-        entry.format = read_le<int32_t>(f);
-        entry.size = read_le<int32_t>(f);
-        entry.offset = read_le<int32_t>(f);
+        entry.type = read_le<int32_t>(pcf_file);
+        entry.format = read_le<int32_t>(pcf_file);
+        entry.size = read_le<int32_t>(pcf_file);
+        entry.offset = read_le<int32_t>(pcf_file);
     }
     std::sort(begin(table_of_contents), end(table_of_contents), [](const toc_entry & a, const toc_entry & b) { return a.type < b.type; });
 
@@ -509,16 +507,16 @@ font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
     std::unordered_map<int, int> glyph_indices;
     for(auto & entry : table_of_contents)
     {
-        fseek(f, entry.offset, SEEK_SET);
-        int32_t format = read_le<int32_t>(f);
+        pcf_file.seek_set(entry.offset);
+        int32_t format = read_le<int32_t>(pcf_file);
         if(format != entry.format) throw std::runtime_error("malformed pcf - mismatched table format");
 
-        auto read_uint32 = [=] { return format & 4 ? read_be<uint32_t>(f) : read_le<uint32_t>(f); };
-        auto read_uint16 = [=] { return format & 4 ? read_be<uint16_t>(f) : read_le<uint16_t>(f); };
-        auto read_uint8 = [=] { return format & 4 ? read_be<uint8_t>(f) : read_le<uint8_t>(f); };
-        auto read_int32 = [=] { return format & 4 ? read_be<int32_t>(f) : read_le<int32_t>(f); };
-        auto read_int16 = [=] { return format & 4 ? read_be<int16_t>(f) : read_le<int16_t>(f); };
-        auto read_int8 = [=] { return format & 4 ? read_be<int8_t>(f) : read_le<int8_t>(f); };
+        auto read_uint32 = [&] { return format & 4 ? read_be<uint32_t>(pcf_file) : read_le<uint32_t>(pcf_file); };
+        auto read_uint16 = [&] { return format & 4 ? read_be<uint16_t>(pcf_file) : read_le<uint16_t>(pcf_file); };
+        auto read_uint8 = [&] { return format & 4 ? read_be<uint8_t>(pcf_file) : read_le<uint8_t>(pcf_file); };
+        auto read_int32 = [&] { return format & 4 ? read_be<int32_t>(pcf_file) : read_le<int32_t>(pcf_file); };
+        auto read_int16 = [&] { return format & 4 ? read_be<int16_t>(pcf_file) : read_le<int16_t>(pcf_file); };
+        auto read_int8 = [&] { return format & 4 ? read_be<int8_t>(pcf_file) : read_le<int8_t>(pcf_file); };
         auto read_metrics = [=]
         {
             const int left_side_bearing = format & 0x100 ? read_uint8() - 0x80 : read_int16();
@@ -574,7 +572,7 @@ font_face::font_face(sprite_sheet & sheet, const char * pcf_path) : sheet{sheet}
                 for(auto & offset : bitmap_offsets) offset = read_int32();
                 const int32_t bitmap_sizes[4] {read_int32(), read_int32(), read_int32(), read_int32()};
                 std::vector<std::byte> bitmap_data(bitmap_sizes[entry.format & 3]);
-                fread(bitmap_data.data(), 1, bitmap_data.size(), f);
+                pcf_file.read(bitmap_data.data(), bitmap_data.size());
 
                 for(size_t i=0; i<glyphs.size(); ++i)
                 {    
