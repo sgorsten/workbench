@@ -21,7 +21,7 @@ rhi::ptr<rhi::device> gfx::context::create_device(array_view<rhi::client_api> ap
     auto & clients = get_clients();
     if(clients.empty()) throw std::runtime_error("No client APIs available for RHI");
     for(auto pref : api_preference) for(auto & client : clients) if(client.api == pref) return client.create_device(debug_callback);
-    clients.front().create_device(debug_callback);
+    return clients.front().create_device(debug_callback);
 }
 void gfx::context::poll_events() { glfwPollEvents(); }
 

@@ -877,9 +877,9 @@ vk_framebuffer::~vk_framebuffer()
 {
     for(auto fb : framebuffers) device->destroy(fb);
     for(auto view : views) device->destroy(view);
-    device->destroy(swapchain);
-    device->destroy(surface);
-    device->destroy(glfw_window);
+    if(swapchain) device->destroy(swapchain);
+    if(surface) device->destroy(surface);
+    if(glfw_window) device->destroy(glfw_window);
 }
 
 template<class T> static VkAttachmentDescription make_attachment_description(VkFormat format, const T & desc, VkImageLayout attachment_optimal_layout)
